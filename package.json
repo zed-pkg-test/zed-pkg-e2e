@@ -1,0 +1,21 @@
+{
+  "name": "zed-pkg-e2e",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Browser automation over the zed-pkg-test fixture packages: publishes the real org fixtures and drives the registry UI against them.",
+  "type": "module",
+  "scripts": {
+    "e2e": "playwright test",
+    "e2e:fixtures": "playwright test suites/fixture-package-pages.spec.ts",
+    "e2e:polyglot": "playwright test suites/polyglot-fan-out.spec.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "npm run e2e"
+  },
+  "license": "MIT",
+  "devDependencies": {
+    "@playwright/test": "^1.61.1",
+    "@types/node": "^26.1.1",
+    "playwright": "^1.61.1",
+    "typescript": "^5.9.3"
+  }
+}

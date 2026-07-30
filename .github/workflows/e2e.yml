@@ -1,0 +1,144 @@
+name: browser e2e (fixtures)
+
+# Boots the registry stack via the suite that owns it (zed-pkg/zed-e2e), then
+# publishes this org's real fixture repos and drives the UI against them in a
+# real browser.
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Check out this suite
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          path: zed-pkg-e2e
+          persist-credentials: false
+
+      # The stack owner. Its harness builds and boots postgres + both servers.
+      - name: Check out zed-e2e
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: zed-pkg/zed-e2e
+          path: zed-e2e
+          persist-credentials: false
+
+      # zed-cli path-depends on ../zed-interfaces, so they must be siblings.
+      - name: Check out zed-cli
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: zed-pkg/zed-cli
+          path: zed-cli
+          persist-credentials: false
+      - name: Check out zed-interfaces
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: zed-pkg/zed-interfaces
+          path: zed-interfaces
+          persist-credentials: false
+      - name: Check out zed-api-server.rs
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: zed-pkg/zed-api-server.rs
+          path: zed-api-server.rs
+          persist-credentials: false
+      - name: Check out zed-web-server.rs
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: zed-pkg/zed-web-server.rs
+          path: zed-web-server.rs
+          persist-credentials: false
+
+      # The fixture repos whose pages this suite asserts on.
+      - name: Check out node-lib
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: zed-pkg-test/node-lib
+          path: node-lib
+          persist-credentials: false
+      - name: Check out rust-lib
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: zed-pkg-test/rust-lib
+          path: rust-lib
+          persist-credentials: false
+      - name: Check out go-lib
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: zed-pkg-test/go-lib
+          path: go-lib
+          persist-credentials: false
+      - name: Check out python-lib
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: zed-pkg-test/python-lib
+          path: python-lib
+          persist-credentials: false
+      - name: Check out polyglot-lib
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: zed-pkg-test/polyglot-lib
+          path: polyglot-lib
+          persist-credentials: false
+
+      - name: Validate workflow
+        uses: docker://rhysd/actionlint@sha256:b1934ee5f1c509618f2508e6eb47ee0d3520686341fec936f3b79331f9315667
+        with:
+          args: zed-pkg-e2e/.github/workflows/e2e.yml
+
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v6
+        with:
+          node-version: 22
+
+      - name: Install this suite
+        working-directory: zed-pkg-e2e
+        run: |
+          set -euo pipefail
+          npm install
+          npm run typecheck
+          npx playwright install --with-deps chromium
+
+      - name: Bring the registry stack up
+        working-directory: zed-e2e
+        run: |
+          set -euo pipefail
+          npm install
+          npm run stack:up
+
+      - name: Drive the fixtures through a browser
+        working-directory: zed-pkg-e2e
+        env:
+          ZED_E2E_API_URL: http://127.0.0.1:48080
+          ZED_E2E_WEB_URL: http://127.0.0.1:48081
+          ZED_BIN: ${{ github.workspace }}/zed-cli/target/debug/zed
+        run: npm run e2e
+
+      - name: Tear the stack down
+        if: ${{ always() }}
+        working-directory: zed-e2e
+        run: npm run stack:down || true
+
+      - name: Upload browser diagnostics
+        if: ${{ always() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: playwright-report
+          path: |
+            zed-pkg-e2e/playwright-report
+            zed-pkg-e2e/test-results
+          if-no-files-found: warn
+          retention-days: 7
