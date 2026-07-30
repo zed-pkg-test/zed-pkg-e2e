@@ -27,15 +27,23 @@ test.describe("polyglot-lib fans out to four distinct packages", () => {
       await expect(page.locator("body")).toContainText(slice.ecosystem);
     });
 
-    test(`${slug} metadata declares language ${slice.language}`, async ({ request }) => {
+    test(`${slug} is addressable and pins one artifact`, async ({ request }) => {
       const res = await request.get(
         `${API_URL}/v1/packages/${slug}/versions/${identity.version}`,
       );
       expect(res.status()).toBe(200);
 
+      // Deliberately NOT asserting language/ecosystem here. Verified against a
+      // real `zed publish`: version metadata carries org/name/version/sha256/
+      // size/format/vcs_tag/download_url/yanked and no language tag at all --
+      // the language and ecosystem are recorded at *install* time, in the
+      // consumer's .zed/paths.json. The per-app e2e workflows assert them
+      // there; asserting them here would be testing a field that does not
+      // exist.
       const meta = await res.json();
-      expect(meta.language).toBe(slice.language);
-      expect(meta.ecosystem).toBe(slice.ecosystem);
+      expect(meta.name).toBe(`${identity.name}-${slice.suffix}`);
+      expect(meta.sha256).toMatch(/^[0-9a-f]{64}$/);
+      expect(meta.yanked).toBe(false);
     });
   }
 
