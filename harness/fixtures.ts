@@ -25,7 +25,7 @@ export interface PublishedPackage {
 }
 
 /** Minimal TOML reach-in: these manifests are fixtures we control, and pulling
- *  a TOML parser in for four `key = "value"` lookups is not worth the dep. */
+ *  a TOML parser in for a few `key = "value"` lookups is not worth the dep. */
 function manifestField(manifest: string, key: string): string {
   const match = manifest.match(new RegExp(`^${key}\\s*=\\s*"([^"]+)"`, "m"));
   if (!match?.[1]) {
@@ -39,7 +39,8 @@ export interface FixtureIdentity {
   name: string;
   version: string;
   description: string;
-  license: string;
+  /** Repository URL is persisted by the registry and rendered by the web UI. */
+  repositoryUrl: string;
 }
 
 export function readIdentity(fixture: FixtureRepo): FixtureIdentity {
@@ -49,7 +50,7 @@ export function readIdentity(fixture: FixtureRepo): FixtureIdentity {
     name: manifestField(manifest, "name"),
     version: manifestField(manifest, "version"),
     description: manifestField(manifest, "description"),
-    license: manifestField(manifest, "license"),
+    repositoryUrl: manifestField(manifest, "url"),
   };
 }
 
