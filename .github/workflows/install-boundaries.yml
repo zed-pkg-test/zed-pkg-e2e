@@ -128,10 +128,34 @@ jobs:
         with:
           args: harness/.github/workflows/install-boundaries.yml
 
-      - name: Compile the assertion harness
+      - name: Compile assertions and render both runtime Dockerfiles
         run: |
           set -euo pipefail
-          python3 -m py_compile harness/scripts/install_boundaries.py
+          python3 -m py_compile harness/scripts/install_boundary_canaries.py
+          python3 - <<'PY'
+          import importlib.util
+          import sys
+          import tempfile
+          from pathlib import Path
+
+          path = Path("harness/scripts/install_boundary_canaries.py")
+          spec = importlib.util.spec_from_file_location("install_boundary_canaries", path)
+          module = importlib.util.module_from_spec(spec)
+          sys.modules[spec.name] = module
+          spec.loader.exec_module(module)
+          harness = object.__new__(module.Harness)
+          harness.dockerfiles = Path(tempfile.mkdtemp())
+          node, rust = module.Harness.runtime_dockerfiles(harness)
+          assert node.read_text(encoding="utf-8").splitlines()[:2] == [
+              "ARG NODE_IMAGE",
+              "FROM ${NODE_IMAGE}",
+          ]
+          assert rust.read_text(encoding="utf-8").splitlines()[:3] == [
+              "ARG RUST_IMAGE",
+              "ARG DEBIAN_IMAGE",
+              "FROM ${RUST_IMAGE} AS build",
+          ]
+          PY
 
       - name: Build zed once in the pinned Debian/Rust environment
         run: |
@@ -155,7 +179,7 @@ jobs:
       - name: Run exact-fixture ownership and OCI canaries
         run: |
           set -euo pipefail
-          python3 harness/scripts/install_boundaries.py \
+          python3 harness/scripts/install_boundary_canaries.py \
             --zed "$RUNNER_TEMP/zed-bin/zed" \
             --node-lib "$GITHUB_WORKSPACE/node-lib" \
             --node-app "$GITHUB_WORKSPACE/node-app" \
