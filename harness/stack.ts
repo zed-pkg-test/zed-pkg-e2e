@@ -14,6 +14,8 @@
  * at all.
  */
 import { execFile } from "node:child_process";
+import { mkdirSync } from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
@@ -28,10 +30,25 @@ export const SIBLINGS = path.resolve(E2E_ROOT, "..");
 
 export const API_URL = process.env.ZED_E2E_API_URL ?? "http://127.0.0.1:48080";
 export const WEB_URL = process.env.ZED_E2E_WEB_URL ?? "http://127.0.0.1:48081";
+export const DATABASE_URL =
+  process.env.ZED_E2E_DATABASE_URL ??
+  "postgres://zed:zed@127.0.0.1:55432/zed_e2e";
 
-/** Built by zed-e2e's stack boot, or any `zed` on PATH. */
+/** Built by zed-e2e's stack boot, or explicitly supplied for an external stack. */
 export const ZED_BIN =
   process.env.ZED_BIN ?? path.join(SIBLINGS, "zed-cli", "target", "debug", "zed");
+export const API_SERVER_BIN =
+  process.env.ZED_E2E_API_BIN ??
+  path.join(SIBLINGS, "zed-api-server.rs", "target", "debug", "zed-api-server");
+
+/**
+ * Every browser worker gets its own disposable zed home. This prevents saved
+ * credentials, registry metadata, artifacts, or lock state from the runner (or
+ * a developer's real home) from making a supposedly clean test pass.
+ */
+const ZED_HOME =
+  process.env.ZED_E2E_HOME ??
+  path.join(os.tmpdir(), "zed-pkg-fixture-e2e", String(process.pid));
 
 /**
  * The fixture repos this suite publishes and then browses. Each must be a
@@ -70,23 +87,62 @@ export interface ZedResult {
 }
 
 /**
- * Runs the zed CLI, returning the exit code rather than throwing, because
- * several assertions here are about a command *failing* the right way.
+ * Runs the zed CLI against the local test registry and a disposable home,
+ * returning the exit code rather than throwing because several assertions are
+ * about a command *failing* the right way.
  */
 export async function runZed(
   args: string[],
   opts: { cwd?: string; env?: NodeJS.ProcessEnv } = {},
 ): Promise<ZedResult> {
+  mkdirSync(ZED_HOME, { recursive: true });
   try {
     const { stdout, stderr } = await pexecFile(ZED_BIN, args, {
       cwd: opts.cwd,
-      env: { ...process.env, ...opts.env },
+      env: {
+        ...process.env,
+        // Never inherit a developer/runner registry, store, or bearer token.
+        ZED_PKG_REGISTRY: API_URL,
+        ZED_PKG_HOME: ZED_HOME,
+        ZED_PKG_TOKEN: undefined,
+        ...opts.env,
+      },
       maxBuffer: 64 * 1024 * 1024,
     });
     return { stdout, stderr, code: 0 };
   } catch (err) {
     const e = err as { stdout?: string; stderr?: string; code?: number };
     return { stdout: e.stdout ?? "", stderr: e.stderr ?? "", code: e.code ?? 1 };
+  }
+}
+
+/**
+ * Mint an org-scoped publishing token through the same API binary and database
+ * used by the running stack. `create-token --org` idempotently creates the
+ * namespace, so the fixture suite exercises authenticated publication without
+ * enabling the server's insecure auth-disabled bootstrap mode.
+ */
+export async function createScopedToken(name: string, org: string): Promise<string> {
+  try {
+    const { stdout } = await pexecFile(
+      API_SERVER_BIN,
+      ["create-token", "--name", name, "--org", org, "--role", "owner"],
+      {
+        env: { ...process.env, DATABASE_URL },
+        maxBuffer: 16 * 1024 * 1024,
+      },
+    );
+    const lines = stdout.trim().split(/\r?\n/).filter(Boolean);
+    const token = lines.at(-1)?.trim();
+    if (!token?.startsWith("zpkg_")) {
+      throw new Error(`could not parse token from output: ${stdout}`);
+    }
+    return token;
+  } catch (err) {
+    const e = err as { stdout?: string; stderr?: string; message?: string };
+    throw new Error(
+      `could not mint fixture token for ${org}: ${e.stderr ?? e.stdout ?? e.message ?? String(err)}`,
+    );
   }
 }
 
