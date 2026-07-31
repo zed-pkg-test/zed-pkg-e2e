@@ -17,26 +17,51 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  # Every cross-repository input is immutable. Updating one of these pins is an
+  # intentional dependency change, not an ambient change to a default branch.
+  ZED_E2E_REF: 5ccd57316ae39c3a3692fb4cfbda2f8a4dd74aa0
+  ZED_CLI_REF: a7e14686b79bbd3e31dc658839ba348c7d2382a5
+  ZED_INTERFACES_REF: 3ffca44d2d93ed4caae5737fe4a38fb50e7f3f60
+  ZED_API_REF: 93de2808e0c19a39bf8350abc6cd3104b729e5bc
+  ZED_WEB_REF: bb6d9a7094fd9a8d13224865b32e9c362eea1b03
+  NODE_LIB_REF: 2d41e658a382fdff27ef87a0db24dbaff280a685
+  RUST_LIB_REF: f2534ffafbc4f7e900075dfc8e48b9259aced2fe
+  GO_LIB_REF: e09dec6790a60ba75d5d338eece1068a4b8454b1
+  PYTHON_LIB_REF: b2db8ce2962fbaae690db7a9dabd14eb1d0362de
+  POLYGLOT_LIB_REF: e62ceb6337324a294d4fc861692a267ff0db97d0
+
 jobs:
   e2e:
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     steps:
+      - name: Require immutable source pins
+        run: |
+          set -euo pipefail
+          for value in \
+            "$ZED_E2E_REF" "$ZED_CLI_REF" "$ZED_INTERFACES_REF" \
+            "$ZED_API_REF" "$ZED_WEB_REF" "$NODE_LIB_REF" \
+            "$RUST_LIB_REF" "$GO_LIB_REF" "$PYTHON_LIB_REF" \
+            "$POLYGLOT_LIB_REF"; do
+            [[ "$value" =~ ^[0-9a-f]{40}$ ]]
+          done
+
       - name: Check out this suite
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           path: zed-pkg-e2e
+          fetch-depth: 1
           persist-credentials: false
           show-progress: false
 
-      # Pin the merged pgvector and target-database readiness hardening. Using
-      # an immutable merge commit keeps this browser run replayable.
       - name: Check out zed-e2e
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: zed-pkg/zed-e2e
-          ref: 5ccd57316ae39c3a3692fb4cfbda2f8a4dd74aa0
+          ref: ${{ env.ZED_E2E_REF }}
           path: zed-e2e
+          fetch-depth: 1
           persist-credentials: false
           show-progress: false
 
@@ -45,28 +70,36 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: zed-pkg/zed-cli
+          ref: ${{ env.ZED_CLI_REF }}
           path: zed-cli
+          fetch-depth: 1
           persist-credentials: false
           show-progress: false
       - name: Check out zed-interfaces
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: zed-pkg/zed-interfaces
+          ref: ${{ env.ZED_INTERFACES_REF }}
           path: zed-interfaces
+          fetch-depth: 1
           persist-credentials: false
           show-progress: false
       - name: Check out zed-api-server.rs
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: zed-pkg/zed-api-server.rs
+          ref: ${{ env.ZED_API_REF }}
           path: zed-api-server.rs
+          fetch-depth: 1
           persist-credentials: false
           show-progress: false
       - name: Check out zed-web-server.rs
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: zed-pkg/zed-web-server.rs
+          ref: ${{ env.ZED_WEB_REF }}
           path: zed-web-server.rs
+          fetch-depth: 1
           persist-credentials: false
           show-progress: false
 
@@ -75,35 +108,45 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: zed-pkg-test/node-lib
+          ref: ${{ env.NODE_LIB_REF }}
           path: node-lib
+          fetch-depth: 1
           persist-credentials: false
           show-progress: false
       - name: Check out rust-lib
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: zed-pkg-test/rust-lib
+          ref: ${{ env.RUST_LIB_REF }}
           path: rust-lib
+          fetch-depth: 1
           persist-credentials: false
           show-progress: false
       - name: Check out go-lib
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: zed-pkg-test/go-lib
+          ref: ${{ env.GO_LIB_REF }}
           path: go-lib
+          fetch-depth: 1
           persist-credentials: false
           show-progress: false
       - name: Check out python-lib
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: zed-pkg-test/python-lib
+          ref: ${{ env.PYTHON_LIB_REF }}
           path: python-lib
+          fetch-depth: 1
           persist-credentials: false
           show-progress: false
       - name: Check out polyglot-lib
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: zed-pkg-test/polyglot-lib
+          ref: ${{ env.POLYGLOT_LIB_REF }}
           path: polyglot-lib
+          fetch-depth: 1
           persist-credentials: false
           show-progress: false
 
@@ -121,14 +164,18 @@ jobs:
         uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v6.0.0
         with:
           node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            zed-pkg-e2e/package-lock.json
+            zed-e2e/package-lock.json
 
-      - name: Install this suite
+      - name: Install this suite reproducibly
         working-directory: zed-pkg-e2e
         run: |
           set -euo pipefail
-          npm install
+          npm ci --ignore-scripts
           npm run typecheck
-          npx playwright install --with-deps chromium
+          npx --no-install playwright install --with-deps chromium
 
       - name: Bring the registry stack up
         working-directory: zed-e2e
@@ -138,7 +185,7 @@ jobs:
           ZED_E2E_PG_IMAGE: pgvector/pgvector:0.8.6-pg16-bookworm@sha256:84a355869251af1a3379cfc9fa7b4dbf962c03f642a4bb7b339a203925071c43
         run: |
           set -euo pipefail
-          npm install
+          npm ci --ignore-scripts
           npm run stack:up
 
       - name: Drive the fixtures through a browser
@@ -146,7 +193,10 @@ jobs:
         env:
           ZED_E2E_API_URL: http://127.0.0.1:48080
           ZED_E2E_WEB_URL: http://127.0.0.1:48081
+          ZED_E2E_DATABASE_URL: postgres://zed:zed@127.0.0.1:55432/zed_e2e
+          ZED_E2E_HOME: ${{ runner.temp }}/zed-pkg-fixture-home
           ZED_BIN: ${{ github.workspace }}/zed-cli/target/debug/zed
+          ZED_E2E_API_BIN: ${{ github.workspace }}/zed-api-server.rs/target/debug/zed-api-server
         run: npm run e2e
 
       - name: Capture stack diagnostics
