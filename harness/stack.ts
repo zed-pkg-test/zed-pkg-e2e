@@ -90,20 +90,37 @@ export async function runZed(
   }
 }
 
+interface HealthResponse {
+  ok?: unknown;
+  db?: unknown;
+}
+
+/**
+ * Require the server's canonical readiness contract, not merely an open port
+ * or an arbitrary non-5xx response. Both zed Rust servers expose `/healthz`
+ * and report whether their Postgres connection is usable; browser publishing
+ * tests require both the process and its database dependency to be ready.
+ */
+async function requireHealthy(label: string, baseUrl: string): Promise<void> {
+  const url = `${baseUrl}/healthz`;
+  try {
+    const res = await fetch(url, { signal: AbortSignal.timeout(5_000) });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
+    const health = (await res.json()) as HealthResponse;
+    if (health.ok !== true || health.db !== true) {
+      throw new Error(`unhealthy response ${JSON.stringify(health)}`);
+    }
+  } catch (err) {
+    throw new Error(
+      `zed-pkg ${label} server is not ready at ${url} (${String(err)}).\n` +
+        `Bring the stack up first:  cd ../zed-e2e && npm run stack:up`,
+    );
+  }
+}
+
 /** Fails fast with an actionable message rather than a wall of 404s. */
 export async function requireStack(): Promise<void> {
-  for (const [label, url] of [
-    ["api", `${API_URL}/v1/health`],
-    ["web", `${WEB_URL}/`],
-  ] as const) {
-    try {
-      const res = await fetch(url, { signal: AbortSignal.timeout(5_000) });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    } catch (err) {
-      throw new Error(
-        `zed-pkg ${label} server is not reachable at ${url} (${String(err)}).\n` +
-          `Bring the stack up first:  cd ../zed-e2e && npm run stack:up`,
-      );
-    }
-  }
+  await requireHealthy("api", API_URL);
+  await requireHealthy("web", WEB_URL);
 }
