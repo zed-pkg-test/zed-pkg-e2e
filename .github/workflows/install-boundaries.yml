@@ -34,7 +34,7 @@ env:
   NODE_IMAGE: node:22.23.1-bookworm-slim@sha256:6c74791e557ce11fc957704f6d4fe134a7bc8d6f5ca4403205b2966bd488f6b3
   RUST_IMAGE: rust:1.90.0-bookworm@sha256:3914072ca0c3b8aad871db9169a651ccfce30cf58303e5d6f2db16d1d8a7e58f
   DEBIAN_IMAGE: debian:bookworm-slim@sha256:7b140f374b289a7c2befc338f42ebe6441b7ea838a042bbd5acbfca6ec875818
-  SKOPEO_IMAGE: quay.io/skopeo/stable@sha256:c5596df97ada178efb685ce34521a3c95006e4125d77c30449f1bc6164cc5be5
+  SKOPEO_PACKAGE: 1.13.3+ds1-2ubuntu0.24.04.3
 
 jobs:
   node-and-rust:
@@ -42,7 +42,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 55
     steps:
-      - name: Require immutable source and image pins
+      - name: Require immutable source, image, and package pins
         run: |
           set -euo pipefail
           for value in \
@@ -51,9 +51,10 @@ jobs:
             "$RUST_LIB_REF" "$RUST_APP_REF"; do
             [[ "$value" =~ ^[0-9a-f]{40}$ ]]
           done
-          for image in "$NODE_IMAGE" "$RUST_IMAGE" "$DEBIAN_IMAGE" "$SKOPEO_IMAGE"; do
+          for image in "$NODE_IMAGE" "$RUST_IMAGE" "$DEBIAN_IMAGE"; do
             [[ "$image" =~ @sha256:[0-9a-f]{64}$ ]]
           done
+          test "$SKOPEO_PACKAGE" = '1.13.3+ds1-2ubuntu0.24.04.3'
 
       - name: Check out the lifecycle harness
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -131,7 +132,9 @@ jobs:
       - name: Compile assertions and render both runtime Dockerfiles
         run: |
           set -euo pipefail
-          python3 -m py_compile harness/scripts/install_boundary_canaries.py
+          python3 -m py_compile \
+            harness/scripts/install_boundary_canaries.py \
+            harness/scripts/install_boundary_runner.py
           python3 - <<'PY'
           import importlib.util
           import sys
@@ -157,6 +160,17 @@ jobs:
           ]
           PY
 
+      - name: Install the exact Ubuntu OCI transport package
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          candidate="$(apt-cache policy skopeo | awk '/Candidate:/ {print $2}')"
+          test "$candidate" = "$SKOPEO_PACKAGE"
+          sudo apt-get install -y --no-install-recommends "skopeo=$SKOPEO_PACKAGE"
+          installed="$(dpkg-query -W -f='${Version}' skopeo)"
+          test "$installed" = "$SKOPEO_PACKAGE"
+          skopeo --version
+
       - name: Build zed once in the pinned Debian/Rust environment
         run: |
           set -euo pipefail
@@ -179,7 +193,7 @@ jobs:
       - name: Run exact-fixture ownership and OCI canaries
         run: |
           set -euo pipefail
-          python3 harness/scripts/install_boundary_canaries.py \
+          python3 harness/scripts/install_boundary_runner.py \
             --zed "$RUNNER_TEMP/zed-bin/zed" \
             --node-lib "$GITHUB_WORKSPACE/node-lib" \
             --node-app "$GITHUB_WORKSPACE/node-app" \
@@ -189,7 +203,7 @@ jobs:
             --node-image "$NODE_IMAGE" \
             --rust-image "$RUST_IMAGE" \
             --debian-image "$DEBIAN_IMAGE" \
-            --skopeo-image "$SKOPEO_IMAGE"
+            --skopeo-image host-package
 
       - name: Capture runner diagnostics
         if: failure()
@@ -197,6 +211,8 @@ jobs:
           set +e
           diagnostics="$RUNNER_TEMP/zed-install-boundaries/diagnostics"
           mkdir -p "$diagnostics"
+          skopeo --version > "$diagnostics/skopeo-version.txt" 2>&1
+          dpkg-query -W skopeo > "$diagnostics/skopeo-package.txt" 2>&1
           docker images --digests --no-trunc > "$diagnostics/runner-images.txt" 2>&1
           docker ps -a --no-trunc > "$diagnostics/runner-containers.txt" 2>&1
           df -T > "$diagnostics/filesystems.txt" 2>&1
