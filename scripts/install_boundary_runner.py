@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run DEN-591 canaries with host Skopeo and hermetic package checks.
+"""Run DEN-591 canaries with host Skopeo and semantic OCI checks.
 
 The core harness keeps containerized Zed and application execution isolated.
 OCI archive transport uses the runner's exact-version Skopeo package. Rust
@@ -10,9 +10,10 @@ inside the pinned runtime image.
 
 from __future__ import annotations
 
+import json
 import os
 from pathlib import Path
-from typing import Sequence
+from typing import Mapping, Sequence
 
 import install_boundary_canaries as canaries
 
@@ -78,6 +79,138 @@ def native_checks_without_optional_rustfmt(self: canaries.Harness) -> None:
     )
 
 
+def semantic_image_contract(raw: str) -> dict[str, object]:
+    image = json.loads(raw)[0]
+    config = image["Config"]
+    return {
+        "architecture": image["Architecture"],
+        "os": image["Os"],
+        "user": config.get("User") or "",
+        "working_dir": config.get("WorkingDir") or "",
+        "entrypoint": config.get("Entrypoint") or [],
+        "cmd": config.get("Cmd") or [],
+        "env": sorted(config.get("Env") or []),
+    }
+
+
+def build_and_roundtrip_semantically(
+    self: canaries.Harness, contexts: Mapping[str, Path]
+) -> None:
+    self.log("\n== Build fresh runtimes and round-trip through OCI archives ==")
+    node_dockerfile, rust_dockerfile = self.runtime_dockerfiles()
+    for context in contexts.values():
+        (context / ".zed").mkdir(exist_ok=True)
+        (context / ".dockerignore").write_text(
+            ".git\ntarget\nDockerfile*\n", encoding="utf-8"
+        )
+
+    specs = {
+        "node": {
+            "context": contexts["node"],
+            "dockerfile": node_dockerfile,
+            "args": ["--build-arg", f"NODE_IMAGE={self.node_image}"],
+            "tag": "zed-pkg-test/node-boundary:den-591",
+            "command": ["sh", "-euc", 'test "$(id -u)" -ne 0; exec node src/main.js'],
+            "expected": self.ecosystems[0].expected_output,
+        },
+        "rust": {
+            "context": contexts["rust"],
+            "dockerfile": rust_dockerfile,
+            "args": [
+                "--build-arg",
+                f"RUST_IMAGE={self.rust_image}",
+                "--build-arg",
+                f"DEBIAN_IMAGE={self.debian_image}",
+            ],
+            "tag": "zed-pkg-test/rust-boundary:den-591",
+            "command": [
+                "sh",
+                "-euc",
+                'test "$(id -u)" -ne 0; exec /usr/local/bin/rust-app',
+            ],
+            "expected": self.ecosystems[1].expected_output,
+        },
+    }
+
+    for name, raw in specs.items():
+        context = raw["context"]
+        dockerfile = raw["dockerfile"]
+        build_args = raw["args"]
+        tag = str(raw["tag"])
+        command = raw["command"]
+        expected = str(raw["expected"])
+        assert isinstance(context, Path)
+        assert isinstance(dockerfile, Path)
+        assert isinstance(build_args, list)
+        assert isinstance(command, list)
+
+        self.run(
+            [
+                "docker",
+                "build",
+                "--pull=false",
+                "--network=none",
+                "--file",
+                dockerfile,
+                "--tag",
+                tag,
+                *build_args,
+                context,
+            ],
+            label=f"build {name} image",
+        )
+        source_inspect = self.run(
+            ["docker", "image", "inspect", tag], label=f"inspect source {name} image"
+        )
+        source_contract = semantic_image_contract(source_inspect)
+        self.image_diagnostics(name, tag)
+        direct = self.runtime(tag, command, label=f"{name} direct runtime")
+        if expected not in direct:
+            raise AssertionError(f"{name} direct runtime output mismatch")
+
+        archive = self.oci_dir / f"{name}.oci.tar"
+        archive_ref = f"{name}-boundary"
+        self.skopeo(
+            [
+                "copy",
+                f"docker-daemon:{tag}",
+                f"oci-archive:/archives/{archive.name}:{archive_ref}",
+            ],
+            label=f"export {name} OCI archive",
+        )
+        if not archive.is_file() or archive.stat().st_size == 0:
+            raise AssertionError(f"missing OCI archive: {archive}")
+        self.skopeo(
+            ["inspect", f"oci-archive:/archives/{archive.name}:{archive_ref}"],
+            label=f"inspect {name} OCI archive",
+        )
+
+        self.run(["docker", "image", "rm", tag], label=f"remove {name} source image")
+        imported = f"{tag}-oci"
+        self.skopeo(
+            [
+                "copy",
+                f"oci-archive:/archives/{archive.name}:{archive_ref}",
+                f"docker-daemon:{imported}",
+            ],
+            label=f"import {name} OCI archive",
+        )
+        imported_inspect = self.run(
+            ["docker", "image", "inspect", imported],
+            label=f"inspect imported {name} image",
+        )
+        imported_contract = semantic_image_contract(imported_inspect)
+        if imported_contract != source_contract:
+            raise AssertionError(
+                f"{name} OCI round-trip changed runtime configuration: "
+                f"{source_contract!r} != {imported_contract!r}"
+            )
+        self.image_diagnostics(f"{name}-oci", imported)
+        roundtrip = self.runtime(imported, command, label=f"{name} OCI-imported runtime")
+        if expected not in roundtrip:
+            raise AssertionError(f"{name} OCI runtime output mismatch")
+
+
 def run_all_without_remote_skopeo_image(self: canaries.Harness) -> None:
     (self.root / "skopeo-runtime").mkdir(parents=True, exist_ok=True)
     for image in [self.node_image, self.rust_image, self.debian_image]:
@@ -97,6 +230,7 @@ def run_all_without_remote_skopeo_image(self: canaries.Harness) -> None:
 
 canaries.Harness.skopeo = host_skopeo
 canaries.Harness.native_checks = native_checks_without_optional_rustfmt
+canaries.Harness.build_and_roundtrip = build_and_roundtrip_semantically
 canaries.Harness.run_all = run_all_without_remote_skopeo_image
 
 
