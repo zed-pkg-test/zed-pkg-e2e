@@ -1,0 +1,189 @@
+name: fixture install boundaries
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      zed_cli_ref:
+        description: Immutable zed-cli commit to test
+        required: false
+        default: dd81344b14a3b311ec2f426fd47ba602627469da
+  schedule:
+    - cron: "41 6 * * 0"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fixture-install-boundaries-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  ZED_CLI_REF: ${{ inputs.zed_cli_ref || 'dd81344b14a3b311ec2f426fd47ba602627469da' }}
+  ZED_INTERFACES_REF: dc0e0a0620b9462817950b552d3d334a184b1cb1
+  NODE_LIB_REF: 2d41e658a382fdff27ef87a0db24dbaff280a685
+  NODE_APP_REF: ef794674647b3620e711f4f855865f8ad3340498
+  RUST_LIB_REF: f2534ffafbc4f7e900075dfc8e48b9259aced2fe
+  RUST_APP_REF: 38b0a5425176a53621d1c07be791701dbd30eefe
+  NODE_IMAGE: node:22.23.1-bookworm-slim@sha256:6c74791e557ce11fc957704f6d4fe134a7bc8d6f5ca4403205b2966bd488f6b3
+  RUST_IMAGE: rust:1.90.0-bookworm@sha256:3914072ca0c3b8aad871db9169a651ccfce30cf58303e5d6f2db16d1d8a7e58f
+  DEBIAN_IMAGE: debian:bookworm-slim@sha256:7b140f374b289a7c2befc338f42ebe6441b7ea838a042bbd5acbfca6ec875818
+  SKOPEO_IMAGE: quay.io/skopeo/stable@sha256:c5596df97ada178efb685ce34521a3c95006e4125d77c30449f1bc6164cc5be5
+
+jobs:
+  node-and-rust:
+    name: Node and Rust Docker/OCI canaries
+    runs-on: ubuntu-24.04
+    timeout-minutes: 55
+    steps:
+      - name: Require immutable source and image pins
+        run: |
+          set -euo pipefail
+          for value in \
+            "$ZED_CLI_REF" "$ZED_INTERFACES_REF" \
+            "$NODE_LIB_REF" "$NODE_APP_REF" \
+            "$RUST_LIB_REF" "$RUST_APP_REF"; do
+            [[ "$value" =~ ^[0-9a-f]{40}$ ]]
+          done
+          for image in "$NODE_IMAGE" "$RUST_IMAGE" "$DEBIAN_IMAGE" "$SKOPEO_IMAGE"; do
+            [[ "$image" =~ @sha256:[0-9a-f]{64}$ ]]
+          done
+
+      - name: Check out the lifecycle harness
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: harness
+          fetch-depth: 1
+          persist-credentials: false
+          show-progress: false
+
+      - name: Check out the reviewed zed-cli
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: zed-pkg/zed-cli
+          ref: ${{ env.ZED_CLI_REF }}
+          path: zed-cli
+          fetch-depth: 1
+          persist-credentials: false
+          show-progress: false
+
+      - name: Check out the pinned zed-interfaces sibling
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: zed-pkg/zed-interfaces
+          ref: ${{ env.ZED_INTERFACES_REF }}
+          path: zed-interfaces
+          fetch-depth: 1
+          persist-credentials: false
+          show-progress: false
+
+      - name: Check out node-lib
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: zed-pkg-test/node-lib
+          ref: ${{ env.NODE_LIB_REF }}
+          path: node-lib
+          fetch-depth: 1
+          persist-credentials: false
+          show-progress: false
+
+      - name: Check out node-app
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: zed-pkg-test/node-app
+          ref: ${{ env.NODE_APP_REF }}
+          path: node-app
+          fetch-depth: 1
+          persist-credentials: false
+          show-progress: false
+
+      - name: Check out rust-lib
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: zed-pkg-test/rust-lib
+          ref: ${{ env.RUST_LIB_REF }}
+          path: rust-lib
+          fetch-depth: 1
+          persist-credentials: false
+          show-progress: false
+
+      - name: Check out rust-app
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: zed-pkg-test/rust-app
+          ref: ${{ env.RUST_APP_REF }}
+          path: rust-app
+          fetch-depth: 1
+          persist-credentials: false
+          show-progress: false
+
+      - name: Validate the workflow and Python harness
+        uses: docker://rhysd/actionlint@sha256:b1934ee5f1c509618f2508e6eb47ee0d3520686341fec936f3b79331f9315667
+        with:
+          args: harness/.github/workflows/install-boundaries.yml
+
+      - name: Compile the assertion harness
+        run: |
+          set -euo pipefail
+          python3 -m py_compile harness/scripts/install_boundaries.py
+
+      - name: Build zed once in the pinned Debian/Rust environment
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/zed-bin" "$RUNNER_TEMP/zed-target"
+          docker pull "$RUST_IMAGE"
+          docker run --rm \
+            --mount "type=bind,src=$GITHUB_WORKSPACE,dst=/src" \
+            --mount "type=bind,src=$RUNNER_TEMP/zed-target,dst=/target" \
+            --mount "type=bind,src=$RUNNER_TEMP/zed-bin,dst=/out" \
+            --workdir /src/zed-cli \
+            --env CARGO_TARGET_DIR=/target \
+            "$RUST_IMAGE" \
+            sh -euc '
+              cargo +1.90.0 build --locked --release --bin zed
+              install -m 0755 /target/release/zed /out/zed
+              sha256sum /out/zed | tee /out/SHA256SUMS
+            '
+          test -x "$RUNNER_TEMP/zed-bin/zed"
+
+      - name: Run exact-fixture ownership and OCI canaries
+        run: |
+          set -euo pipefail
+          python3 harness/scripts/install_boundaries.py \
+            --zed "$RUNNER_TEMP/zed-bin/zed" \
+            --node-lib "$GITHUB_WORKSPACE/node-lib" \
+            --node-app "$GITHUB_WORKSPACE/node-app" \
+            --rust-lib "$GITHUB_WORKSPACE/rust-lib" \
+            --rust-app "$GITHUB_WORKSPACE/rust-app" \
+            --work-root "$RUNNER_TEMP/zed-install-boundaries" \
+            --node-image "$NODE_IMAGE" \
+            --rust-image "$RUST_IMAGE" \
+            --debian-image "$DEBIAN_IMAGE" \
+            --skopeo-image "$SKOPEO_IMAGE"
+
+      - name: Capture runner diagnostics
+        if: failure()
+        run: |
+          set +e
+          diagnostics="$RUNNER_TEMP/zed-install-boundaries/diagnostics"
+          mkdir -p "$diagnostics"
+          docker images --digests --no-trunc > "$diagnostics/runner-images.txt" 2>&1
+          docker ps -a --no-trunc > "$diagnostics/runner-containers.txt" 2>&1
+          df -T > "$diagnostics/filesystems.txt" 2>&1
+          mount > "$diagnostics/mounts.txt" 2>&1
+
+      - name: Upload failure diagnostics
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: install-boundary-diagnostics-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/zed-install-boundaries/diagnostics
+          if-no-files-found: warn
+          retention-days: 14
+          include-hidden-files: true
