@@ -79,18 +79,25 @@ requires a fresh root and GitHub-hosted jobs receive a new runner filesystem.
 
 | Suite | What it covers |
 | --- | --- |
-| `suites/fixture-package-pages.spec.ts` | Each single-language fixture (`node-lib`, `rust-lib`, `go-lib`, `python-lib`) renders the version, description, license, and install snippet declared by its `.zpkg.toml`; each is findable through HTMX search; a missing package is a real 404. |
-| `suites/polyglot-fan-out.spec.ts` | `polyglot-lib` becomes four separately addressable packages with distinct content hashes, and the unsuffixed repository name is not itself a package. |
+| `suites/fixture-package-pages.spec.ts` | Each single-language fixture (`node-lib`, `rust-lib`, `go-lib`, `python-lib`) renders the version, description, repository URL, and install snippet persisted from its `.zpkg.toml`; each is findable through HTMX search; a missing package is a real 404. |
+| `suites/polyglot-fan-out.spec.ts` | `polyglot-lib` becomes four separately addressable packages with distinct content hashes, and the unsuffixed repository name is not itself a package. Ecosystem-specific install enforcement remains in the lifecycle matrix, which reads each derived artifact manifest and exercises the native toolchain. |
+
+The browser workflow pins the stack, CLI, interfaces, Rust servers, and fixture
+inputs to immutable commit SHAs. Both Node workspaces install from their checked-in
+lockfiles with `npm ci`. The fixture publisher forces the local API URL, uses a
+disposable zed home, clears ambient credentials, and mints owner tokens scoped to
+each fixture manifest org through the local test database. It never falls back
+to the public registry or a developer's saved state.
 
 ### Run browser automation
 
 ```bash
 # 1. Bring up the stack through the suite that owns it.
-cd ../zed-e2e && npm run stack:up && cd -
+cd ../zed-e2e && npm ci --ignore-scripts && npm run stack:up && cd -
 
-# 2. Install browser-test prerequisites.
-npm install
-npx playwright install chromium
+# 2. Install browser-test prerequisites from the lockfile.
+npm ci --ignore-scripts
+npm exec -- playwright install chromium
 
 # 3. Publish the fixture inputs and drive the UI.
 npm run e2e
@@ -98,23 +105,27 @@ npm run e2e:fixtures
 npm run e2e:polyglot
 ```
 
-Sibling checkouts are expected alongside this repository: `zed-cli` and the
-fixture repositories the browser tests publish (`node-lib`, `rust-lib`,
-`go-lib`, `python-lib`, and `polyglot-lib`). The lifecycle harness instead
-clones prerequisites into its disposable work root according to the explicit
-dependency graph.
+Sibling checkouts are expected alongside this repository: `zed-cli`,
+`zed-interfaces`, `zed-api-server.rs`, `zed-web-server.rs`, and the fixture
+repositories the browser tests publish (`node-lib`, `rust-lib`, `go-lib`,
+`python-lib`, and `polyglot-lib`). The lifecycle harness instead clones
+prerequisites into its disposable work root according to the explicit dependency
+graph.
 
 ## Browser configuration
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
-| `ZED_E2E_API_URL` | `http://127.0.0.1:48080` | API server whose package metadata is asserted. |
-| `ZED_E2E_WEB_URL` | `http://127.0.0.1:48081` | Web server the browser drives. |
+| `ZED_E2E_API_URL` | `http://127.0.0.1:48080` | Local API server whose health and package metadata are asserted. |
+| `ZED_E2E_WEB_URL` | `http://127.0.0.1:48081` | Local web server the browser drives. |
+| `ZED_E2E_DATABASE_URL` | `postgres://zed:zed@127.0.0.1:55432/zed_e2e` | Test database used only to mint scoped fixture tokens. |
+| `ZED_E2E_HOME` | process-specific directory under the OS temp root | Disposable zed store and credentials root. |
 | `ZED_BIN` | `../zed-cli/target/debug/zed` | zed binary used to publish browser fixtures. |
+| `ZED_E2E_API_BIN` | `../zed-api-server.rs/target/debug/zed-api-server` | API binary used to create scoped test tokens. |
 | `PW_CONNECT_WS` | — | Connect Playwright to a remote browser server instead of local Chromium. |
 
 Defaults match `zed-pkg/zed-e2e`, so the common local case needs no additional
-environment variables.
+environment variables after the sibling stack is running.
 
 ## License
 

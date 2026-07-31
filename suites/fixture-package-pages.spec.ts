@@ -5,7 +5,7 @@ import { ensureSeeded, readIdentity } from "../harness/fixtures.js";
 // What the per-repo CI cannot check: that a fixture published from its real tree
 // is then *rendered correctly by the registry UI*. The repo CI stops at "the
 // package is well-formed"; this starts at "a human opening the page sees the
-// truth", in a real browser.
+// persisted registry metadata", in a real browser.
 test.describe("fixture packages render on the registry UI", () => {
   test.beforeAll(async () => {
     await ensureSeeded();
@@ -24,14 +24,16 @@ test.describe("fixture packages render on the registry UI", () => {
       await expect(page.locator("table.versions")).toContainText(identity.version);
     });
 
-    test(`${slug} page agrees with its .zpkg.toml`, async ({ page }) => {
+    test(`${slug} page agrees with persisted manifest metadata`, async ({ page }) => {
       await page.goto(`${WEB_URL}/p/${slug}`);
       const body = page.locator("body");
 
-      // Description and license come from the manifest the fixture repo owns;
-      // if the UI shows something else, one of the two drifted.
+      // Description and repository URL are carried in package metadata and
+      // rendered by the web server. License remains inside the immutable
+      // artifact manifest today, so asserting it here would invent a web/API
+      // contract that does not exist.
       await expect(body).toContainText(identity.description);
-      await expect(body).toContainText(identity.license);
+      await expect(body).toContainText(identity.repositoryUrl);
     });
   }
 

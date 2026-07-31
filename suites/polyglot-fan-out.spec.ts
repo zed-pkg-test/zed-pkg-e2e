@@ -2,11 +2,12 @@ import { expect, test } from "@playwright/test";
 import { API_URL, POLYGLOT_FIXTURE, WEB_URL } from "../harness/stack.js";
 import { ensureSeeded, polyglotSlices, readIdentity } from "../harness/fixtures.js";
 
-// The polyglot claim is that ONE repo becomes FOUR independently installable
-// packages, each tagged with the ecosystem it belongs to. That is the assertion
-// worth making through the UI and the API together: a visitor must be able to
-// tell the four slices apart, or the ecosystem-mismatch refusal that depends on
-// those tags is unexplainable.
+// The polyglot publication claim is that ONE repo becomes FOUR independently
+// addressable packages with independently re-rooted artifacts. Language and
+// ecosystem stay in each artifact's derived .zpkg.toml and are enforced by the
+// per-app lifecycle jobs during install; package/version HTTP metadata does not
+// currently duplicate those fields, so this suite tests the contract that does
+// exist rather than inventing a UI tag contract.
 test.describe("polyglot-lib fans out to four distinct packages", () => {
   const identity = readIdentity(POLYGLOT_FIXTURE);
 
@@ -17,14 +18,11 @@ test.describe("polyglot-lib fans out to four distinct packages", () => {
   for (const slice of polyglotSlices()) {
     const slug = `${identity.org}/${identity.name}-${slice.suffix}`;
 
-    test(`${slug} has its own page tagged ${slice.ecosystem}`, async ({ page }) => {
+    test(`${slug} has its own page (${slice.ecosystem} slice)`, async ({ page }) => {
       await page.goto(`${WEB_URL}/p/${slug}`);
 
       await expect(page.locator(".snippet")).toContainText(`zed add ${slug}`);
       await expect(page.locator("table.versions")).toContainText(identity.version);
-      // The language/ecosystem tags are what make the wrong-package install
-      // refusable, so they have to be visible, not merely stored.
-      await expect(page.locator("body")).toContainText(slice.ecosystem);
     });
 
     test(`${slug} is addressable and pins one artifact`, async ({ request }) => {
@@ -33,13 +31,9 @@ test.describe("polyglot-lib fans out to four distinct packages", () => {
       );
       expect(res.status()).toBe(200);
 
-      // Deliberately NOT asserting language/ecosystem here. Verified against a
-      // real `zed publish`: version metadata carries org/name/version/sha256/
-      // size/format/vcs_tag/download_url/yanked and no language tag at all --
-      // the language and ecosystem are recorded at *install* time, in the
-      // consumer's .zed/paths.json. The per-app e2e workflows assert them
-      // there; asserting them here would be testing a field that does not
-      // exist.
+      // Version metadata carries immutable identity/hash fields; language and
+      // ecosystem are deliberately verified after install from the artifact's
+      // derived manifest by the fixture repos' lifecycle workflows.
       const meta = await res.json();
       expect(meta.name).toBe(`${identity.name}-${slice.suffix}`);
       expect(meta.sha256).toMatch(/^[0-9a-f]{64}$/);

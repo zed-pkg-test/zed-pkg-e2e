@@ -10,6 +10,7 @@ import { readFileSync } from "node:fs";
 import {
   POLYGLOT_FIXTURE,
   SINGLE_LANGUAGE_FIXTURES,
+  createScopedToken,
   fixturePath,
   runZed,
   type FixtureRepo,
@@ -24,7 +25,7 @@ export interface PublishedPackage {
 }
 
 /** Minimal TOML reach-in: these manifests are fixtures we control, and pulling
- *  a TOML parser in for four `key = "value"` lookups is not worth the dep. */
+ *  a TOML parser in for a few `key = "value"` lookups is not worth the dep. */
 function manifestField(manifest: string, key: string): string {
   const match = manifest.match(new RegExp(`^${key}\\s*=\\s*"([^"]+)"`, "m"));
   if (!match?.[1]) {
@@ -38,7 +39,8 @@ export interface FixtureIdentity {
   name: string;
   version: string;
   description: string;
-  license: string;
+  /** Repository URL is persisted by the registry and rendered by the web UI. */
+  repositoryUrl: string;
 }
 
 export function readIdentity(fixture: FixtureRepo): FixtureIdentity {
@@ -48,23 +50,31 @@ export function readIdentity(fixture: FixtureRepo): FixtureIdentity {
     name: manifestField(manifest, "name"),
     version: manifestField(manifest, "version"),
     description: manifestField(manifest, "description"),
-    license: manifestField(manifest, "license"),
+    repositoryUrl: manifestField(manifest, "url"),
   };
 }
 
 /**
- * Publishes one fixture repo. `--skip-vcs-checks` because a CI checkout has no
- * release tag; publishing an already-published version is treated as success so
- * the suite is re-runnable against a stack that was left up (versions are
- * immutable, so a 409 means the registry already holds exactly these bytes).
+ * Publishes one fixture repo with an explicitly scoped test token.
+ * `--skip-vcs-checks` is necessary because a CI checkout has no release tag;
+ * publishing an already-published version is treated as success so the suite
+ * stays idempotent when multiple browser files seed the same clean stack.
  */
-export async function publishFixture(fixture: FixtureRepo): Promise<FixtureIdentity> {
+export async function publishFixture(
+  fixture: FixtureRepo,
+  token: string,
+): Promise<FixtureIdentity> {
   const identity = readIdentity(fixture);
   const cwd = fixturePath(fixture);
 
-  const result = await runZed(["publish", "--skip-vcs-checks"], { cwd });
+  const result = await runZed(["publish", "--skip-vcs-checks"], {
+    cwd,
+    env: { ZED_PKG_TOKEN: token },
+  });
   const alreadyPublished =
-    result.code !== 0 && /already (?:exists|published)|409/i.test(result.stderr + result.stdout);
+    result.code !== 0 && /already (?:exists|published)|version_exists|409/i.test(
+      result.stderr + result.stdout,
+    );
 
   if (result.code !== 0 && !alreadyPublished) {
     throw new Error(
@@ -78,12 +88,28 @@ export async function publishFixture(fixture: FixtureRepo): Promise<FixtureIdent
 
 let seeded: Promise<Map<string, FixtureIdentity>> | undefined;
 
-/** Publishes every fixture once per process, shared across suites. */
+/**
+ * Publishes every fixture once per process. Tokens are created per manifest org
+ * rather than hard-coding `zed-pkg-test`, so adding a fixture under another
+ * namespace remains least-privilege and does not silently broaden authority.
+ */
 export function ensureSeeded(): Promise<Map<string, FixtureIdentity>> {
   seeded ??= (async () => {
     const published = new Map<string, FixtureIdentity>();
+    const tokens = new Map<string, string>();
+
     for (const fixture of [...SINGLE_LANGUAGE_FIXTURES, POLYGLOT_FIXTURE]) {
-      published.set(fixture.repo, await publishFixture(fixture));
+      const identity = readIdentity(fixture);
+      let token = tokens.get(identity.org);
+      if (!token) {
+        const safeOrg = identity.org.replace(/[^a-zA-Z0-9_-]/g, "-");
+        token = await createScopedToken(
+          `fixture-e2e-${safeOrg}-${process.pid}-${Date.now().toString(36)}`,
+          identity.org,
+        );
+        tokens.set(identity.org, token);
+      }
+      published.set(fixture.repo, await publishFixture(fixture, token));
     }
     return published;
   })();
