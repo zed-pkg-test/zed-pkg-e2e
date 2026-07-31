@@ -83,7 +83,7 @@ jobs:
           set -euo pipefail
           cargo build --locked --release --manifest-path zed-cli/Cargo.toml --bin zed
           install -Dm755 zed-cli/target/release/zed "$RUNNER_TEMP/zed-bin/zed"
-          sha256sum "$RUNNER_TEMP/zed-bin/zed" | tee "$RUNNER_TEMP/zed-bin/SHA256SUMS"
+          (cd "$RUNNER_TEMP/zed-bin" && sha256sum zed | tee SHA256SUMS)
           "$RUNNER_TEMP/zed-bin/zed" --version
 
       - name: Upload immutable zed binary
