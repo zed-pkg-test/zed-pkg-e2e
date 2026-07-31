@@ -29,13 +29,13 @@ jobs:
           persist-credentials: false
           show-progress: false
 
-      # The stack owner. Pin the pgvector preflight change until zed-e2e#3 is
-      # merged; using an immutable commit also makes this browser run replayable.
+      # Pin the merged pgvector and target-database readiness hardening. Using
+      # an immutable merge commit keeps this browser run replayable.
       - name: Check out zed-e2e
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: zed-pkg/zed-e2e
-          ref: 5ba5904ef130a85b8d0ac7393d6cf46f89b70e9d
+          ref: 5ccd57316ae39c3a3692fb4cfbda2f8a4dd74aa0
           path: zed-e2e
           persist-credentials: false
           show-progress: false
