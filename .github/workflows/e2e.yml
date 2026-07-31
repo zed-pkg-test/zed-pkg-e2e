@@ -29,11 +29,13 @@ jobs:
           persist-credentials: false
           show-progress: false
 
-      # The stack owner. Its harness builds and boots postgres + both servers.
+      # The stack owner. Pin the pgvector preflight change until zed-e2e#3 is
+      # merged; using an immutable commit also makes this browser run replayable.
       - name: Check out zed-e2e
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: zed-pkg/zed-e2e
+          ref: 5ba5904ef130a85b8d0ac7393d6cf46f89b70e9d
           path: zed-e2e
           persist-credentials: false
           show-progress: false
@@ -130,6 +132,10 @@ jobs:
 
       - name: Bring the registry stack up
         working-directory: zed-e2e
+        env:
+          # Official pgvector 0.8.6 + Postgres 16 Bookworm, pinned to the
+          # linux/amd64 manifest used by GitHub's ubuntu-24.04 runners.
+          ZED_E2E_PG_IMAGE: pgvector/pgvector:0.8.6-pg16-bookworm@sha256:84a355869251af1a3379cfc9fa7b4dbf962c03f642a4bb7b339a203925071c43
         run: |
           set -euo pipefail
           npm install
