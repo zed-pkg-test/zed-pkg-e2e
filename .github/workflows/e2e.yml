@@ -19,88 +19,106 @@ concurrency:
 
 jobs:
   e2e:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 60
     steps:
       - name: Check out this suite
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           path: zed-pkg-e2e
           persist-credentials: false
+          show-progress: false
 
-      # The stack owner. Its harness builds and boots postgres + both servers.
+      # The stack owner. Pin the pgvector preflight change until zed-e2e#3 is
+      # merged; using an immutable commit also makes this browser run replayable.
       - name: Check out zed-e2e
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: zed-pkg/zed-e2e
+          ref: 5ba5904ef130a85b8d0ac7393d6cf46f89b70e9d
           path: zed-e2e
           persist-credentials: false
+          show-progress: false
 
       # zed-cli path-depends on ../zed-interfaces, so they must be siblings.
       - name: Check out zed-cli
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: zed-pkg/zed-cli
           path: zed-cli
           persist-credentials: false
+          show-progress: false
       - name: Check out zed-interfaces
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: zed-pkg/zed-interfaces
           path: zed-interfaces
           persist-credentials: false
+          show-progress: false
       - name: Check out zed-api-server.rs
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: zed-pkg/zed-api-server.rs
           path: zed-api-server.rs
           persist-credentials: false
+          show-progress: false
       - name: Check out zed-web-server.rs
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: zed-pkg/zed-web-server.rs
           path: zed-web-server.rs
           persist-credentials: false
+          show-progress: false
 
       # The fixture repos whose pages this suite asserts on.
       - name: Check out node-lib
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: zed-pkg-test/node-lib
           path: node-lib
           persist-credentials: false
+          show-progress: false
       - name: Check out rust-lib
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: zed-pkg-test/rust-lib
           path: rust-lib
           persist-credentials: false
+          show-progress: false
       - name: Check out go-lib
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: zed-pkg-test/go-lib
           path: go-lib
           persist-credentials: false
+          show-progress: false
       - name: Check out python-lib
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: zed-pkg-test/python-lib
           path: python-lib
           persist-credentials: false
+          show-progress: false
       - name: Check out polyglot-lib
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: zed-pkg-test/polyglot-lib
           path: polyglot-lib
           persist-credentials: false
+          show-progress: false
 
       - name: Validate workflow
         uses: docker://rhysd/actionlint@sha256:b1934ee5f1c509618f2508e6eb47ee0d3520686341fec936f3b79331f9315667
         with:
           args: zed-pkg-e2e/.github/workflows/e2e.yml
 
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v6
+      - name: Install pinned Rust toolchain action
+        uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4
+        with:
+          toolchain: stable
+
+      - name: Install Node.js
+        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v6.0.0
         with:
           node-version: 22
 
@@ -114,6 +132,10 @@ jobs:
 
       - name: Bring the registry stack up
         working-directory: zed-e2e
+        env:
+          # Official pgvector 0.8.6 + Postgres 16 Bookworm, pinned to the
+          # linux/amd64 manifest used by GitHub's ubuntu-24.04 runners.
+          ZED_E2E_PG_IMAGE: pgvector/pgvector:0.8.6-pg16-bookworm@sha256:84a355869251af1a3379cfc9fa7b4dbf962c03f642a4bb7b339a203925071c43
         run: |
           set -euo pipefail
           npm install
@@ -127,6 +149,22 @@ jobs:
           ZED_BIN: ${{ github.workspace }}/zed-cli/target/debug/zed
         run: npm run e2e
 
+      - name: Capture stack diagnostics
+        if: ${{ failure() }}
+        run: |
+          set +e
+          destination="zed-pkg-e2e/test-results/stack"
+          mkdir -p "$destination"
+          if test -d zed-e2e/.stack; then
+            cp -a zed-e2e/.stack/. "$destination/"
+          fi
+          docker logs zed-e2e-postgres > "$destination/postgres.log" 2>&1 || true
+          for log in "$destination"/*.log; do
+            test -f "$log" || continue
+            printf '\n===== %s =====\n' "$log"
+            cat "$log"
+          done
+
       - name: Tear the stack down
         if: ${{ always() }}
         working-directory: zed-e2e
@@ -134,11 +172,12 @@ jobs:
 
       - name: Upload browser diagnostics
         if: ${{ always() }}
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: playwright-report
+          name: browser-diagnostics-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
             zed-pkg-e2e/playwright-report
             zed-pkg-e2e/test-results
           if-no-files-found: warn
-          retention-days: 7
+          retention-days: 14
+          include-hidden-files: true
