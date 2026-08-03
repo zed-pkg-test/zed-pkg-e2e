@@ -12,7 +12,7 @@ on:
       zed_cli_ref:
         description: Exact 40-character zed-pkg/zed-cli layout candidate
         required: true
-        default: 3b620c8d2a96fd95f18b08fc087cfd67a9ac6228
+        default: c6207598240c073ecce13e344c54c6074e37eb6a
         type: string
 
 permissions:
@@ -30,7 +30,7 @@ env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: "1"
   HARNESS_REF: ${{ github.event.pull_request.head.sha || github.sha }}
-  ZED_CLI_REF: ${{ inputs.zed_cli_ref || '3b620c8d2a96fd95f18b08fc087cfd67a9ac6228' }}
+  ZED_CLI_REF: ${{ inputs.zed_cli_ref || 'c6207598240c073ecce13e344c54c6074e37eb6a' }}
   NODE_LIB_REF: 2d41e658a382fdff27ef87a0db24dbaff280a685
   NODE_APP_REF: ef794674647b3620e711f4f855865f8ad3340498
   POLYGLOT_LIB_REF: e62ceb6337324a294d4fc861692a267ff0db97d0
