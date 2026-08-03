@@ -16,7 +16,7 @@ Neither suite may substitute for the other.
 
 `.github/workflows/mise-runtime.yml` builds a full 40-character `zed-cli` commit pin and runs the same black-box harness on Ubuntu 24.04 and macOS 15. The workflow does not install mise or download language runtimes. Instead, it supplies a deterministic executable stub whose arguments and relevant environment values are observable.
 
-The current candidate is `2211b69e3c3b7e850dfcfb650936d0d4b9f5437c`, the exact clean head of `zed-pkg/zed-cli#70`. Update the pin whenever that pull request changes, and never promote this certification against a branch name or abbreviated SHA.
+The current candidate is `12fa84f11cef7ce2783683d6efc5b79409f62be7`, the exact clean head of `zed-pkg/zed-cli#70`. Update the pin whenever that pull request changes, and never promote this certification against a branch name or abbreviated SHA.
 
 ## Certified behavior
 
@@ -37,7 +37,9 @@ The current candidate is `2211b69e3c3b7e850dfcfb650936d0d4b9f5437c`, the exact c
 - Zed and mise activation markers prevent recursive re-entry in non-frozen mode; and
 - the exact child exit status survives both `mise exec` and `zed dev`.
 
-The first runtime assertion is also a regression test for the macOS PATH failure that exposed the former `bash -lc` behavior. It requires both a mise-selected executable and a project-local Zed executable to remain callable in the expected order.
+The workflow also runs all three direct command-shell test targets: `develop_edge_cases`, `develop_shell_edge_cases`, and `develop_help_contract`. This keeps the source-level Bash/Fish/PowerShell/cmd/generic dispatch matrix synchronized with the black-box PATH assertions.
+
+The first runtime assertion is a regression test for the macOS PATH failure that exposed the former `bash -lc` behavior. It requires both a mise-selected executable and a project-local Zed executable to remain callable in the expected order.
 
 ## Local execution
 
