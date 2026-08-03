@@ -9,7 +9,7 @@ on:
       zed_cli_ref:
         description: Immutable zed-cli commit to test
         required: false
-        default: 8929a58c6591c7a964d7f91412665d7c8a4afdf3
+        default: 3a91d64abf1fc0bdee6eab2ff804113b1429849f
   schedule:
     - cron: "41 6 * * 0"
 
@@ -25,7 +25,7 @@ defaults:
     shell: bash
 
 env:
-  ZED_CLI_REF: ${{ inputs.zed_cli_ref || '8929a58c6591c7a964d7f91412665d7c8a4afdf3' }}
+  ZED_CLI_REF: ${{ inputs.zed_cli_ref || '3a91d64abf1fc0bdee6eab2ff804113b1429849f' }}
   ZED_INTERFACES_REF: dc0e0a0620b9462817950b552d3d334a184b1cb1
   NODE_LIB_REF: 2d41e658a382fdff27ef87a0db24dbaff280a685
   NODE_APP_REF: ef794674647b3620e711f4f855865f8ad3340498
