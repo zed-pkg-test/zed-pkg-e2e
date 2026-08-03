@@ -8,7 +8,7 @@ fixtures on Ubuntu 24.04 and macOS 15.
 
 The candidate and fixture revisions are independent reviewed inputs:
 
-- `zed-pkg/zed-cli@2b298d94c96fe74339da930013935b3d21039da0`;
+- `zed-pkg/zed-cli@5a86a7d90f497a17d5594b16efa0bcb713d41868`;
 - `zed-pkg-test/node-lib@222cdf57f48530fce8e6c1f58632d9676203512e`;
 - `zed-pkg-test/polyglot-lib@998964aa58e49595547650b4a8da407b7a2283a9`;
 - `zed-pkg/zed-interfaces@c2e049006453c26ca8ca291783f681fce75cb01f`.
@@ -16,7 +16,10 @@ The candidate and fixture revisions are independent reviewed inputs:
 The candidate contains the current resolver-only CLI, resolver-only Nix FOD,
 deterministic planner, merged install-shaped bridge, and the four-system public
 Nix evaluation ratchet. The stacked histories are explicit; the candidate does
-not restore obsolete Cargo pins or temporary branch-writing workflows.
+not restore obsolete Cargo pins or temporary branch-writing workflows. Its
+negative resolver fixtures also use intentionally unchecked serialization only
+inside tests, so stricter shared lock validation does not prevent the resolver
+boundary from proving duplicate-identity and credential-source rejection.
 
 The canary proves:
 
