@@ -1,0 +1,49 @@
+name: lifecycle harness unit
+
+on:
+  pull_request:
+    paths:
+      - scripts/lifecycle.py
+      - tests/test_lifecycle_harness.py
+      - .github/workflows/lifecycle-harness-unit.yml
+  push:
+    branches: [main]
+    paths:
+      - scripts/lifecycle.py
+      - tests/test_lifecycle_harness.py
+      - .github/workflows/lifecycle-harness-unit.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: lifecycle-harness-unit-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lifecycle-harness-unit:
+    name: Dependency map and safe scratch cleanup
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Check out the harness
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+          show-progress: false
+
+      - name: Show tool versions
+        run: |
+          set -euo pipefail
+          python3 --version
+          git --version
+
+      - name: Compile the lifecycle harness and its tests
+        run: |
+          set -euo pipefail
+          python3 -m py_compile scripts/lifecycle.py tests/test_lifecycle_harness.py
+
+      - name: Run dependency-map and cleanup safety tests
+        run: python3 tests/test_lifecycle_harness.py
