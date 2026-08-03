@@ -8,10 +8,15 @@ fixtures on Ubuntu 24.04 and macOS 15.
 
 The candidate and fixture revisions are independent reviewed inputs:
 
-- `zed-pkg/zed-cli@71181c1f859f889829b0fc54183fc0d627983882`;
+- `zed-pkg/zed-cli@2b298d94c96fe74339da930013935b3d21039da0`;
 - `zed-pkg-test/node-lib@222cdf57f48530fce8e6c1f58632d9676203512e`;
 - `zed-pkg-test/polyglot-lib@998964aa58e49595547650b4a8da407b7a2283a9`;
 - `zed-pkg/zed-interfaces@c2e049006453c26ca8ca291783f681fce75cb01f`.
+
+The candidate contains the current resolver-only CLI, resolver-only Nix FOD,
+deterministic planner, merged install-shaped bridge, and the four-system public
+Nix evaluation ratchet. The stacked histories are explicit; the candidate does
+not restore obsolete Cargo pins or temporary branch-writing workflows.
 
 The canary proves:
 
