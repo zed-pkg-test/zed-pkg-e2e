@@ -1,0 +1,40 @@
+name: lifecycle harness contract
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/lifecycle-harness-contract.yml"
+      - "scripts/lifecycle.py"
+      - "tests/test_lifecycle_metadata.py"
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/lifecycle-harness-contract.yml"
+      - "scripts/lifecycle.py"
+      - "tests/test_lifecycle_metadata.py"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: lifecycle-harness-contract-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  metadata-contract:
+    name: package classification and dependency-source metadata
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Check out lifecycle harness
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          show-progress: false
+
+      - name: Compile the harness
+        run: python3 -m py_compile scripts/lifecycle.py tests/test_lifecycle_metadata.py
+
+      - name: Run lifecycle metadata regressions
+        run: python3 -m unittest discover -s tests -p 'test_lifecycle*.py' -v
