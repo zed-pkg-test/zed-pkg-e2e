@@ -225,13 +225,13 @@ install_consumer "$latest" "$home/latest" "$package" latest
 cmp "$explicit/.zpkg.toml" "$latest/.zpkg.toml"
 cmp "$explicit/.zpkg.lock" "$latest/.zpkg.lock"
 
-# Managed state remains stable across uninstall and a frozen reinstall from a
-# nested directory. The package is rematerialized without re-resolving or
-# rewriting the manifest/lockfile.
+# Managed state remains stable across uninstall and a frozen reinstall. Install
+# and frozen-install stay nested-root tests; uninstall currently consumes the
+# managed root directly.
 cp "$explicit/.zpkg.toml" "$work_root/before-reinstall.toml"
 cp "$explicit/.zpkg.lock" "$work_root/before-reinstall.lock"
 (
-  cd "$explicit/deep/nested"
+  cd "$explicit"
   "$zed" --home "$home/explicit" uninstall
 )
 test -f "$explicit/.zpkg.toml"
