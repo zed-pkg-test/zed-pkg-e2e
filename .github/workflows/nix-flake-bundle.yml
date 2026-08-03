@@ -138,7 +138,7 @@ jobs:
           printf 'evidence=%s\n' "$evidence" >> "$GITHUB_OUTPUT"
           test -z "$(git -C zed-cli status --porcelain=v1 --untracked-files=all)"
 
-      - name: Check and build both standalone flakes offline
+      - name: Prime the locked closure, then replay both flakes offline
         id: build
         shell: bash
         env:
@@ -147,10 +147,31 @@ jobs:
           EVIDENCE: ${{ steps.render.outputs.evidence }}
         run: |
           set -euo pipefail
+
+          # Archive both byte-identical sources and realize the exact locked package
+          # once while the configured binary cache is available. A fresh empty Nix
+          # store cannot honestly replay stdenv offline without first obtaining its
+          # immutable closure; attempting that merely bootstraps all of Nixpkgs from
+          # source and tests runner capacity rather than the generated package.
           for bundle in "$BUNDLE_A" "$BUNDLE_B"; do
             (
               cd "$bundle"
               nix flake archive --no-update-lock-file
+            )
+          done
+          primed_out="$(
+            cd "$BUNDLE_A"
+            nix build \
+              --no-update-lock-file \
+              --no-link \
+              --print-build-logs \
+              --print-out-paths \
+              .#sample
+          )"
+
+          for bundle in "$BUNDLE_A" "$BUNDLE_B"; do
+            (
+              cd "$bundle"
               nix flake check \
                 --offline \
                 --no-update-lock-file \
@@ -178,6 +199,7 @@ jobs:
               --print-out-paths \
               .#sample
           )"
+          test "$primed_out" = "$out_a"
           test "$out_a" = "$out_b"
 
           mkdir -p "$RUNNER_TEMP/empty-home"
@@ -223,6 +245,7 @@ jobs:
           assert 'persist-credentials: false' in workflow
           assert 'ubuntu-24.04' in workflow and 'macos-15' in workflow
           assert '--offline' in workflow and '--no-update-lock-file' in workflow
+          assert 'primed_out=' in workflow
           assert '--exercise-tamper' in workflow
           assert 'credential_canaries_retained' in rust
           assert 'tamper_cases' in verifier
@@ -261,7 +284,7 @@ jobs:
           mkdir -p "$diagnostics"
           git -C zed-cli status --porcelain=v1 --untracked-files=all \
             > "$diagnostics/zed-cli-status.txt" 2>&1
-          find "$RUNNER_TEMP" -maxdepth 8 -type f -o -type l 2>/dev/null \
+          find "$RUNNER_TEMP" -maxdepth 8 \( -type f -o -type l \) 2>/dev/null \
             | LC_ALL=C sort > "$diagnostics/work-tree.txt" 2>&1
 
       - name: Upload failure diagnostics
