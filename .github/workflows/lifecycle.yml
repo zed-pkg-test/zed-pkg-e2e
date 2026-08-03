@@ -163,6 +163,15 @@ jobs:
             --zed tooling/zed \
             --work-root "$WORK_ROOT"
 
+      - name: Reject missing, non-directory, and redirected output parents
+        env:
+          WORK_ROOT: ${{ runner.temp }}/zed-frozen-fetch-canary
+        run: |
+          set -euo pipefail
+          python3 harness/scripts/frozen_fetch_output_boundaries.py \
+            --zed tooling/zed \
+            --work-root "$WORK_ROOT"
+
       - name: Collect failure diagnostics
         if: failure()
         env:
