@@ -53,3 +53,17 @@ runs the complete crate tests and Clippy with warnings denied, and executes a
 separate Rust consumer offline. Two schema generations must retain identical
 bytes. The schema, checksum, source status, and consumer lockfile are retained
 as evidence.
+
+## Stacked lifecycle harness
+
+The canary pull request is temporarily based on the lifecycle source-map repair
+in `zed-pkg-test/zed-pkg-e2e#24`. That repair promotes
+`zedtest/shared-schema` from the negative non-package classification into
+`PACKAGE_SOURCES`, allowing the existing Python consumer and the shared-schema
+matrix row to run their real package lifecycle.
+
+This stack is intentional: the focused native-range workflow remains independent
+of the lifecycle implementation, while the repository-wide regression suite is
+required to pass against the repaired fixture graph before either PR is promoted.
+After the repair lands on `main`, this canary is retargeted to `main` without
+changing its native dependency contract or exact `zed-interfaces` pin.
