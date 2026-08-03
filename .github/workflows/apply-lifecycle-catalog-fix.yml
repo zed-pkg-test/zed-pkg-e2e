@@ -43,38 +43,39 @@ jobs:
               raise SystemExit('could not locate stale NON_PACKAGE_REPOS declaration')
           text = text.replace(old_non_packages, new_non_packages, 1)
 
-          mapping_anchor = '''    "zedtest/polyglot-lib-rust": ("polyglot-lib", "."),
-          '''
-          mapping = mapping_anchor + '''    "zedtest/shared-schema": ("shared-schema", "."),
-          '''
+          mapping_anchor = '    "zedtest/polyglot-lib-rust": ("polyglot-lib", "."),\n'
+          mapping = mapping_anchor + '    "zedtest/shared-schema": ("shared-schema", "."),\n'
           if text.count(mapping_anchor) != 1:
               raise SystemExit('could not locate PACKAGE_SOURCES insertion point')
           text = text.replace(mapping_anchor, mapping, 1)
 
-          method_anchor = '''    def source_root(self, repo: str) -> Path:
-          '''
-          classification_method = '''    def validate_fixture_classification(self) -> None:
-              has_manifest = (self.fixture / ".zpkg.toml").is_file()
-              declared_non_package = self.repo in NON_PACKAGE_REPOS
-              if has_manifest and declared_non_package:
-                  raise AssertionError(
-                      f"{self.repo} has .zpkg.toml but is listed in NON_PACKAGE_REPOS"
-                  )
-              if not has_manifest and not declared_non_package:
-                  raise AssertionError(
-                      f"{self.repo} has no .zpkg.toml and is not listed in NON_PACKAGE_REPOS"
-                  )
-
-          '''
+          method_anchor = '    def source_root(self, repo: str) -> Path:\n'
+          classification_method = "\n".join(
+              [
+                  '    def validate_fixture_classification(self) -> None:',
+                  '        has_manifest = (self.fixture / ".zpkg.toml").is_file()',
+                  '        declared_non_package = self.repo in NON_PACKAGE_REPOS',
+                  '        if has_manifest and declared_non_package:',
+                  '            raise AssertionError(',
+                  '                f"{self.repo} has .zpkg.toml but is listed in NON_PACKAGE_REPOS"',
+                  '            )',
+                  '        if not has_manifest and not declared_non_package:',
+                  '            raise AssertionError(',
+                  '                f"{self.repo} has no .zpkg.toml and is not listed in NON_PACKAGE_REPOS"',
+                  '            )',
+                  '',
+                  '',
+              ]
+          )
           if text.count(method_anchor) != 1:
               raise SystemExit('could not locate source_root method')
           text = text.replace(method_anchor, classification_method + method_anchor, 1)
 
-          main_anchor = '''        if args.repo in NON_PACKAGE_REPOS:
-          '''
-          main_replacement = '''        harness.validate_fixture_classification()
-              if args.repo in NON_PACKAGE_REPOS:
-          '''
+          main_anchor = '        if args.repo in NON_PACKAGE_REPOS:\n'
+          main_replacement = (
+              '        harness.validate_fixture_classification()\n'
+              '        if args.repo in NON_PACKAGE_REPOS:\n'
+          )
           if text.count(main_anchor) != 1:
               raise SystemExit('could not locate lifecycle classification branch')
           text = text.replace(main_anchor, main_replacement, 1)
