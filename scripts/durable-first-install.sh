@@ -87,7 +87,9 @@ copy_tree "$node_lib_source" "$publish_source"
     publish --skip-vcs-checks
 )
 
-test -f "$registry/zed-pkg-test/node-lib/1.0.0/metadata.json"
+test -f "$registry/packages/zed-pkg-test/node-lib/package.json"
+test -f "$registry/packages/zed-pkg-test/node-lib/versions/1.0.0.json"
+test -n "$(find "$registry/artifacts" -maxdepth 1 -type f -name '*.tar.gz' -print -quit)"
 
 install_durable() {
   local root="$1"
