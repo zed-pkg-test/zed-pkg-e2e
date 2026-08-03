@@ -2,8 +2,16 @@
 
 This repository tests deterministic Nix export planning outside the `zed-cli`
 implementation repository. `.zed-nix-plan-cli-ref` pins one exact 40-character
-CLI commit. The workflow builds that commit and runs it against clean copies of
-real `zed-pkg-test/node-lib` and `zed-pkg-test/polyglot-lib` fixtures.
+CLI commit. The workflow builds that commit and runs it against immutable clean
+checkouts of real `zed-pkg-test/node-lib` and `zed-pkg-test/polyglot-lib`
+fixtures on Ubuntu 24.04 and macOS 15.
+
+The candidate and fixture revisions are independent reviewed inputs:
+
+- `zed-pkg/zed-cli@71181c1f859f889829b0fc54183fc0d627983882`;
+- `zed-pkg-test/node-lib@222cdf57f48530fce8e6c1f58632d9676203512e`;
+- `zed-pkg-test/polyglot-lib@998964aa58e49595547650b4a8da407b7a2283a9`;
+- `zed-pkg/zed-interfaces@c2e049006453c26ca8ca291783f681fce75cb01f`.
 
 The canary proves:
 
@@ -25,9 +33,15 @@ The canary proves:
   and
 - different target payloads do not collapse to one artifact identity.
 
-The workflow has read-only repository permissions, uses commit-pinned actions,
+The workflow also verifies that the built CLI and both fixtures resolve to their
+exact pins, that Cargo uses the current immutable interface revision, and that
+all three checkouts remain clean after the canary.
+
+The workflow has top-level `contents: read`, uses only commit-pinned Actions,
 disables persisted checkout credentials, accepts only a full immutable manual
-CLI override, and uploads diagnostics only on failure.
+CLI override, grants no OIDC or package-write permission, and uploads bounded
+failure diagnostics only when an assertion fails. It rejects mutable fixture
+branch refs such as `main` in its own policy check.
 
 Before this canary merges to `main`, `.zed-nix-plan-cli-ref` must point to the
 final merged zed-cli planner commit. Scheduled or dispatch-driven certification
