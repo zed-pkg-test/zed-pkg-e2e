@@ -65,6 +65,25 @@ prepare_consumer() {
     "$destination/node_modules" \
     "$destination/target" \
     "$destination/__pycache__"
+
+  # The authored fixture manifests deliberately override [install].dir to
+  # `.vendor/.zed`. Once the Zed manifest is removed, the generated contract
+  # correctly defaults to `zed_modules`. Adapt only these disposable native
+  # manifests so their real applications consume that generated default.
+  case "$ecosystem" in
+    go)
+      perl -0pi -e \
+        's@\.vendor/\.zed/zed-pkg-test/go-lib@zed_modules/zed-pkg-test/go-lib@g' \
+        "$destination/go.mod"
+      ;;
+    rust)
+      perl -0pi -e \
+        's@\.vendor/\.zed/zed-pkg-test/rust-lib@zed_modules/zed-pkg-test/rust-lib@g' \
+        "$destination/Cargo.toml"
+      ;;
+    python) ;;
+  esac
+
   mkdir -p "$destination/deep/nested"
 }
 
@@ -104,25 +123,34 @@ run_native_consumer() {
 
 assert_package_shape() {
   local root="$1"
-  local installed="$root/.vendor/.zed/$package"
+  local installed="$root/zed_modules/$package"
   [[ -d "$installed" ]]
+  [[ -f "$root/.zed/paths.json" ]]
+  grep -Fq "zed_modules/$package" "$root/.zed/paths.json"
+
   case "$ecosystem" in
     go)
       [[ -f "$installed/go.mod" ]]
       [[ -f "$installed/greet.go" ]]
+      [[ -f "$root/.zed/go.work" ]]
+      grep -Fq "zed_modules/$package" "$root/.zed/go.work"
       ;;
     python)
       [[ -f "$installed/pyproject.toml" ]]
       [[ -f "$installed/python_lib/__init__.py" ]]
+      python_adapter_path "$root" | grep -Fq "zed_modules/$package"
       ;;
     rust)
       [[ -f "$installed/Cargo.toml" ]]
       [[ -f "$installed/src/lib.rs" ]]
+      [[ -f "$root/.zed/cargo-paths.toml" ]]
+      grep -Fq "zed_modules/$package" "$root/.zed/cargo-paths.toml"
       ;;
   esac
-  if find "$root/.vendor/.zed" -type l -print -quit | grep -q .; then
+
+  if find "$root/zed_modules" -type l -print -quit | grep -q .; then
     echo "copy-mode install contains a symlink: $root" >&2
-    find "$root/.vendor/.zed" -type l -print >&2
+    find "$root/zed_modules" -type l -print >&2
     exit 1
   fi
 }
@@ -202,7 +230,7 @@ cp "$explicit/.zpkg.lock" "$work_root/before-reinstall.lock"
 )
 test -f "$explicit/.zpkg.toml"
 test -f "$explicit/.zpkg.lock"
-test ! -e "$explicit/.vendor/.zed/$package"
+test ! -e "$explicit/zed_modules/$package"
 (
   cd "$explicit/deep/nested"
   "$zed" \
