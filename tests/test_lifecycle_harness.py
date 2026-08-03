@@ -5,6 +5,7 @@ import argparse
 import importlib.util
 import os
 import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -16,6 +17,7 @@ SPEC = importlib.util.spec_from_file_location("zed_lifecycle_harness", LIFECYCLE
 if SPEC is None or SPEC.loader is None:
     raise RuntimeError(f"could not load lifecycle harness from {LIFECYCLE_PATH}")
 LIFECYCLE = importlib.util.module_from_spec(SPEC)
+sys.modules[SPEC.name] = LIFECYCLE
 SPEC.loader.exec_module(LIFECYCLE)
 
 
