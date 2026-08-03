@@ -93,27 +93,24 @@ def write_package(root: Path, name: str, dependencies: Sequence[str]) -> None:
     (root / "payload.txt").write_text(f"{ORG}/{name}@{VERSION}\n", encoding="utf-8")
 
 
-def write_consumer(root: Path) -> None:
+def write_consumer(root: Path, dependencies: Sequence[str]) -> None:
     root.mkdir(parents=True, exist_ok=True)
-    (root / ".zpkg.toml").write_text(
-        "\n".join(
-            [
-                "[package]",
-                'org = "recursive-consumer"',
-                f'name = "{root.name}"',
-                'version = "0.1.0"',
-                "",
-                "[package.repository]",
-                'vcs = "git"',
-                'url = "https://example.invalid/recursive-consumer"',
-                "",
-                "[dependencies]",
-                f'"{ORG}/root" = "={VERSION}"',
-                "",
-            ]
-        ),
-        encoding="utf-8",
-    )
+    lines = [
+        "[package]",
+        'org = "recursive-consumer"',
+        f'name = "{root.name}"',
+        'version = "0.1.0"',
+        "",
+        "[package.repository]",
+        'vcs = "git"',
+        'url = "https://example.invalid/recursive-consumer"',
+        "",
+        "[dependencies]",
+    ]
+    for dependency in dependencies:
+        lines.append(f'"{ORG}/{dependency}" = "={VERSION}"')
+    lines.append("")
+    (root / ".zpkg.toml").write_text("\n".join(lines), encoding="utf-8")
 
 
 def zed_command(zed: Path, registry: Path, home: Path, *args: str) -> list[str | Path]:
@@ -127,19 +124,40 @@ def zed_command(zed: Path, registry: Path, home: Path, *args: str) -> list[str |
     ]
 
 
-def assert_lock_graph(consumer: Path) -> None:
+def package_keys(names: Sequence[str]) -> set[str]:
+    return {f"{ORG}/{name}" for name in names}
+
+
+def assert_manifest_dependencies(consumer: Path, expected_names: Sequence[str]) -> None:
+    with (consumer / ".zpkg.toml").open("rb") as handle:
+        document = tomllib.load(handle)
+    actual = set((document.get("dependencies") or {}).keys())
+    expected = package_keys(expected_names)
+    if actual != expected:
+        raise AssertionError(
+            f"manifest dependency mismatch: expected {sorted(expected)}, got {sorted(actual)}"
+        )
+
+
+def assert_lock_packages(consumer: Path, expected_names: Sequence[str]) -> None:
     with (consumer / ".zpkg.lock").open("rb") as handle:
         document = tomllib.load(handle)
     packages = document.get("package") or []
     actual = {f"{package['org']}/{package['name']}" for package in packages}
-    expected = {f"{ORG}/{name}" for name in PACKAGE_GRAPH}
+    expected = package_keys(expected_names)
     if actual != expected:
-        raise AssertionError(f"lock graph mismatch: expected {sorted(expected)}, got {sorted(actual)}")
+        raise AssertionError(
+            f"lock graph mismatch: expected {sorted(expected)}, got {sorted(actual)}"
+        )
 
 
-def assert_symlink_graph(consumer: Path, store_root: Path) -> dict[str, Path]:
+def assert_symlink_packages(
+    consumer: Path,
+    store_root: Path,
+    expected_names: Sequence[str],
+) -> dict[str, Path]:
     targets: dict[str, Path] = {}
-    for name in PACKAGE_GRAPH:
+    for name in expected_names:
         installed = consumer / "zed_modules" / ORG / name
         if not installed.is_symlink():
             raise AssertionError(f"default install did not symlink {installed}")
@@ -147,19 +165,64 @@ def assert_symlink_graph(consumer: Path, store_root: Path) -> dict[str, Path]:
         try:
             target.relative_to(store_root)
         except ValueError as error:
-            raise AssertionError(f"{installed} resolves outside the shared store: {target}") from error
+            raise AssertionError(
+                f"{installed} resolves outside the shared store: {target}"
+            ) from error
         if (target / "payload.txt").read_text(encoding="utf-8") != f"{ORG}/{name}@{VERSION}\n":
             raise AssertionError(f"unexpected payload for {installed}")
         targets[name] = target
     return targets
 
 
+def assert_not_materialized(consumer: Path, names: Sequence[str]) -> None:
+    for name in names:
+        installed = consumer / "zed_modules" / ORG / name
+        if installed.exists() or installed.is_symlink():
+            raise AssertionError(f"unexpected materialized package {installed}")
+
+
+def assert_artifact_home(home: Path, expected_count: int) -> None:
+    cache_files = sorted((home / "cache").glob("*.tar.gz"))
+    if len(cache_files) != expected_count:
+        raise AssertionError(
+            f"expected {expected_count} cached artifacts in {home}, got {cache_files}"
+        )
+    temporary_downloads = list((home / "cache").glob("**/artifact.download"))
+    if temporary_downloads:
+        raise AssertionError(
+            f"temporary downloads leaked into {home}: {temporary_downloads}"
+        )
+    lock_files = sorted((home / "locks").glob("artifact-*.lock"))
+    if len(lock_files) != expected_count:
+        raise AssertionError(
+            f"expected {expected_count} artifact lock files in {home}, got {lock_files}"
+        )
+
+
 def parse_prefetch(output: str) -> tuple[int, int, int]:
     matches = list(PREFETCH_RE.finditer(output))
     if len(matches) != 1:
-        raise AssertionError(f"expected one recursive prefetch summary, got {len(matches)}\n{output}")
+        raise AssertionError(
+            f"expected one recursive prefetch summary, got {len(matches)}\n{output}"
+        )
     match = matches[0]
-    return tuple(int(match.group(field)) for field in ("resolved", "concurrency", "downloaded"))
+    return tuple(
+        int(match.group(field))
+        for field in ("resolved", "concurrency", "downloaded")
+    )
+
+
+def assert_prefetch(
+    completed: Completed,
+    *,
+    resolved: int,
+    downloaded: int,
+) -> tuple[int, int, int]:
+    summary = parse_prefetch(completed.output)
+    expected = (resolved, 5, downloaded)
+    if summary != expected:
+        raise AssertionError(f"prefetch summary mismatch: expected {expected}, got {summary}")
+    return summary
 
 
 def main() -> int:
@@ -178,8 +241,12 @@ def main() -> int:
     registry = root / "registry"
     publish_home = root / "publish-home"
     shared_home = root / "shared-home"
+    add_home = root / "add-home"
+    remove_home = root / "remove-home"
     sources = root / "sources"
     consumers = [root / "consumer-a", root / "consumer-b"]
+    add_consumer = root / "consumer-add"
+    remove_consumer = root / "consumer-remove"
     registry.mkdir(parents=True)
 
     environment = os.environ.copy()
@@ -209,7 +276,7 @@ def main() -> int:
         require_success(completed)
 
     for consumer in consumers:
-        write_consumer(consumer)
+        write_consumer(consumer, ("root",))
 
     start = Barrier(3)
 
@@ -238,9 +305,13 @@ def main() -> int:
 
     summaries = [parse_prefetch(completed.output) for completed in completed_installs]
     if any(resolved != len(PACKAGE_GRAPH) for resolved, _, _ in summaries):
-        raise AssertionError(f"each recursive resolver must discover four packages: {summaries}")
+        raise AssertionError(
+            f"each recursive resolver must discover four packages: {summaries}"
+        )
     if any(concurrency != 5 for _, concurrency, _ in summaries):
-        raise AssertionError(f"installer did not honor five-worker concurrency: {summaries}")
+        raise AssertionError(
+            f"installer did not honor five-worker concurrency: {summaries}"
+        )
     if sum(downloaded for _, _, downloaded in summaries) != len(PACKAGE_GRAPH):
         raise AssertionError(
             "shared-home installs did not deduplicate downloads across processes: "
@@ -249,29 +320,75 @@ def main() -> int:
 
     first_targets: dict[str, Path] | None = None
     store_root = (shared_home / "store").resolve()
+    all_packages = tuple(PACKAGE_GRAPH)
     for consumer in consumers:
-        assert_lock_graph(consumer)
-        targets = assert_symlink_graph(consumer, store_root)
+        assert_manifest_dependencies(consumer, ("root",))
+        assert_lock_packages(consumer, all_packages)
+        targets = assert_symlink_packages(consumer, store_root, all_packages)
         if first_targets is None:
             first_targets = targets
         elif targets != first_targets:
             raise AssertionError(
                 f"consumers did not share identical store entries: {first_targets} != {targets}"
             )
+    assert_artifact_home(shared_home, len(PACKAGE_GRAPH))
 
-    cache_files = sorted((shared_home / "cache").glob("*.tar.gz"))
-    if len(cache_files) != len(PACKAGE_GRAPH):
-        raise AssertionError(f"expected four cached artifacts, got {cache_files}")
-    temporary_downloads = list((shared_home / "cache").glob("**/artifact.download"))
-    if temporary_downloads:
-        raise AssertionError(f"temporary downloads leaked into the cache: {temporary_downloads}")
+    # `zed add` installs against an in-memory proposed manifest before writing
+    # it. This must enter the same recursive prefetch facade as a normal install.
+    write_consumer(add_consumer, ())
+    add_completed = run(
+        zed_command(
+            zed,
+            registry,
+            add_home,
+            "add",
+            f"{ORG}/root@={VERSION}",
+        ),
+        cwd=add_consumer,
+        env=environment,
+    )
+    require_success(add_completed)
+    add_summary = assert_prefetch(
+        add_completed,
+        resolved=len(PACKAGE_GRAPH),
+        downloaded=len(PACKAGE_GRAPH),
+    )
+    assert_manifest_dependencies(add_consumer, ("root",))
+    assert_lock_packages(add_consumer, all_packages)
+    assert_symlink_packages(add_consumer, (add_home / "store").resolve(), all_packages)
+    assert_artifact_home(add_home, len(PACKAGE_GRAPH))
 
-    lock_files = sorted((shared_home / "locks").glob("artifact-*.lock"))
-    if len(lock_files) != len(PACKAGE_GRAPH):
-        raise AssertionError(f"expected one artifact lock file per hash, got {lock_files}")
+    # `zed remove` also installs an in-memory proposed manifest. Starting with
+    # root + left and removing root leaves left -> leaf, so exactly two packages
+    # should be recursively prefetched and materialized.
+    write_consumer(remove_consumer, ("root", "left"))
+    remove_completed = run(
+        zed_command(
+            zed,
+            registry,
+            remove_home,
+            "remove",
+            f"{ORG}/root",
+        ),
+        cwd=remove_consumer,
+        env=environment,
+    )
+    require_success(remove_completed)
+    remove_summary = assert_prefetch(remove_completed, resolved=2, downloaded=2)
+    assert_manifest_dependencies(remove_consumer, ("left",))
+    assert_lock_packages(remove_consumer, ("left", "leaf"))
+    assert_symlink_packages(
+        remove_consumer,
+        (remove_home / "store").resolve(),
+        ("left", "leaf"),
+    )
+    assert_not_materialized(remove_consumer, ("root", "right"))
+    assert_artifact_home(remove_home, 2)
 
     print("\nrecursive install e2e passed", flush=True)
-    print(f"prefetch summaries: {summaries}", flush=True)
+    print(f"concurrent install summaries: {summaries}", flush=True)
+    print(f"add summary: {add_summary}", flush=True)
+    print(f"remove summary: {remove_summary}", flush=True)
     print(f"shared store: {store_root}", flush=True)
     return 0
 
