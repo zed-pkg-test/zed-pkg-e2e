@@ -23,9 +23,11 @@ state.
 ## Full lifecycle matrix
 
 `.github/workflows/lifecycle.yml` covers all 22 repositories in the organization:
-20 package fixtures plus the deliberately non-package `shared-schema` repository
-and this orchestration repository as fail-closed negative cases. Workspace
-members and polyglot target packages are expanded and tested independently.
+21 package fixtures plus this orchestration repository as the one fail-closed
+negative case. `shared-schema` is a real language-neutral Zed package and is
+also seeded recursively when Python or polyglot consumers declare
+`zedtest/shared-schema`. Workspace members and polyglot target packages are
+expanded and tested independently.
 
 Each matrix job starts with an empty runner directory and owns its own registry,
 zed home, dependency clones, R2G workspace, consumers, lockfiles, and diagnostic
@@ -53,6 +55,11 @@ example, an app fixture first publishes its library fixture to the job-local
 registry; `workspace-monorepo` is exercised as the root plus `ws-core`,
 `ws-utils`, and `ws-cli`; and one polyglot source publication is checked through
 each derived target package.
+
+The lightweight `.github/workflows/lifecycle-harness-contract.yml` gate compiles
+the Python harness and unit-tests repository classification, dependency-section
+normalization, and dependency-source metadata before the full matrix has to
+exercise those mappings against live fixture repositories.
 
 The workflow uses read-only repository permissions, disables persisted checkout
 credentials, pins third-party actions and zed components to immutable commit
