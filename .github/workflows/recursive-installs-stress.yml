@@ -9,14 +9,14 @@ on:
       zed_cli_ref:
         description: Immutable zed-cli commit to test
         required: false
-        default: c2e7fa8f7f4ea5a0acbdb51d6b4ac34f46b406ea
+        default: 3a36b527de3264f616b32b84a2ca35bec554aaac
 
 permissions:
   contents: read
 
 concurrency:
   group: recursive-install-stress-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  cancel-in-progress: true
 
 defaults:
   run:
@@ -25,7 +25,7 @@ defaults:
 env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: "1"
-  ZED_CLI_REF: ${{ github.event.inputs.zed_cli_ref || 'c2e7fa8f7f4ea5a0acbdb51d6b4ac34f46b406ea' }}
+  ZED_CLI_REF: ${{ github.event.inputs.zed_cli_ref || '3a36b527de3264f616b32b84a2ca35bec554aaac' }}
   ZED_INTERFACES_REF: dc0e0a0620b9462817950b552d3d334a184b1cb1
 
 jobs:
