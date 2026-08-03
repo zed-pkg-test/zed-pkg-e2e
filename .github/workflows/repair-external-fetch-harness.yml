@@ -1,0 +1,160 @@
+name: one-shot external fetch harness repair
+
+on:
+  push:
+    branches:
+      - agent/den-1436-external-fetch-canary
+    paths:
+      - .github/workflows/repair-external-fetch-harness.yml
+
+permissions:
+  contents: write
+
+concurrency:
+  group: one-shot-external-fetch-harness-repair-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  apply:
+    if: github.ref == 'refs/heads/agent/den-1436-external-fetch-canary'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: agent/den-1436-external-fetch-canary
+          persist-credentials: true
+          fetch-depth: 0
+          show-progress: false
+
+      - name: Repair package mapping, immutable fixture provenance, and pins
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          lifecycle = Path('scripts/lifecycle.py')
+          source = lifecycle.read_text(encoding='utf-8')
+          old_non_packages = 'NON_PACKAGE_REPOS = {"shared-schema", "zed-pkg-e2e"}'
+          new_non_packages = 'NON_PACKAGE_REPOS = {"zed-pkg-e2e"}'
+          if source.count(old_non_packages) != 1:
+              raise SystemExit('expected one stale shared-schema non-package classification')
+          source = source.replace(old_non_packages, new_non_packages)
+          anchor = '    "zed-pkg-test/gleam-lib": ("gleam-lib", "."),\n'
+          mapping = '    "zedtest/shared-schema": ("shared-schema", "."),\n'
+          if source.count(anchor) != 1 or mapping in source:
+              raise SystemExit('unexpected shared-schema mapping state')
+          source = source.replace(anchor, anchor + mapping)
+          lifecycle.write_text(source, encoding='utf-8')
+
+          canary = Path('scripts/frozen_fetch_canary.py')
+          source = canary.read_text(encoding='utf-8')
+          old_publish = '''    assert_git_clean(fixture)
+          zed_cmd(
+              "publish",
+              "--skip-vcs-checks",
+              cwd=fixture,
+              home=publish_home,
+          )
+          assert_git_clean(fixture)
+          '''
+          new_publish = '''    assert_git_clean(fixture)
+          fixture_commit = run(["git", "rev-parse", "HEAD"], cwd=fixture).strip()
+          tag_format = str((manifest.get("publish") or {}).get("tag_format") or "v{version}")
+          fixture_tag = tag_format.format(version=version)
+          run(["git", "tag", fixture_tag, fixture_commit], cwd=fixture)
+          zed_cmd(
+              "publish",
+              cwd=fixture,
+              home=publish_home,
+          )
+          metadata_path = (
+              registry / "packages" / org / name / "versions" / f"{version}.json"
+          )
+          metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+          if metadata.get("vcs_tag") != fixture_tag:
+              raise AssertionError("published fixture retained the wrong VCS tag")
+          if metadata.get("vcs_commit") != fixture_commit:
+              raise AssertionError("published fixture retained the wrong VCS commit")
+          assert_git_clean(fixture)
+          '''
+          if source.count(old_publish) != 1:
+              raise SystemExit('expected one skip-vcs external publisher')
+          source = source.replace(old_publish, new_publish)
+
+          old_lock = '''    lock = consumer / ".zpkg.lock"
+          lock_bytes = lock.read_bytes()
+          if not (consumer / "zed_modules" / org / name / ".zpkg.toml").is_file():
+          '''
+          new_lock = '''    lock = consumer / ".zpkg.lock"
+          lock_bytes = lock.read_bytes()
+          lock_data = tomllib.loads(lock_bytes.decode("utf-8"))
+          locked_packages = lock_data.get("packages") or []
+          if len(locked_packages) != 1:
+              raise AssertionError(f"expected one locked package: {locked_packages!r}")
+          locked = locked_packages[0]
+          for field in (
+              "org",
+              "name",
+              "version",
+              "sha256",
+              "size",
+              "format",
+              "vcs_tag",
+              "vcs_commit",
+          ):
+              if locked.get(field) != metadata.get(field):
+                  raise AssertionError(
+                      f"generated lock {field} differs from registry metadata"
+                  )
+          if not (consumer / "zed_modules" / org / name / ".zpkg.toml").is_file():
+          '''
+          if source.count(old_lock) != 1:
+              raise SystemExit('expected one ordinary install lock boundary')
+          source = source.replace(old_lock, new_lock)
+          canary.write_text(source, encoding='utf-8')
+
+          workflow = Path('.github/workflows/lifecycle.yml')
+          source = workflow.read_text(encoding='utf-8')
+          old_interface = '  ZED_INTERFACES_REF: dc0e0a0620b9462817950b552d3d334a184b1cb1'
+          new_interface = '  ZED_INTERFACES_REF: c2e049006453c26ca8ca291783f681fce75cb01f'
+          if source.count(old_interface) != 1:
+              raise SystemExit('expected the retired interface pin once')
+          source = source.replace(old_interface, new_interface)
+          old_fixture = '''          repository: zed-pkg-test/node-lib
+          ref: main
+          path: fixture'''
+          new_fixture = '''          repository: zed-pkg-test/node-lib
+          ref: 222cdf57f48530fce8e6c1f58632d9676203512e
+          path: fixture'''
+          if source.count(old_fixture) != 1:
+              raise SystemExit('expected one mutable external node fixture')
+          source = source.replace(old_fixture, new_fixture)
+          workflow.write_text(source, encoding='utf-8')
+          PY
+
+          python3 -m py_compile \
+            scripts/lifecycle.py \
+            scripts/frozen_fetch_canary.py \
+            scripts/frozen_fetch_output_boundaries.py
+          git diff --check
+          grep -F '"zedtest/shared-schema": ("shared-schema", ".")' scripts/lifecycle.py
+          grep -F 'git", "tag", fixture_tag' scripts/frozen_fetch_canary.py
+          grep -F 'ZED_INTERFACES_REF: c2e049006453c26ca8ca291783f681fce75cb01f' .github/workflows/lifecycle.yml
+          grep -F 'ref: 222cdf57f48530fce8e6c1f58632d9676203512e' .github/workflows/lifecycle.yml
+          ! grep -F -- 'publish", "--skip-vcs-checks"' scripts/frozen_fetch_canary.py
+
+      - name: Commit the harness repair and remove this workflow
+        shell: bash
+        run: |
+          set -euo pipefail
+          git rm .github/workflows/repair-external-fetch-harness.yml
+          git add \
+            .github/workflows/lifecycle.yml \
+            scripts/lifecycle.py \
+            scripts/frozen_fetch_canary.py
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'test(DEN-1436): repair immutable external fetch lifecycle coverage'
+          git push origin HEAD:agent/den-1436-external-fetch-canary
