@@ -1,0 +1,67 @@
+name: apply org workspace install coverage
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - .github/augment_org_workspace_installs.py
+      - .github/workflows/apply-org-workspace-coverage.yml
+  push:
+    branches:
+      - agent/recursive-install-e2e
+    paths:
+      - .github/augment_org_workspace_installs.py
+      - .github/workflows/apply-org-workspace-coverage.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: apply-org-workspace-install-coverage-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  apply:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - name: Check out E2E branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: agent/recursive-install-e2e
+          fetch-depth: 0
+          persist-credentials: false
+          show-progress: false
+
+      - name: Apply and validate workspace coverage
+        run: |
+          set -euo pipefail
+          python3 .github/augment_org_workspace_installs.py
+          python3 -m py_compile scripts/org_app_installs.py
+          grep -F 'frozen workspace repair accessed registry artifacts' scripts/org_app_installs.py
+          grep -F 'does not satisfy `^2`' scripts/org_app_installs.py
+          grep -F 'workspace copy mode leaked symlinks' scripts/org_app_installs.py
+          git diff --check
+
+      - name: Publish validated workspace coverage
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          git add scripts/org_app_installs.py
+          git diff --cached --check
+          if git diff --cached --quiet; then
+            echo 'workspace coverage already published'
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'test: harden workspace install and frozen repair coverage'
+          git push \
+            "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" \
+            HEAD:agent/recursive-install-e2e
