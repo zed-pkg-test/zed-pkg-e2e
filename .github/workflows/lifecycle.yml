@@ -9,7 +9,7 @@ on:
       zed_cli_ref:
         description: Immutable zed-cli commit to test
         required: false
-        default: 8929a58c6591c7a964d7f91412665d7c8a4afdf3
+        default: 741c21f512dd7e98a5f9786b90d3fb0c8696c80a
   repository_dispatch:
     types: [fixture-updated]
   schedule:
@@ -29,7 +29,9 @@ defaults:
 env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: "1"
-  ZED_CLI_REF: ${{ github.event.inputs.zed_cli_ref || '8929a58c6591c7a964d7f91412665d7c8a4afdf3' }}
+  # Validation pin for zed-pkg/zed-cli#47. Keep immutable; replace with the
+  # final reviewed/merged commit before this canary lands on main.
+  ZED_CLI_REF: ${{ github.event.inputs.zed_cli_ref || '741c21f512dd7e98a5f9786b90d3fb0c8696c80a' }}
   ZED_INTERFACES_REF: dc0e0a0620b9462817950b552d3d334a184b1cb1
 
 jobs:
@@ -93,6 +95,81 @@ jobs:
           path: ${{ runner.temp }}/zed-bin
           if-no-files-found: error
           retention-days: 7
+          include-hidden-files: false
+
+  frozen-fetch-canary:
+    name: External frozen fetch bundle
+    needs: build-zed
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Check out lifecycle harness
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: harness
+          fetch-depth: 1
+          persist-credentials: false
+          show-progress: false
+
+      - name: Check out a real package fixture
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: zed-pkg-test/node-lib
+          ref: main
+          path: fixture
+          fetch-depth: 1
+          persist-credentials: false
+          show-progress: false
+
+      - name: Download immutable zed binary
+        uses: actions/download-artifact@974686ed5098c7f9c9289ec946b9058e496a2561 # v8.0.0
+        with:
+          name: zed-cli-${{ github.run_id }}-${{ github.run_attempt }}
+          path: tooling
+
+      - name: Verify binary checksum and fresh work root
+        env:
+          WORK_ROOT: ${{ runner.temp }}/zed-frozen-fetch-canary
+        run: |
+          set -euo pipefail
+          chmod +x tooling/zed
+          (cd tooling && sha256sum --check SHA256SUMS)
+          test ! -e "$WORK_ROOT"
+          tooling/zed --version
+
+      - name: Publish, lock, uninstall, fetch, replay, and reject tampering
+        env:
+          WORK_ROOT: ${{ runner.temp }}/zed-frozen-fetch-canary
+        run: |
+          set -euo pipefail
+          python3 harness/scripts/frozen_fetch_canary.py \
+            --fixture-dir fixture \
+            --zed tooling/zed \
+            --work-root "$WORK_ROOT"
+
+      - name: Collect failure diagnostics
+        if: failure()
+        env:
+          WORK_ROOT: ${{ runner.temp }}/zed-frozen-fetch-canary
+        run: |
+          set +e
+          mkdir -p "$WORK_ROOT/diagnostics"
+          git -C fixture status --porcelain=v1 --untracked-files=all \
+            > "$WORK_ROOT/diagnostics/fixture-status.txt" 2>&1
+          find "$WORK_ROOT" -maxdepth 10 -printf '%y %P -> %l\n' \
+            | LC_ALL=C sort > "$WORK_ROOT/diagnostics/work-tree.txt" 2>&1
+          find "$WORK_ROOT/registry" -maxdepth 8 -type f -print0 2>/dev/null \
+            | sort -z | xargs -0 -r sha256sum \
+            > "$WORK_ROOT/diagnostics/registry-sha256.txt" 2>&1
+
+      - name: Upload failure diagnostics
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: frozen-fetch-diagnostics-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/zed-frozen-fetch-canary/diagnostics
+          if-no-files-found: warn
+          retention-days: 14
           include-hidden-files: false
 
   lifecycle:
@@ -202,16 +279,19 @@ jobs:
   lifecycle-gate:
     name: All fixture lifecycles passed
     if: always()
-    needs: [build-zed, lifecycle]
+    needs: [build-zed, frozen-fetch-canary, lifecycle]
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
       - name: Enforce aggregate result
         env:
           BUILD_RESULT: ${{ needs.build-zed.result }}
+          FETCH_RESULT: ${{ needs.frozen-fetch-canary.result }}
           MATRIX_RESULT: ${{ needs.lifecycle.result }}
         run: |
           set -euo pipefail
-          printf 'build-zed=%s\nlifecycle=%s\n' "$BUILD_RESULT" "$MATRIX_RESULT"
+          printf 'build-zed=%s\nfrozen-fetch=%s\nlifecycle=%s\n' \
+            "$BUILD_RESULT" "$FETCH_RESULT" "$MATRIX_RESULT"
           test "$BUILD_RESULT" = success
+          test "$FETCH_RESULT" = success
           test "$MATRIX_RESULT" = success
