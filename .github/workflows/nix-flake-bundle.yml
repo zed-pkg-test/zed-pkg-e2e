@@ -253,14 +253,14 @@ jobs:
               value = match.group(1)
               assert re.search(r'@[0-9a-f]{40}$', value), value
           for forbidden in (
-              'contents: write',
-              'pull_request_target:',
-              'secrets: inherit',
-              'git push',
-              'id-token: write',
-              'packages: write',
-              'reqwest::',
-              'Command::new',
+              'contents' + ': write',
+              'pull_request' + '_target:',
+              'secrets' + ': inherit',
+              'git' + ' push',
+              'id-token' + ': write',
+              'packages' + ': write',
+              'reqwest' + '::',
+              'Command' + '::new',
           ):
               assert forbidden not in workflow + '\n' + rust, forbidden
           PY
