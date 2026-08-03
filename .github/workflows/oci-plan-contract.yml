@@ -12,7 +12,7 @@ on:
       zed_cli_ref:
         description: Exact 40-character zed-pkg/zed-cli candidate commit
         required: true
-        default: 04905c6b28db24539d17a4ab42d9a6dbb5bd347d
+        default: a5d002b1c3c9dd451c1a201e2aea97cacc0f6e53
         type: string
 
 permissions:
@@ -30,7 +30,7 @@ env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: "1"
   HARNESS_REF: ${{ github.event.pull_request.head.sha || github.sha }}
-  ZED_CLI_REF: ${{ inputs.zed_cli_ref || '04905c6b28db24539d17a4ab42d9a6dbb5bd347d' }}
+  ZED_CLI_REF: ${{ inputs.zed_cli_ref || 'a5d002b1c3c9dd451c1a201e2aea97cacc0f6e53' }}
   NODE_LIB_REF: 2d41e658a382fdff27ef87a0db24dbaff280a685
   NODE_APP_REF: ef794674647b3620e711f4f855865f8ad3340498
   POLYGLOT_LIB_REF: e62ceb6337324a294d4fc861692a267ff0db97d0
