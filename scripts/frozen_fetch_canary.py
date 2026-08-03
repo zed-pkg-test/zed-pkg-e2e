@@ -167,14 +167,25 @@ def main() -> int:
             extra_env=extra_env,
         )
 
+    # Strict frozen fetch requires the registry record and lock to agree on
+    # real VCS provenance. The external checkout deliberately does not fetch
+    # tags, so create the manifest-derived release tag locally at the exact
+    # checked-out commit instead of using the publish escape hatch.
     assert_git_clean(fixture)
-    zed_cmd(
-        "publish",
-        "--skip-vcs-checks",
-        cwd=fixture,
-        home=publish_home,
+    release_tag = f"v{version}"
+    fixture_commit = run(["git", "rev-parse", "HEAD"], cwd=fixture).strip()
+    run(["git", "tag", release_tag, fixture_commit], cwd=fixture)
+    zed_cmd("publish", cwd=fixture, home=publish_home)
+    assert_git_clean(fixture)
+
+    registry_metadata_path = (
+        registry / "packages" / org / name / "versions" / f"{version}.json"
     )
-    assert_git_clean(fixture)
+    registry_metadata = json.loads(registry_metadata_path.read_text(encoding="utf-8"))
+    if registry_metadata.get("vcs_tag") != release_tag:
+        raise AssertionError("registry did not retain the exact release tag")
+    if registry_metadata.get("vcs_commit") != fixture_commit:
+        raise AssertionError("registry did not retain the exact source commit")
 
     consumer = root / "consumer"
     write_consumer_manifest(consumer, org, name, version)
@@ -190,6 +201,16 @@ def main() -> int:
     )
     lock = consumer / ".zpkg.lock"
     lock_bytes = lock.read_bytes()
+    with lock.open("rb") as handle:
+        lock_data = tomllib.load(handle)
+    locked_packages = lock_data.get("package", [])
+    if len(locked_packages) != 1:
+        raise AssertionError(f"expected one canonical lock entry: {locked_packages!r}")
+    locked = locked_packages[0]
+    if locked.get("vcs_tag") != release_tag:
+        raise AssertionError("lock did not preserve the registry release tag")
+    if locked.get("vcs_commit") != fixture_commit:
+        raise AssertionError("lock did not preserve the registry source commit")
     if not (consumer / "zed_modules" / org / name / ".zpkg.toml").is_file():
         raise AssertionError("normal install did not materialize the published fixture")
 
@@ -250,6 +271,10 @@ def main() -> int:
     digest = str(fetched.get("sha256") or "")
     if not re.fullmatch(r"[0-9a-f]{64}", digest):
         raise AssertionError(f"invalid artifact digest in fetch index: {digest!r}")
+    if fetched.get("vcs_tag") != release_tag:
+        raise AssertionError("fetch index did not preserve the release tag")
+    if fetched.get("vcs_commit") != fixture_commit:
+        raise AssertionError("fetch index did not preserve the source commit")
     if fetched.get("source_kind") != "file":
         raise AssertionError(f"wrong source classification: {fetched!r}")
     payload = first / "packages" / digest / "pkg"
@@ -350,6 +375,8 @@ def main() -> int:
             {
                 "result": "PASS",
                 "package": f"{org}/{name}@{version}",
+                "vcs_tag": release_tag,
+                "vcs_commit": fixture_commit,
                 "artifact_sha256": digest,
                 "bundle_files": len(tree_digest(first)),
             },
