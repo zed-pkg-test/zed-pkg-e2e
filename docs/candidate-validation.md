@@ -65,7 +65,7 @@ inherit publication credentials.
 ## Initial candidate rollout
 
 The initial rollout exercises `zed-pkg/zed-cli#36` at
-`73e7d818741acb6d33ddfa5f5617ac7d0583865b`, with
+`3a91d64abf1fc0bdee6eab2ff804113b1429849f`, with
 `zed-pkg/zed-interfaces` pinned to
 `dc0e0a0620b9462817950b552d3d334a184b1cb1`.
 
@@ -75,9 +75,14 @@ build, checksum verification, and non-package refusal passed, while every
 package fixture independently exposed the same product regression: a frozen
 install moved `.zpkg.lock` into transaction staging and committed without
 rewriting it. The candidate now checkpoints that lockfile while leaving the
-source bytes visible and adds exact-byte commit and rollback tests. The smoke
-workflow is repinned to the fixed candidate; a successful rerun is still
-required before the candidate is treated as passing.
+source bytes visible and adds exact-byte commit and rollback tests.
+
+The first fixed-candidate rerun, `30786757858`, stopped before fixture execution
+because `cargo fmt --check` found the new transaction source lacked its final
+newline. That formatting defect was corrected without changing the lockfile
+semantics. The smoke workflow is now repinned to the formatted candidate above;
+a successful matrix rerun is still required before the candidate is treated as
+passing.
 
 Record the smoke workflow run and any later lifecycle, browser, and
 install-boundary runs on the owning Linear issue. A smoke failure must be
