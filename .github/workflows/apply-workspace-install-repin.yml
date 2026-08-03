@@ -1,0 +1,73 @@
+name: apply workspace install head repin
+
+on:
+  push:
+    branches:
+      - agent/recursive-install-e2e
+    paths:
+      - .github/repin_workspace_install_head.py
+      - .github/workflows/apply-workspace-install-repin.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: apply-workspace-install-head-repin
+  cancel-in-progress: true
+
+jobs:
+  repin:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - name: Check out E2E branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: agent/recursive-install-e2e
+          fetch-depth: 0
+          persist-credentials: false
+          show-progress: false
+
+      - name: Apply and validate immutable pins
+        run: |
+          set -euo pipefail
+          python3 .github/repin_workspace_install_head.py
+          python3 - <<'PY'
+          from pathlib import Path
+          pin = "56e597b35deccc82bff7deee807f459a1def537d"
+          for path in [
+              Path(".github/workflows/recursive-installs.yml"),
+              Path(".github/workflows/recursive-installs-stress.yml"),
+              Path(".github/workflows/install-recovery.yml"),
+              Path(".github/workflows/org-app-installs.yml"),
+          ]:
+              text = path.read_text()
+              assert text.count(pin) == 2, (path, text.count(pin))
+          PY
+          git diff --check
+
+      - name: Publish the validated workflow pins
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          git add \
+            .github/workflows/recursive-installs.yml \
+            .github/workflows/recursive-installs-stress.yml \
+            .github/workflows/install-recovery.yml \
+            .github/workflows/org-app-installs.yml
+          git diff --cached --check
+          if git diff --cached --quiet; then
+            echo 'workspace implementation head already pinned'
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'test: pin workspace install implementation'
+          git push \
+            "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" \
+            HEAD:agent/recursive-install-e2e
