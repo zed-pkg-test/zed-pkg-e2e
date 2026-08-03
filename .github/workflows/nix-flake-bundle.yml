@@ -87,8 +87,8 @@ jobs:
         run: |
           set -euo pipefail
           test "$(git -C zed-cli rev-parse HEAD)" = "${{ steps.pin.outputs.ref }}"
-          grep -F 'rev = "625ba7bdf4339df7d0880f791a0715ca894558fe"' zed-cli/Cargo.toml
-          grep -F '#625ba7bdf4339df7d0880f791a0715ca894558fe' zed-cli/Cargo.lock
+          grep -F 'rev = "c2e049006453c26ca8ca291783f681fce75cb01f"' zed-cli/Cargo.toml
+          grep -F '#c2e049006453c26ca8ca291783f681fce75cb01f' zed-cli/Cargo.lock
           cargo fmt --all --check --manifest-path zed-cli/Cargo.toml
           python3 -m py_compile harness/scripts/verify_nix_flake_bundle_canary.py
 
