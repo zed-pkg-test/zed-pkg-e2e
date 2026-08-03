@@ -38,6 +38,7 @@ PACKAGE_SOURCES: dict[str, tuple[str, str]] = {
     "zedtest/polyglot-lib-python": ("polyglot-lib", "."),
     "zedtest/polyglot-lib-golang": ("polyglot-lib", "."),
     "zedtest/polyglot-lib-rust": ("polyglot-lib", "."),
+    "zedtest/shared-schema": ("shared-schema", "."),
     "zedtest/ws-core": ("workspace-monorepo", "packages/core"),
     "zedtest/ws-utils": ("workspace-monorepo", "packages/utils"),
     "zedtest/ws-cli": ("workspace-monorepo", "apps/cli"),
@@ -173,6 +174,33 @@ class Harness:
         if output.strip():
             raise AssertionError(f"{label} was mutated by lifecycle tests:\n{output}")
 
+    def remove_generated_pack_output(self, source: Path) -> None:
+        """Remove only the documented publish scratch directory.
+
+        `zed publish` writes its deterministic archive below `.zed/pack` even
+        when the registry is isolated. Some fixtures ignore that directory and
+        some intentionally do not. Cleaning this exact generated path keeps the
+        source-mutation assertion portable without hiding any other `.zed`
+        output or any tracked-file mutation.
+        """
+
+        pack_dir = source / ".zed" / "pack"
+        if pack_dir.is_symlink():
+            raise AssertionError(f"refusing to remove symlinked pack path: {pack_dir}")
+        if pack_dir.exists():
+            if not pack_dir.is_dir():
+                raise AssertionError(f"generated pack path is not a directory: {pack_dir}")
+            shutil.rmtree(pack_dir)
+
+        zed_dir = source / ".zed"
+        if zed_dir.is_dir():
+            try:
+                zed_dir.rmdir()
+            except OSError:
+                # Preserve and surface any unrelated `.zed` output through the
+                # normal git-clean assertion below.
+                pass
+
     def source_root(self, repo: str) -> Path:
         if repo == self.repo:
             return self.fixture
@@ -226,6 +254,7 @@ class Harness:
         self.published_sources.add(key)
         for output in expected_packages(manifest):
             assert_registry_version(self.registry, output)
+        self.remove_generated_pack_output(source)
         self.assert_git_clean(self.source_root(repo), f"seed source {repo}")
 
     def seed_dependencies(self, manifest: dict) -> None:
@@ -331,6 +360,7 @@ class Harness:
             raise AssertionError(
                 f"second publish changed registry bytes for {full_name}"
             )
+        self.remove_generated_pack_output(unit)
 
         for output_index, output in enumerate(outputs):
             self.exercise_consumer(output, index, output_index)
