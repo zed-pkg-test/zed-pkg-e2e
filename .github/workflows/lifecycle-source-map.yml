@@ -17,6 +17,9 @@ defaults:
   run:
     shell: bash
 
+env:
+  PYTHONDONTWRITEBYTECODE: "1"
+
 jobs:
   source-map:
     name: Package classification and live dependency map
@@ -61,15 +64,22 @@ jobs:
           persist-credentials: false
           show-progress: false
 
-      - name: Compile and run source-map contract
+      - name: Parse and run source-map contract
         env:
           FIXTURE_ROOT: ${{ github.workspace }}/fixtures
         run: |
           set -euo pipefail
-          python3 -m py_compile \
-            harness/scripts/lifecycle.py \
-            harness/tests/test_lifecycle_source_map.py
-          python3 harness/tests/test_lifecycle_source_map.py -v 2>&1 \
+          python3 - <<'PY'
+          from pathlib import Path
+
+          for raw in (
+              "harness/scripts/lifecycle.py",
+              "harness/tests/test_lifecycle_source_map.py",
+          ):
+              path = Path(raw)
+              compile(path.read_text(encoding="utf-8"), str(path), "exec")
+          PY
+          python3 -B harness/tests/test_lifecycle_source_map.py -v 2>&1 \
             | tee "$RUNNER_TEMP/lifecycle-source-map-test.log"
 
       - name: Verify read-only fixture state
