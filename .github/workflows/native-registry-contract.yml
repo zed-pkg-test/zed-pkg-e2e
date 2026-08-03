@@ -9,7 +9,7 @@ on:
       zed_interfaces_ref:
         description: Immutable zed-interfaces commit to certify
         required: false
-        default: 8a9b51f63e682edaf8f709db4a679a3a493fe334
+        default: 8bcbcbe9377760c9a8843b75daff54e92c1bf6d2
 
 permissions:
   contents: read
@@ -25,7 +25,7 @@ defaults:
 env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: "1"
-  ZED_INTERFACES_REF: ${{ github.event.inputs.zed_interfaces_ref || '8a9b51f63e682edaf8f709db4a679a3a493fe334' }}
+  ZED_INTERFACES_REF: ${{ github.event.inputs.zed_interfaces_ref || '8bcbcbe9377760c9a8843b75daff54e92c1bf6d2' }}
 
 jobs:
   native-registry-contract:
@@ -70,6 +70,7 @@ jobs:
           cd zed-interfaces
           cargo run --locked --example generate_schemas
           test -s schemas/native-registry-adapter-record.json
+          git diff --exit-code -- schemas/native-registry-adapter-record.json
           sha256sum schemas/native-registry-adapter-record.json \
             | tee "$RUNNER_TEMP/native-registry-schema.sha256"
           cp schemas/native-registry-adapter-record.json \
@@ -104,18 +105,11 @@ jobs:
               raise SystemExit(f"schema is missing public contract tokens: {missing}")
           PY
 
-      - name: Format disposable checkout and run complete gates
+      - name: Run complete zed-interfaces gates
         run: |
           set -euo pipefail
           cd zed-interfaces
-          cargo fmt --all
-          evidence="$RUNNER_TEMP/native-registry-contract-evidence/formatted"
-          mkdir -p "$evidence/src" "$evidence/examples" "$evidence/tests"
-          cp src/native_registry.rs "$evidence/src/native_registry.rs"
-          cp src/lib.rs "$evidence/src/lib.rs"
-          cp examples/generate_schemas.rs "$evidence/examples/generate_schemas.rs"
-          cp tests/native_registry_schema_contract.rs \
-            "$evidence/tests/native_registry_schema_contract.rs"
+          cargo fmt --all -- --check
           cargo test --locked --all-targets
           cargo clippy --locked --all-targets --all-features -- -D warnings
           git diff --check
