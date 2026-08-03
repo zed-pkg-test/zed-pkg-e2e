@@ -1,0 +1,55 @@
+name: materialize DEN-1439 hardening v2
+
+on:
+  pull_request:
+    paths:
+      - .github/workflows/materialize-den1439-v2.yml
+
+permissions:
+  contents: read
+
+jobs:
+  materialize:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - name: Check out immutable zed CLI feature head
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: zed-pkg/zed-cli
+          ref: f019e1ac2b3cbe271df19372773b6b65f7a8de70
+          path: zed-cli
+          fetch-depth: 1
+          persist-credentials: false
+          show-progress: false
+
+      - name: Install Rust validation toolchain
+        run: |
+          set -euo pipefail
+          rustup toolchain install stable --profile minimal --component rustfmt,clippy
+          rustup default stable
+
+      - name: Materialize and validate normalized manager state
+        working-directory: zed-cli
+        run: |
+          set -euo pipefail
+          python .github/scripts/den1439_normalize.py
+          python .github/scripts/den1439_require_checksums.py
+          python .github/scripts/den1439_fix_shadow.py
+          cargo fmt
+          cargo test --locked --lib environment::tests
+          cargo test --locked --test mise_environment_cli
+          cargo clippy --locked --all-targets -- -D warnings
+          git diff -- src/environment.rs > generated-environment.diff
+          test -s generated-environment.diff
+
+      - name: Upload exact validated source
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: den-1439-validated-environment-source-v2
+          path: |
+            zed-cli/src/environment.rs
+            zed-cli/generated-environment.diff
+          if-no-files-found: error
+          retention-days: 1
+          include-hidden-files: false
