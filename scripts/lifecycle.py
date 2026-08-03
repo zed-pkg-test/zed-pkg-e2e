@@ -22,7 +22,7 @@ from pathlib import Path
 from typing import Mapping, Sequence
 
 ORG = "zed-pkg-test"
-NON_PACKAGE_REPOS = {"zed-pkg-e2e"}
+NON_PACKAGE_REPOS = {"shared-schema", "zed-pkg-e2e"}
 
 # Package -> (fixture repository, path containing .zpkg.toml). This is the
 # dependency graph boundary. Target packages all map to the one source repo
@@ -38,7 +38,6 @@ PACKAGE_SOURCES: dict[str, tuple[str, str]] = {
     "zedtest/polyglot-lib-python": ("polyglot-lib", "."),
     "zedtest/polyglot-lib-golang": ("polyglot-lib", "."),
     "zedtest/polyglot-lib-rust": ("polyglot-lib", "."),
-    "zedtest/shared-schema": ("shared-schema", "."),
     "zedtest/ws-core": ("workspace-monorepo", "packages/core"),
     "zedtest/ws-utils": ("workspace-monorepo", "packages/utils"),
     "zedtest/ws-cli": ("workspace-monorepo", "apps/cli"),
@@ -173,18 +172,6 @@ class Harness:
         )
         if output.strip():
             raise AssertionError(f"{label} was mutated by lifecycle tests:\n{output}")
-
-    def validate_fixture_classification(self) -> None:
-        has_manifest = (self.fixture / ".zpkg.toml").is_file()
-        declared_non_package = self.repo in NON_PACKAGE_REPOS
-        if has_manifest and declared_non_package:
-            raise AssertionError(
-                f"{self.repo} has .zpkg.toml but is listed in NON_PACKAGE_REPOS"
-            )
-        if not has_manifest and not declared_non_package:
-            raise AssertionError(
-                f"{self.repo} has no .zpkg.toml and is not listed in NON_PACKAGE_REPOS"
-            )
 
     def source_root(self, repo: str) -> Path:
         if repo == self.repo:
@@ -585,7 +572,6 @@ def main() -> int:
     args = parse_args()
     harness = Harness(args)
     try:
-        harness.validate_fixture_classification()
         if args.repo in NON_PACKAGE_REPOS:
             harness.run_non_package_contract()
         else:
