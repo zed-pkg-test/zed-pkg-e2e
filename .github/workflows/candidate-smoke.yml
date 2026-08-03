@@ -12,7 +12,7 @@ on:
       zed_cli_ref:
         description: Exact 40-character zed-pkg/zed-cli commit to test
         required: false
-        default: 8d318ce457841c485e394575dee17fbf78fcc63c
+        default: 73e7d818741acb6d33ddfa5f5617ac7d0583865b
         type: string
       harness_ref:
         description: Exact 40-character zed-pkg-test/zed-pkg-e2e commit
@@ -55,7 +55,7 @@ defaults:
 env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: "1"
-  ZED_CLI_REF: ${{ inputs.zed_cli_ref || '8d318ce457841c485e394575dee17fbf78fcc63c' }}
+  ZED_CLI_REF: ${{ inputs.zed_cli_ref || '73e7d818741acb6d33ddfa5f5617ac7d0583865b' }}
   HARNESS_REF: ${{ inputs.harness_ref || github.event.pull_request.head.sha || github.sha }}
   ZED_INTERFACES_REF: dc0e0a0620b9462817950b552d3d334a184b1cb1
 
