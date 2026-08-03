@@ -9,7 +9,7 @@ on:
       zed_cli_ref:
         description: Immutable zed-cli commit to certify
         required: false
-        default: c8958114b7da5b3b27daafe871c52f062b1153c2
+        default: 9c57da4d68b48468d4b37dff2e65f35e1f80ee4d
   schedule:
     - cron: "41 4 * * 1"
 
@@ -27,7 +27,7 @@ defaults:
 env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: "1"
-  ZED_CLI_REF: ${{ github.event.inputs.zed_cli_ref || 'c8958114b7da5b3b27daafe871c52f062b1153c2' }}
+  ZED_CLI_REF: ${{ github.event.inputs.zed_cli_ref || '9c57da4d68b48468d4b37dff2e65f35e1f80ee4d' }}
   ZED_INTERFACES_REF: 19e6d74d9f9ff92d549d2072793ebe1116a25d90
 
 jobs:
@@ -88,15 +88,7 @@ jobs:
           cargo fmt --all --check --manifest-path zed-cli/Cargo.toml
           cargo test --locked --manifest-path zed-cli/Cargo.toml --lib environment::tests
           cargo test --locked --manifest-path zed-cli/Cargo.toml --test mise_environment_cli
-          if [[ "$RUNNER_OS" == "Windows" ]]; then
-            # Certify the actual adapter surface while the unrelated Unix-only
-            # relocation fixture is repaired in zed-cli#38.
-            cargo clippy --locked --manifest-path zed-cli/Cargo.toml \
-              --lib --bins --test mise_environment_cli -- -D warnings
-          else
-            cargo clippy --locked --manifest-path zed-cli/Cargo.toml \
-              --all-targets -- -D warnings
-          fi
+          cargo clippy --locked --manifest-path zed-cli/Cargo.toml --all-targets -- -D warnings
 
       - name: Build the immutable zed executable
         run: |
