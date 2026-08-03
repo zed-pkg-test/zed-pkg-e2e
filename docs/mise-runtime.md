@@ -12,6 +12,14 @@ This runtime suite exercises a separate contract: `zed dev --mise auto|never|req
 
 Neither suite may substitute for the other.
 
+## Lifecycle stack prerequisite
+
+This pull request is stacked on `zed-pkg-e2e#24`, branch `agent/lifecycle-shared-schema-source`, exact head `b34f52b44f72118742f566829166bebd7358788d`.
+
+PR #24 is the canonical shared-schema lifecycle/source-map correction. It classifies `shared-schema` as a package fixture, maps `zedtest/shared-schema`, removes only the exact untracked publish archive with fail-closed checks, and has a green 22-fixture lifecycle matrix. The runtime suite does not duplicate those changes.
+
+After PR #24 merges, retarget this pull request to `main` without changing the immutable `zed-cli` candidate, then require the same runtime and ordinary lifecycle checks on the new synthetic merge.
+
 ## Immutable candidate
 
 `.github/workflows/mise-runtime.yml` builds a full 40-character `zed-cli` commit pin and runs the same black-box harness on Ubuntu 24.04 and macOS 15. The workflow does not install mise or download language runtimes. Instead, it supplies a deterministic executable stub whose arguments and relevant environment values are observable.
@@ -58,9 +66,11 @@ The work root must not already exist. On success, the harness emits TAP-style as
 
 Keep this pull request draft until:
 
-1. `zed-pkg/zed-cli#70` has a final immutable head;
-2. the workflow pin matches that head exactly;
-3. Ubuntu and macOS runtime jobs pass on that pin;
-4. the static suite in `zed-pkg-e2e#7` remains green for its own declared surface;
-5. ordinary `zed-cli` CI, development-shell, policy, and hardening checks are green; and
-6. DEN-1420 and DEN-1449 link both pull requests and their exact candidate SHA.
+1. lifecycle base PR #24 is green and merged;
+2. `zed-pkg/zed-cli#70` has a final immutable head;
+3. the workflow pin matches that head exactly;
+4. Ubuntu and macOS runtime jobs pass on that pin;
+5. ordinary stacked lifecycle checks pass with PR #24;
+6. the static suite in `zed-pkg-e2e#7` remains green for its own declared surface;
+7. ordinary `zed-cli` CI, development-shell, policy, and hardening checks are green; and
+8. DEN-1420 and DEN-1449 link both pull requests and their exact candidate SHA.
