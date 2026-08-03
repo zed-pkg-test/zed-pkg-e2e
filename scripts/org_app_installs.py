@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import re
@@ -111,6 +112,34 @@ def require_success(completed: Completed) -> None:
     if completed.returncode != 0:
         shown = " ".join(shell_quote(value) for value in completed.command)
         raise RuntimeError(f"command failed with exit code {completed.returncode}: {shown}")
+
+
+def require_failure(completed: Completed, *fragments: str) -> None:
+    if completed.returncode == 0:
+        shown = " ".join(shell_quote(value) for value in completed.command)
+        raise AssertionError(f"command unexpectedly succeeded: {shown}")
+    for fragment in fragments:
+        if fragment not in completed.output:
+            raise AssertionError(
+                f"failed command output did not contain {fragment!r}:\n{completed.output}"
+            )
+
+
+def tree_fingerprint(root: Path) -> tuple[tuple[str, int, str], ...]:
+    if not root.exists():
+        return ()
+    rows: list[tuple[str, int, str]] = []
+    for candidate in sorted(root.rglob("*")):
+        if candidate.is_file() and not candidate.is_symlink():
+            data = candidate.read_bytes()
+            rows.append(
+                (
+                    candidate.relative_to(root).as_posix(),
+                    len(data),
+                    hashlib.sha256(data).hexdigest(),
+                )
+            )
+    return tuple(rows)
 
 
 def zed_command(zed: Path, registry: Path, home: Path, *args: str) -> list[str | Path]:
@@ -537,6 +566,51 @@ def exercise_workspace(
 ) -> None:
     source = clone_repo(clone_root, "workspace-monorepo", clones)
 
+    def expected_sources(repo_root: Path) -> dict[str, Path]:
+        return {
+            "ws-utils": repo_root / "packages" / "utils",
+            "ws-core": repo_root / "packages" / "core",
+        }
+
+    def assert_projection(repo_root: Path, project: Path, mode: str) -> None:
+        expected = expected_sources(repo_root)
+        path_index = project / ".zed" / "paths.json"
+        if not path_index.is_file():
+            raise AssertionError(f"workspace install omitted {path_index}")
+        index_text = path_index.read_text(encoding="utf-8")
+        json.loads(index_text)
+        for name, expected_source in expected.items():
+            key = f"zedtest/{name}"
+            installed = project / "zed_modules" / "zedtest" / name
+            node_link = project / "node_modules" / "@zedtest" / name
+            for projection in (installed, node_link):
+                if mode == "symlink":
+                    if not projection.is_symlink():
+                        raise AssertionError(
+                            f"workspace dependency was not symlinked: {projection}"
+                        )
+                    if projection.resolve(strict=True) != expected_source.resolve(
+                        strict=True
+                    ):
+                        raise AssertionError(
+                            f"workspace target mismatch: {projection} -> {projection.resolve()}"
+                        )
+                else:
+                    if projection.is_symlink() or not projection.is_dir():
+                        raise AssertionError(
+                            f"workspace dependency was not copied: {projection}"
+                        )
+                    if not (projection / ".zpkg.toml").is_file():
+                        raise AssertionError(
+                            f"workspace copied projection has no manifest: {projection}"
+                        )
+            if key not in index_text or '"version": "workspace"' not in index_text:
+                raise AssertionError(f"workspace path index omits {key}: {index_text}")
+
+        node_path = project / ".zed" / "node_path"
+        if node_path.read_text(encoding="utf-8").strip() != "zed_modules":
+            raise AssertionError(f"unexpected workspace node_path: {node_path.read_text()!r}")
+
     symlink_repo = workspace_root / "symlink"
     copy_fixture(source, symlink_repo)
     symlink_project = symlink_repo / "apps" / "cli"
@@ -546,24 +620,14 @@ def exercise_workspace(
         env=environment,
     )
     require_success(symlink_install)
-
-    expected_sources = {
-        "ws-utils": symlink_repo / "packages" / "utils",
-        "ws-core": symlink_repo / "packages" / "core",
-    }
-    for name, expected_source in expected_sources.items():
-        installed = symlink_project / "zed_modules" / "zedtest" / name
-        if not installed.is_symlink():
-            raise AssertionError(f"workspace dependency was not symlinked: {installed}")
-        if installed.resolve(strict=True) != expected_source.resolve(strict=True):
-            raise AssertionError(
-                f"workspace link target mismatch: {installed} -> {installed.resolve()}"
-            )
-        node_link = symlink_project / "node_modules" / "@zedtest" / name
-        if not node_link.is_symlink() or node_link.resolve(strict=True) != expected_source.resolve(
-            strict=True
-        ):
-            raise AssertionError(f"workspace Node adapter mismatch: {node_link}")
+    if PREFETCH_RE.search(symlink_install.output):
+        raise AssertionError(
+            "workspace-only install unexpectedly reported registry artifact prefetch"
+        )
+    if parse_lock(symlink_project):
+        raise AssertionError("workspace packages must not be written as registry lock entries")
+    symlink_lock = (symlink_project / ".zpkg.lock").read_bytes()
+    assert_projection(symlink_repo, symlink_project, "symlink")
 
     live_sentinel = symlink_repo / "packages" / "core" / "live-sentinel.txt"
     live_sentinel.write_text("visible after install\n", encoding="utf-8")
@@ -576,6 +640,54 @@ def exercise_workspace(
     )
     if visible.read_text(encoding="utf-8") != "visible after install\n":
         raise AssertionError("workspace symlink did not expose a post-install source edit")
+
+    registry_before_frozen = tree_fingerprint(registry)
+    cache_before_frozen = tree_fingerprint(home / "cache")
+    for projection in [
+        symlink_project / "zed_modules" / "zedtest" / "ws-utils",
+        symlink_project / "zed_modules" / "zedtest" / "ws-core",
+        symlink_project / "node_modules" / "@zedtest" / "ws-utils",
+        symlink_project / "node_modules" / "@zedtest" / "ws-core",
+    ]:
+        projection.unlink()
+
+    frozen_repair = run(
+        zed_command(zed, registry, home, "install", "--frozen"),
+        cwd=symlink_project,
+        env=environment,
+    )
+    require_success(frozen_repair)
+    if PREFETCH_RE.search(frozen_repair.output):
+        raise AssertionError("frozen workspace repair accessed registry artifacts")
+    if (symlink_project / ".zpkg.lock").read_bytes() != symlink_lock:
+        raise AssertionError("frozen workspace repair rewrote the empty artifact lock")
+    if tree_fingerprint(registry) != registry_before_frozen:
+        raise AssertionError("frozen workspace repair mutated the registry")
+    if tree_fingerprint(home / "cache") != cache_before_frozen:
+        raise AssertionError("frozen workspace repair mutated the artifact cache")
+    assert_projection(symlink_repo, symlink_project, "symlink")
+
+    manifest_path = symlink_project / ".zpkg.toml"
+    manifest_before = manifest_path.read_text(encoding="utf-8")
+    incompatible = re.sub(
+        r'("zedtest/ws-utils"\s*=\s*)"[^"]+"',
+        r'\1"^2"',
+        manifest_before,
+        count=1,
+    )
+    if incompatible == manifest_before:
+        raise AssertionError("could not rewrite workspace requirement for drift test")
+    manifest_path.write_text(incompatible, encoding="utf-8")
+    version_drift = run(
+        zed_command(zed, registry, home, "install", "--frozen"),
+        cwd=symlink_project,
+        env=environment,
+    )
+    require_failure(version_drift, "ws-utils", "does not satisfy `^2`")
+    if (symlink_project / ".zpkg.lock").read_bytes() != symlink_lock:
+        raise AssertionError("workspace version-drift failure rewrote the lock")
+    assert_projection(symlink_repo, symlink_project, "symlink")
+    manifest_path.write_text(manifest_before, encoding="utf-8")
 
     copy_repo = workspace_root / "copy"
     copy_fixture(source, copy_repo)
@@ -595,16 +707,61 @@ def exercise_workspace(
         env=environment,
     )
     require_success(copy_install)
-    copied = copy_project / "zed_modules" / "zedtest" / "ws-core"
-    if copied.is_symlink() or not copied.is_dir():
-        raise AssertionError(f"workspace copy mode did not copy {copied}")
-    copied_sentinel = copied / "copy-sentinel.txt"
-    if copied_sentinel.read_text(encoding="utf-8") != "before install\n":
-        raise AssertionError("workspace copy omitted source content")
+    if PREFETCH_RE.search(copy_install.output):
+        raise AssertionError("workspace copy install accessed registry artifacts")
+    if parse_lock(copy_project):
+        raise AssertionError("workspace copy install wrote registry lock entries")
+    copy_lock = (copy_project / ".zpkg.lock").read_bytes()
+    assert_projection(copy_repo, copy_project, "copy")
+
+    copied_sentinels = [
+        copy_project / "zed_modules" / "zedtest" / "ws-core" / "copy-sentinel.txt",
+        copy_project
+        / "node_modules"
+        / "@zedtest"
+        / "ws-core"
+        / "copy-sentinel.txt",
+    ]
+    for copied_sentinel in copied_sentinels:
+        if copied_sentinel.read_text(encoding="utf-8") != "before install\n":
+            raise AssertionError(f"workspace copy omitted source content: {copied_sentinel}")
     copy_source_sentinel.write_text("after install\n", encoding="utf-8")
-    if copied_sentinel.read_text(encoding="utf-8") != "before install\n":
-        raise AssertionError("workspace copy remained coupled to mutable source")
-    leaked = [path for path in (copy_project / "zed_modules").rglob("*") if path.is_symlink()]
+    for copied_sentinel in copied_sentinels:
+        if copied_sentinel.read_text(encoding="utf-8") != "before install\n":
+            raise AssertionError(
+                f"workspace copy remained coupled to mutable source: {copied_sentinel}"
+            )
+
+    for projection in [
+        copy_project / "zed_modules" / "zedtest" / "ws-core",
+        copy_project / "node_modules" / "@zedtest" / "ws-core",
+    ]:
+        shutil.rmtree(projection)
+    copy_repair = run(
+        zed_command(
+            zed,
+            registry,
+            home,
+            "install",
+            "--frozen",
+            "--install-mode",
+            "copy",
+        ),
+        cwd=copy_project,
+        env=environment,
+    )
+    require_success(copy_repair)
+    if PREFETCH_RE.search(copy_repair.output):
+        raise AssertionError("frozen workspace copy repair accessed registry artifacts")
+    if (copy_project / ".zpkg.lock").read_bytes() != copy_lock:
+        raise AssertionError("frozen workspace copy repair rewrote the lock")
+    assert_projection(copy_repo, copy_project, "copy")
+    leaked = [
+        candidate
+        for root in (copy_project / "zed_modules", copy_project / "node_modules")
+        for candidate in root.rglob("*")
+        if candidate.is_symlink()
+    ]
     if leaked:
         raise AssertionError(f"workspace copy mode leaked symlinks: {leaked}")
 
