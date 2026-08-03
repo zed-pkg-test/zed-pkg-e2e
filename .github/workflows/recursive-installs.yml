@@ -9,7 +9,7 @@ on:
       zed_cli_ref:
         description: Immutable zed-cli commit to test
         required: false
-        default: bbca23825fd163faf4acd885009f147b08a3a3eb
+        default: 99ca21a363b38f42a3cd42e1021049019753c1c6
 
 permissions:
   contents: read
@@ -25,7 +25,7 @@ defaults:
 env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: "1"
-  ZED_CLI_REF: ${{ github.event.inputs.zed_cli_ref || 'bbca23825fd163faf4acd885009f147b08a3a3eb' }}
+  ZED_CLI_REF: ${{ github.event.inputs.zed_cli_ref || '99ca21a363b38f42a3cd42e1021049019753c1c6' }}
   ZED_INTERFACES_REF: dc0e0a0620b9462817950b552d3d334a184b1cb1
 
 jobs:
@@ -114,6 +114,7 @@ jobs:
           find "$WORK_ROOT/shared-home" -maxdepth 9 -type f -print0 2>/dev/null \
             | sort -z | xargs -0 -r sha256sum \
             > "$WORK_ROOT/diagnostics/shared-home-sha256.txt" 2>&1
+          true
 
       - name: Upload failure diagnostics
         if: failure()
