@@ -43,8 +43,33 @@ fn assert_source_aware_translation() {
     assert_eq!(npm_comparators.canonical, ">=1.2.3, <2.0.0");
     assert_eq!(cargo_comparators.canonical, ">=1.2.3, <2.0.0");
 
+    let npm_spaced =
+        NativeVersionRequirement::parse(NativeRegistry::Npm, ">= 1.2.3 < 2.0.0").unwrap();
+    assert_eq!(npm_spaced.canonical, ">=1.2.3, <2.0.0");
+    assert!(npm_spaced.matches("1.9.9").unwrap());
+    assert!(!npm_spaced.matches("2.0.0").unwrap());
+
+    let cargo_spaced =
+        NativeVersionRequirement::parse(NativeRegistry::Cargo, ">= 1.2, < 1.5").unwrap();
+    assert_eq!(cargo_spaced.canonical, ">=1.2, <1.5");
+    assert!(cargo_spaced.matches("1.4.99").unwrap());
+    assert!(!cargo_spaced.matches("1.5.0").unwrap());
+
     let npm_x = NativeVersionRequirement::parse(NativeRegistry::Npm, "v1.2.X").unwrap();
     assert_eq!(npm_x.canonical, "1.2.*");
+
+    let npm_gt_major = NativeVersionRequirement::parse(NativeRegistry::Npm, ">1").unwrap();
+    let npm_gt_minor = NativeVersionRequirement::parse(NativeRegistry::Npm, ">1.2").unwrap();
+    let npm_lte_minor = NativeVersionRequirement::parse(NativeRegistry::Npm, "<=1.2").unwrap();
+    assert_eq!(npm_gt_major.canonical, ">=2.0.0");
+    assert_eq!(npm_gt_minor.canonical, ">=1.3.0");
+    assert_eq!(npm_lte_minor.canonical, "<1.3.0");
+    assert!(!npm_gt_major.matches("1.99.99").unwrap());
+    assert!(npm_gt_major.matches("2.0.0").unwrap());
+    assert!(!npm_gt_minor.matches("1.2.999").unwrap());
+    assert!(npm_gt_minor.matches("1.3.0").unwrap());
+    assert!(npm_lte_minor.matches("1.2.999").unwrap());
+    assert!(!npm_lte_minor.matches("1.3.0").unwrap());
 
     let cargo_zero = NativeVersionRequirement::parse(NativeRegistry::Cargo, "0.2.3").unwrap();
     assert!(cargo_zero.matches("0.2.9").unwrap());
@@ -116,6 +141,12 @@ fn assert_requirement_rejections() {
         "git+https://example.invalid/core",
         ">=1.0.0, <2.0.0",
         "1.2.3+linux",
+        "01.2",
+        "1.02",
+        ">1.02",
+        "^01.2",
+        "9007199254740992.0.0",
+        ">9007199254740991",
     ] {
         assert!(NativeVersionRequirement::parse(NativeRegistry::Npm, declared).is_err());
     }
@@ -125,6 +156,7 @@ fn assert_requirement_rejections() {
         "1.0.0 || 2.0.0",
         "1.0.0 - 2.0.0",
         ">=1.0.0 <2.0.0",
+        ">= 1.0 < 2.0",
         "1.x",
         "file:../core",
         "1.2.3+linux",
@@ -237,6 +269,16 @@ fn assert_lock_rejections() {
             &[candidate("1.2.3", 'a')],
         ),
         Err(NativeDependencyError::InvalidPackageName { .. })
+    ));
+
+    assert!(matches!(
+        NativeDependencyLock::resolve(
+            NativeRegistry::Npm,
+            "@fiducia/core",
+            "*",
+            &[candidate("9007199254740992.0.0", 'a')],
+        ),
+        Err(NativeDependencyError::InvalidVersion { .. })
     ));
 }
 
