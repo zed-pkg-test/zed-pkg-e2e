@@ -1,0 +1,298 @@
+name: external nix flake bundle
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/nix-flake-bundle.yml"
+      - ".zed-nix-bundle-cli-ref"
+      - "scripts/nix_flake_bundle_external.rs"
+      - "scripts/verify_nix_flake_bundle_canary.py"
+      - "docs/nix-flake-bundle-canary.md"
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/nix-flake-bundle.yml"
+      - ".zed-nix-bundle-cli-ref"
+      - "scripts/nix_flake_bundle_external.rs"
+      - "scripts/verify_nix_flake_bundle_canary.py"
+      - "docs/nix-flake-bundle-canary.md"
+  workflow_dispatch:
+    inputs:
+      zed_cli_ref:
+        description: Optional immutable zed-cli commit override
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+concurrency:
+  group: external-nix-flake-bundle-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  canary:
+    name: Clean-room flake bundle on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 55
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-15]
+
+    steps:
+      - name: Check out harness and reviewed pin
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          path: harness
+          persist-credentials: false
+          show-progress: false
+
+      - name: Load immutable CLI pin
+        id: pin
+        shell: bash
+        run: |
+          set -euo pipefail
+          override="${{ github.event.inputs.zed_cli_ref || '' }}"
+          if [[ -n "$override" ]]; then
+            ref="$override"
+          else
+            ref="$(tr -d '[:space:]' < harness/.zed-nix-bundle-cli-ref)"
+          fi
+          [[ "$ref" =~ ^[0-9a-f]{40}$ ]]
+          printf 'ref=%s\n' "$ref" >> "$GITHUB_OUTPUT"
+          printf 'zed-cli=%s\n' "$ref"
+
+      - name: Check out exact zed-cli renderer
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: zed-pkg/zed-cli
+          ref: ${{ steps.pin.outputs.ref }}
+          path: zed-cli
+          persist-credentials: false
+          show-progress: false
+
+      - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30
+        with:
+          components: rustfmt
+
+      - uses: cachix/install-nix-action@630ae543ea3a38a9a4166f03376c02c50f408342
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+            accept-flake-config = false
+
+      - name: Verify exact candidate and shared-contract pins
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git -C zed-cli rev-parse HEAD)" = "${{ steps.pin.outputs.ref }}"
+          grep -F 'rev = "625ba7bdf4339df7d0880f791a0715ca894558fe"' zed-cli/Cargo.toml
+          grep -F '#625ba7bdf4339df7d0880f791a0715ca894558fe' zed-cli/Cargo.lock
+          cargo fmt --all --check --manifest-path zed-cli/Cargo.toml
+          python3 -m py_compile harness/scripts/verify_nix_flake_bundle_canary.py
+
+      - name: Exercise the renderer only through its public API
+        id: render
+        shell: bash
+        env:
+          CANDIDATE_SHA: ${{ steps.pin.outputs.ref }}
+          FORBIDDEN_CANARY: bundle-secret-${{ github.run_id }}-${{ github.run_attempt }}
+          FORBIDDEN_PATH: ${{ runner.temp }}/private-workspace-must-not-leak
+        run: |
+          set -euo pipefail
+          bundle_a="$RUNNER_TEMP/zed-nix-bundle-a"
+          bundle_b="$RUNNER_TEMP/zed-nix-bundle-b"
+          evidence="$RUNNER_TEMP/zed-nix-bundle-evidence"
+          report="$evidence/report.json"
+          test ! -e "$bundle_a"
+          test ! -e "$bundle_b"
+          mkdir -p "$evidence"
+
+          system="$(nix eval --impure --raw --expr builtins.currentSystem)"
+          install -m 0644 \
+            harness/scripts/nix_flake_bundle_external.rs \
+            zed-cli/tests/external_nix_flake_bundle.rs
+          cargo fmt --all --check --manifest-path zed-cli/Cargo.toml
+          EXTERNAL_NIX_SYSTEM="$system" \
+          BUNDLE_OUT_A="$bundle_a" \
+          BUNDLE_OUT_B="$bundle_b" \
+          BUNDLE_REPORT="$report" \
+          cargo test --locked \
+            --manifest-path zed-cli/Cargo.toml \
+            --test external_nix_flake_bundle \
+            -- --nocapture --test-threads=1
+          rm zed-cli/tests/external_nix_flake_bundle.rs
+
+          python3 harness/scripts/verify_nix_flake_bundle_canary.py \
+            --bundle-a "$bundle_a" \
+            --bundle-b "$bundle_b" \
+            --report "$report" \
+            --forbidden "$FORBIDDEN_CANARY" \
+            --forbidden "$FORBIDDEN_PATH" \
+            --exercise-tamper \
+            | tee "$evidence/verification.jsonl"
+
+          printf 'bundle_a=%s\n' "$bundle_a" >> "$GITHUB_OUTPUT"
+          printf 'bundle_b=%s\n' "$bundle_b" >> "$GITHUB_OUTPUT"
+          printf 'evidence=%s\n' "$evidence" >> "$GITHUB_OUTPUT"
+          test -z "$(git -C zed-cli status --porcelain=v1 --untracked-files=all)"
+
+      - name: Prime the locked closure, then replay both flakes offline
+        id: build
+        shell: bash
+        env:
+          BUNDLE_A: ${{ steps.render.outputs.bundle_a }}
+          BUNDLE_B: ${{ steps.render.outputs.bundle_b }}
+          EVIDENCE: ${{ steps.render.outputs.evidence }}
+        run: |
+          set -euo pipefail
+
+          # Archive both byte-identical sources and realize the exact locked package
+          # once while the configured binary cache is available. A fresh empty Nix
+          # store cannot honestly replay stdenv offline without first obtaining its
+          # immutable closure; attempting that merely bootstraps all of Nixpkgs from
+          # source and tests runner capacity rather than the generated package.
+          for bundle in "$BUNDLE_A" "$BUNDLE_B"; do
+            (
+              cd "$bundle"
+              nix flake archive --no-update-lock-file
+            )
+          done
+          primed_out="$(
+            cd "$BUNDLE_A"
+            nix build \
+              --no-update-lock-file \
+              --no-link \
+              --print-build-logs \
+              --print-out-paths \
+              .#sample
+          )"
+
+          for bundle in "$BUNDLE_A" "$BUNDLE_B"; do
+            (
+              cd "$bundle"
+              nix flake check \
+                --offline \
+                --no-update-lock-file \
+                --print-build-logs
+            )
+          done
+
+          out_a="$(
+            cd "$BUNDLE_A"
+            nix build \
+              --offline \
+              --no-update-lock-file \
+              --no-link \
+              --print-build-logs \
+              --print-out-paths \
+              .#sample
+          )"
+          out_b="$(
+            cd "$BUNDLE_B"
+            nix build \
+              --offline \
+              --no-update-lock-file \
+              --no-link \
+              --print-build-logs \
+              --print-out-paths \
+              .#sample
+          )"
+          test "$primed_out" = "$out_a"
+          test "$out_a" = "$out_b"
+
+          mkdir -p "$RUNNER_TEMP/empty-home"
+          actual="$(env -i HOME="$RUNNER_TEMP/empty-home" PATH=/usr/bin:/bin "$out_a/bin/sample")"
+          test "$actual" = external-bundle-ok
+          if nix-store -q --references "$out_a" | grep -Eqi 'zed-cli|zed-pkg'; then
+            echo 'generated package unexpectedly retains a Zed runtime dependency' >&2
+            exit 1
+          fi
+
+          nix path-info --json "$out_a" > "$EVIDENCE/nix-path-info.json"
+          printf '%s\n' "$out_a" > "$EVIDENCE/output-path.txt"
+          python3 - "$BUNDLE_A" "$EVIDENCE/bundle-files.sha256" <<'PY'
+          import hashlib
+          import sys
+          from pathlib import Path
+
+          root = Path(sys.argv[1])
+          output = Path(sys.argv[2])
+          rows = []
+          for path in sorted(candidate for candidate in root.rglob('*') if candidate.is_file()):
+              rows.append(
+                  f"{hashlib.sha256(path.read_bytes()).hexdigest()}  {path.relative_to(root).as_posix()}"
+              )
+          output.write_text("\n".join(rows) + "\n", encoding="utf-8")
+          PY
+
+      - name: Prove the workflow remains immutable and credential-free
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import re
+          from pathlib import Path
+
+          workflow = Path('harness/.github/workflows/nix-flake-bundle.yml').read_text()
+          pin = Path('harness/.zed-nix-bundle-cli-ref').read_text().strip()
+          rust = Path('harness/scripts/nix_flake_bundle_external.rs').read_text()
+          verifier = Path('harness/scripts/verify_nix_flake_bundle_canary.py').read_text()
+
+          assert re.fullmatch(r'[0-9a-f]{40}', pin)
+          assert 'permissions:\n  contents: read' in workflow
+          assert 'persist-credentials: false' in workflow
+          assert 'ubuntu-24.04' in workflow and 'macos-15' in workflow
+          assert '--offline' in workflow and '--no-update-lock-file' in workflow
+          assert 'primed_out=' in workflow
+          assert '--exercise-tamper' in workflow
+          assert 'credential_canaries_retained' in rust
+          assert 'tamper_cases' in verifier
+          for match in re.finditer(r'^\s*uses:\s*([^\s]+)$', workflow, re.MULTILINE):
+              value = match.group(1)
+              assert re.search(r'@[0-9a-f]{40}$', value), value
+          for forbidden in (
+              'contents' + ': write',
+              'pull_request' + '_target:',
+              'secrets' + ': inherit',
+              'git' + ' push',
+              'id-token' + ': write',
+              'packages' + ': write',
+              'reqwest' + '::',
+              'Command' + '::new',
+          ):
+              assert forbidden not in workflow + '\n' + rust, forbidden
+          PY
+
+      - name: Upload non-secret reproducibility evidence
+        if: success()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: nix-flake-bundle-${{ runner.os }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ steps.render.outputs.evidence }}
+          if-no-files-found: error
+          retention-days: 7
+          include-hidden-files: false
+
+      - name: Collect failure diagnostics
+        if: failure()
+        shell: bash
+        run: |
+          set +e
+          diagnostics="$RUNNER_TEMP/nix-flake-bundle-diagnostics"
+          mkdir -p "$diagnostics"
+          git -C zed-cli status --porcelain=v1 --untracked-files=all \
+            > "$diagnostics/zed-cli-status.txt" 2>&1
+          find "$RUNNER_TEMP" -maxdepth 8 \( -type f -o -type l \) 2>/dev/null \
+            | LC_ALL=C sort > "$diagnostics/work-tree.txt" 2>&1
+
+      - name: Upload failure diagnostics
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: nix-flake-bundle-failure-${{ runner.os }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/nix-flake-bundle-diagnostics
+          if-no-files-found: warn
+          retention-days: 3
+          include-hidden-files: false
