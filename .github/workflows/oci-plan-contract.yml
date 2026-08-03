@@ -29,6 +29,7 @@ defaults:
 env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: "1"
+  HARNESS_REF: ${{ github.event.pull_request.head.sha || github.sha }}
   ZED_CLI_REF: ${{ inputs.zed_cli_ref || 'd92a0c84c0a69a4890d7409a63d40e9d3adb125b' }}
   NODE_LIB_REF: 2d41e658a382fdff27ef87a0db24dbaff280a685
   NODE_APP_REF: ef794674647b3620e711f4f855865f8ad3340498
@@ -43,6 +44,7 @@ jobs:
       - name: Validate immutable inputs
         run: |
           set -euo pipefail
+          [[ "$HARNESS_REF" =~ ^[0-9a-f]{40}$ ]]
           [[ "$ZED_CLI_REF" =~ ^[0-9a-f]{40}$ ]]
           [[ "$NODE_LIB_REF" =~ ^[0-9a-f]{40}$ ]]
           [[ "$NODE_APP_REF" =~ ^[0-9a-f]{40}$ ]]
@@ -51,6 +53,7 @@ jobs:
       - name: Check out exact harness
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ env.HARNESS_REF }}
           path: harness
           fetch-depth: 1
           persist-credentials: false
@@ -112,6 +115,7 @@ jobs:
       - name: Verify exact checkouts and harness syntax
         run: |
           set -euo pipefail
+          test "$(git -C harness rev-parse HEAD)" = "$HARNESS_REF"
           test "$(git -C zed-cli rev-parse HEAD)" = "$ZED_CLI_REF"
           test "$(git -C fixtures/node-lib rev-parse HEAD)" = "$NODE_LIB_REF"
           test "$(git -C fixtures/node-app rev-parse HEAD)" = "$NODE_APP_REF"
