@@ -15,18 +15,18 @@ from typing import Sequence
 def digest_tree(root: Path) -> tuple[tuple[str, str], ...]:
     rows: list[tuple[str, str]] = []
     for path in sorted(root.rglob("*")):
-        if path.is_file() and not path.is_symlink():
-            rows.append(
-                (
-                    path.relative_to(root).as_posix(),
-                    hashlib.sha256(path.read_bytes()).hexdigest(),
-                )
-            )
-        elif path.is_symlink():
+        if path.is_symlink():
             rows.append(
                 (
                     path.relative_to(root).as_posix(),
                     f"symlink:{os.readlink(path)}",
+                )
+            )
+        elif path.is_file():
+            rows.append(
+                (
+                    path.relative_to(root).as_posix(),
+                    hashlib.sha256(path.read_bytes()).hexdigest(),
                 )
             )
     return tuple(rows)
