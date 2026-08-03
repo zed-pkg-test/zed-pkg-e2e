@@ -288,13 +288,16 @@ def main() -> int:
     if lock_digest_text != f"{expected_lock_digest}  .zpkg.lock\n":
         raise AssertionError("fetch bundle retained the wrong lock digest")
 
-    # Artifact provenance drift must fail before a final output appears.
+    # Artifact provenance drift must fail before a final output appears. Use a
+    # syntactically valid nonzero digest so the parser accepts the lock and the
+    # test reaches the registry-versus-lock verification boundary.
     tampered = root / "tampered-consumer"
     shutil.copytree(consumer, tampered)
     tampered_lock = tampered / ".zpkg.lock"
+    wrong_digest = "1" * 64 if digest != "1" * 64 else "2" * 64
     tampered_text, replacements = re.subn(
         r'^sha256 = "[0-9a-f]{64}"$',
-        f'sha256 = "{"0" * 64}"',
+        f'sha256 = "{wrong_digest}"',
         tampered_lock.read_text(encoding="utf-8"),
         count=1,
         flags=re.MULTILINE,
