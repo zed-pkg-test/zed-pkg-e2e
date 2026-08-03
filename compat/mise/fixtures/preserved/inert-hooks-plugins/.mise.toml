@@ -1,0 +1,11 @@
+[tools]
+node = "22.4.0"
+
+[hooks]
+postinstall = "touch ADAPTER_EXECUTED_HOOK"
+
+[plugins]
+custom = "https://example.invalid/never-fetch-or-execute.git"
+
+[tasks.never-run]
+run = "touch ADAPTER_EXECUTED_TASK"
