@@ -1,6 +1,7 @@
 from pathlib import Path
 
 
+# One-shot exact-head repin for the workspace install implementation.
 OLD = "67c01b83c834ea14af996613f1a3dc0802a2fbd3"
 NEW = "56e597b35deccc82bff7deee807f459a1def537d"
 WORKFLOWS = [
