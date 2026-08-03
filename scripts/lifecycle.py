@@ -175,7 +175,7 @@ class Harness:
             raise AssertionError(f"{label} was mutated by lifecycle tests:\n{output}")
 
     def remove_generated_pack_output(self, source: Path) -> None:
-        """Remove only the documented publish scratch directory.
+        """Remove only untracked publish scratch output below `.zed/pack`.
 
         `zed publish` writes its deterministic archive below `.zed/pack` even
         when the registry is isolated. Some fixtures ignore that directory and
@@ -184,15 +184,23 @@ class Harness:
         output or any tracked-file mutation.
         """
 
-        pack_dir = source / ".zed" / "pack"
+        zed_dir = source / ".zed"
+        if zed_dir.is_symlink():
+            raise AssertionError(f"refusing to traverse symlinked .zed path: {zed_dir}")
+
+        pack_dir = zed_dir / "pack"
         if pack_dir.is_symlink():
             raise AssertionError(f"refusing to remove symlinked pack path: {pack_dir}")
         if pack_dir.exists():
             if not pack_dir.is_dir():
                 raise AssertionError(f"generated pack path is not a directory: {pack_dir}")
+            tracked = self.run(["git", "ls-files", "--", ".zed/pack"], cwd=source)
+            if tracked.strip():
+                raise AssertionError(
+                    f"refusing to remove tracked publish output below {pack_dir}:\n{tracked}"
+                )
             shutil.rmtree(pack_dir)
 
-        zed_dir = source / ".zed"
         if zed_dir.is_dir():
             try:
                 zed_dir.rmdir()
