@@ -104,11 +104,18 @@ jobs:
               raise SystemExit(f"schema is missing public contract tokens: {missing}")
           PY
 
-      - name: Run complete zed-interfaces gates
+      - name: Format disposable checkout and run complete gates
         run: |
           set -euo pipefail
           cd zed-interfaces
-          cargo fmt --all -- --check
+          cargo fmt --all
+          evidence="$RUNNER_TEMP/native-registry-contract-evidence/formatted"
+          mkdir -p "$evidence/src" "$evidence/examples" "$evidence/tests"
+          cp src/native_registry.rs "$evidence/src/native_registry.rs"
+          cp src/lib.rs "$evidence/src/lib.rs"
+          cp examples/generate_schemas.rs "$evidence/examples/generate_schemas.rs"
+          cp tests/native_registry_schema_contract.rs \
+            "$evidence/tests/native_registry_schema_contract.rs"
           cargo test --locked --all-targets
           cargo clippy --locked --all-targets --all-features -- -D warnings
           git diff --check
