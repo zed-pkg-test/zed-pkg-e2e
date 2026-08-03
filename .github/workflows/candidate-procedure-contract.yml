@@ -1,0 +1,65 @@
+name: zed-pkg-test candidate procedure contract
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/candidate-smoke.yml"
+      - ".github/workflows/candidate-procedure-contract.yml"
+      - "scripts/lifecycle.py"
+      - "scripts/candidate_lifecycle.py"
+      - "scripts/procedure_contract.py"
+      - "tests/test_candidate_*.py"
+      - "docs/candidate-validation.md"
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/candidate-smoke.yml"
+      - ".github/workflows/candidate-procedure-contract.yml"
+      - "scripts/lifecycle.py"
+      - "scripts/candidate_lifecycle.py"
+      - "scripts/procedure_contract.py"
+      - "tests/test_candidate_*.py"
+      - "docs/candidate-validation.md"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: candidate-procedure-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  procedure-contract:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Check out exact procedure source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+          show-progress: false
+
+      - name: Compile the lifecycle and policy modules
+        run: |
+          set -euo pipefail
+          python3 -m py_compile \
+            scripts/lifecycle.py \
+            scripts/candidate_lifecycle.py \
+            scripts/procedure_contract.py \
+            tests/test_candidate_lifecycle.py \
+            tests/test_candidate_procedure.py
+
+      - name: Run fail-closed procedure tests
+        run: |
+          set -euo pipefail
+          python3 -m unittest discover \
+            --start-directory tests \
+            --pattern 'test_candidate_*.py' \
+            --verbose
+
+      - name: Audit the checked-out certification procedure
+        run: |
+          set -euo pipefail
+          python3 scripts/procedure_contract.py --root .
