@@ -7,9 +7,9 @@ on:
   workflow_dispatch:
     inputs:
       zed_cli_ref:
-        description: Immutable zed-cli commit to test
+        description: Optional immutable zed-cli commit override
         required: false
-        default: 741c21f512dd7e98a5f9786b90d3fb0c8696c80a
+        default: ""
   repository_dispatch:
     types: [fixture-updated]
   schedule:
@@ -29,9 +29,6 @@ defaults:
 env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: "1"
-  # Validation pin for zed-pkg/zed-cli#47. Keep immutable; replace with the
-  # final reviewed/merged commit before this canary lands on main.
-  ZED_CLI_REF: ${{ github.event.inputs.zed_cli_ref || '741c21f512dd7e98a5f9786b90d3fb0c8696c80a' }}
   ZED_INTERFACES_REF: dc0e0a0620b9462817950b552d3d334a184b1cb1
 
 jobs:
@@ -40,17 +37,36 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 25
     steps:
-      - name: Require immutable component pins
+      - name: Check out lifecycle harness and reviewed pin
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: harness
+          fetch-depth: 1
+          persist-credentials: false
+          show-progress: false
+
+      - name: Load immutable component pins
+        id: pins
         run: |
           set -euo pipefail
-          [[ "$ZED_CLI_REF" =~ ^[0-9a-f]{40}$ ]]
+          override="${{ github.event.inputs.zed_cli_ref || '' }}"
+          if [[ -n "$override" ]]; then
+            zed_cli_ref="$override"
+          else
+            zed_cli_ref="$(tr -d '[:space:]' < harness/.zed-cli-ref)"
+          fi
+          [[ "$zed_cli_ref" =~ ^[0-9a-f]{40}$ ]]
           [[ "$ZED_INTERFACES_REF" =~ ^[0-9a-f]{40}$ ]]
+          printf 'zed_cli_ref=%s\n' "$zed_cli_ref" >> "$GITHUB_OUTPUT"
+          printf 'ZED_CLI_REF=%s\n' "$zed_cli_ref" >> "$GITHUB_ENV"
+          printf 'zed-cli=%s\nzed-interfaces=%s\n' \
+            "$zed_cli_ref" "$ZED_INTERFACES_REF"
 
       - name: Check out zed-cli
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: zed-pkg/zed-cli
-          ref: ${{ env.ZED_CLI_REF }}
+          ref: ${{ steps.pins.outputs.zed_cli_ref }}
           path: zed-cli
           fetch-depth: 1
           persist-credentials: false
