@@ -1,0 +1,77 @@
+name: lifecycle fixture catalog
+
+on:
+  pull_request:
+    paths:
+      - scripts/lifecycle.py
+      - scripts/lifecycle_catalog_test.py
+      - .github/workflows/lifecycle-catalog.yml
+  push:
+    branches: [main]
+    paths:
+      - scripts/lifecycle.py
+      - scripts/lifecycle_catalog_test.py
+      - .github/workflows/lifecycle-catalog.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: lifecycle-catalog-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    name: Fixture classification and source mappings
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Check out lifecycle harness
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: harness
+          fetch-depth: 1
+          persist-credentials: false
+          show-progress: false
+
+      - name: Check out shared schema fixture
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: zed-pkg-test/shared-schema
+          ref: main
+          path: fixtures/shared-schema
+          fetch-depth: 1
+          persist-credentials: false
+          show-progress: false
+
+      - name: Check out Python consumer fixture
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: zed-pkg-test/python-app
+          ref: main
+          path: fixtures/python-app
+          fetch-depth: 1
+          persist-credentials: false
+          show-progress: false
+
+      - name: Check out polyglot Node consumer fixture
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: zed-pkg-test/polyglot-node-app
+          ref: main
+          path: fixtures/polyglot-node-app
+          fetch-depth: 1
+          persist-credentials: false
+          show-progress: false
+
+      - name: Validate fixture catalog and dependency sources
+        run: |
+          set -euo pipefail
+          python3 -m py_compile \
+            harness/scripts/lifecycle.py \
+            harness/scripts/lifecycle_catalog_test.py
+          python3 harness/scripts/lifecycle_catalog_test.py \
+            --harness-root harness \
+            --shared-schema fixtures/shared-schema \
+            --python-app fixtures/python-app \
+            --polyglot-node-app fixtures/polyglot-node-app
