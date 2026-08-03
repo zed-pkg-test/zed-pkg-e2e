@@ -1,0 +1,15 @@
+[tools]
+node = "22.4.0"
+python = { version = "3.12.4", virtualenv = ".venv" }
+
+[env]
+APP_ENV = "test"
+RETRIES = 3
+FEATURE_ENABLED = true
+
+[vars]
+release_channel = "stable"
+
+[tasks.setup]
+description = "Restore Zed package dependencies"
+run = "zed install --frozen"
