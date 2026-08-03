@@ -14,8 +14,8 @@ use zed_cli::nix_export_plan::{
     PlannedZedArtifact, ResolvedNixIntent,
 };
 use zed_interfaces::{
-    ArtifactFormat, NixBuilderNetwork, NixExportMode, NixInteropArtifact,
-    NixPackageIdentity, NixPolicyEvidence, NixPolicyProfile,
+    ArtifactFormat, NixBuilderNetwork, NixExportMode, NixInteropArtifact, NixPackageIdentity,
+    NixPolicyEvidence, NixPolicyProfile,
 };
 
 fn sha256(bytes: &[u8]) -> String {
@@ -56,11 +56,7 @@ fn symlink_artifact() -> Vec<u8> {
     header.set_link_name("/etc/passwd").unwrap();
     header.set_cksum();
     builder
-        .append_data(
-            &mut header,
-            "package/bin/sample",
-            std::io::empty(),
-        )
+        .append_data(&mut header, "package/bin/sample", std::io::empty())
         .unwrap();
     builder.into_inner().unwrap().finish().unwrap()
 }
@@ -137,7 +133,11 @@ fn required_path(name: &str) -> PathBuf {
 }
 
 fn write_bundle(root: &Path, rendered: &RenderedNixExportBundle) {
-    assert!(!root.exists(), "bundle output must be fresh: {}", root.display());
+    assert!(
+        !root.exists(),
+        "bundle output must be fresh: {}",
+        root.display()
+    );
     fs::create_dir(root).unwrap();
     fs::set_permissions(root, fs::Permissions::from_mode(0o755)).unwrap();
 
@@ -257,8 +257,7 @@ fn mutable_nixpkgs_revision_fails_closed() {
     let mut lock: Value = serde_json::from_slice(&flake_lock()).unwrap();
     lock["nodes"]["nixpkgs"]["locked"]["rev"] = json!("nixos-unstable");
     assert!(
-        render_nix_export_bundle(&plan, &artifact, &serde_json::to_vec(&lock).unwrap())
-            .is_err()
+        render_nix_export_bundle(&plan, &artifact, &serde_json::to_vec(&lock).unwrap()).is_err()
     );
 }
 
