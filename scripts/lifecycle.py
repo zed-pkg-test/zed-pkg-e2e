@@ -34,11 +34,11 @@ PACKAGE_SOURCES: dict[str, tuple[str, str]] = {
     "zed-pkg-test/python-lib": ("python-lib", "."),
     "zed-pkg-test/dart-lib": ("dart-lib", "."),
     "zed-pkg-test/gleam-lib": ("gleam-lib", "."),
+    "zedtest/shared-schema": ("shared-schema", "."),
     "zedtest/polyglot-lib-nodejs": ("polyglot-lib", "."),
     "zedtest/polyglot-lib-python": ("polyglot-lib", "."),
     "zedtest/polyglot-lib-golang": ("polyglot-lib", "."),
     "zedtest/polyglot-lib-rust": ("polyglot-lib", "."),
-    "zedtest/shared-schema": ("shared-schema", "."),
     "zedtest/ws-core": ("workspace-monorepo", "packages/core"),
     "zedtest/ws-utils": ("workspace-monorepo", "packages/utils"),
     "zedtest/ws-cli": ("workspace-monorepo", "apps/cli"),
@@ -61,6 +61,88 @@ class PackageRef:
     @property
     def spec(self) -> str:
         return f"{self.full_name}@{self.version}"
+
+
+def publish_archive_name(package: PackageRef) -> str:
+    """Return the deterministic archive name emitted by `zed publish`."""
+    return f"{package.full_name.replace('/', '-')}-{package.version}.tar.gz"
+
+
+def remove_transient_pack_outputs(root: Path, packages: Sequence[PackageRef]) -> None:
+    """Remove only verified untracked archives produced by lifecycle publishes.
+
+    The source-cleanliness invariant remains fail closed: tracked modifications,
+    symlinks, directories, and unexpected files under `.zed/pack` are rejected.
+    Repositories that already ignore these archives produce no status entries and
+    require no cleanup.
+    """
+
+    expected = {
+        f".zed/pack/{publish_archive_name(package)}" for package in packages
+    }
+    if not expected:
+        return
+
+    completed = subprocess.run(
+        [
+            "git",
+            "status",
+            "--porcelain=v1",
+            "--untracked-files=all",
+            "--",
+            ".zed/pack",
+        ],
+        cwd=root,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+    if completed.returncode != 0:
+        detail = completed.stderr.strip() or completed.stdout.strip()
+        raise RuntimeError(f"failed to inspect transient pack outputs: {detail}")
+
+    entries: list[str] = []
+    for line in completed.stdout.splitlines():
+        if len(line) < 4:
+            raise AssertionError(f"malformed git status entry for pack output: {line!r}")
+        status = line[:2]
+        relative = line[3:]
+        if status != "??":
+            raise AssertionError(
+                f"refusing to clean tracked or modified pack output: {line}"
+            )
+        if relative not in expected:
+            raise AssertionError(
+                f"refusing to clean unexpected pack output: {relative}"
+            )
+        entries.append(relative)
+
+    if not entries:
+        return
+
+    zed_dir = root / ".zed"
+    pack_dir = zed_dir / "pack"
+    if zed_dir.is_symlink() or pack_dir.is_symlink():
+        raise AssertionError("refusing to clean pack outputs through a symlink")
+
+    for relative in entries:
+        archive = root / relative
+        if archive.is_symlink() or not archive.is_file():
+            raise AssertionError(
+                f"refusing to clean non-regular pack output: {relative}"
+            )
+        if archive.parent != pack_dir:
+            raise AssertionError(
+                f"refusing to clean pack output outside .zed/pack: {relative}"
+            )
+        archive.unlink()
+
+    for directory in (pack_dir, zed_dir):
+        try:
+            directory.rmdir()
+        except OSError:
+            pass
 
 
 class Harness:
@@ -174,41 +256,6 @@ class Harness:
         if output.strip():
             raise AssertionError(f"{label} was mutated by lifecycle tests:\n{output}")
 
-    def remove_generated_pack_output(self, source: Path) -> None:
-        """Remove only untracked publish scratch output below `.zed/pack`.
-
-        `zed publish` writes its deterministic archive below `.zed/pack` even
-        when the registry is isolated. Some fixtures ignore that directory and
-        some intentionally do not. Cleaning this exact generated path keeps the
-        source-mutation assertion portable without hiding any other `.zed`
-        output or any tracked-file mutation.
-        """
-
-        zed_dir = source / ".zed"
-        if zed_dir.is_symlink():
-            raise AssertionError(f"refusing to traverse symlinked .zed path: {zed_dir}")
-
-        pack_dir = zed_dir / "pack"
-        if pack_dir.is_symlink():
-            raise AssertionError(f"refusing to remove symlinked pack path: {pack_dir}")
-        if pack_dir.exists():
-            if not pack_dir.is_dir():
-                raise AssertionError(f"generated pack path is not a directory: {pack_dir}")
-            tracked = self.run(["git", "ls-files", "--", ".zed/pack"], cwd=source)
-            if tracked.strip():
-                raise AssertionError(
-                    f"refusing to remove tracked publish output below {pack_dir}:\n{tracked}"
-                )
-            shutil.rmtree(pack_dir)
-
-        if zed_dir.is_dir():
-            try:
-                zed_dir.rmdir()
-            except OSError:
-                # Preserve and surface any unrelated `.zed` output through the
-                # normal git-clean assertion below.
-                pass
-
     def source_root(self, repo: str) -> Path:
         if repo == self.repo:
             return self.fixture
@@ -260,9 +307,10 @@ class Harness:
             home=self.root / "dependency-publish-home",
         )
         self.published_sources.add(key)
-        for output in expected_packages(manifest):
+        outputs = expected_packages(manifest)
+        for output in outputs:
             assert_registry_version(self.registry, output)
-        self.remove_generated_pack_output(source)
+        remove_transient_pack_outputs(source, outputs)
         self.assert_git_clean(self.source_root(repo), f"seed source {repo}")
 
     def seed_dependencies(self, manifest: dict) -> None:
@@ -368,10 +416,10 @@ class Harness:
             raise AssertionError(
                 f"second publish changed registry bytes for {full_name}"
             )
-        self.remove_generated_pack_output(unit)
 
         for output_index, output in enumerate(outputs):
             self.exercise_consumer(output, index, output_index)
+        remove_transient_pack_outputs(unit, outputs)
         self.assert_git_clean(self.fixture, self.repo)
 
     def exercise_consumer(
