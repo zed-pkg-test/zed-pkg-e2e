@@ -9,7 +9,7 @@ on:
       zed_cli_ref:
         description: Immutable zed-cli commit to certify
         required: false
-        default: 4ccec25304cad8589f1ceab60c36a8d05c0cef32
+        default: 38921fc61ee63f5561062a53bfae0d3bc438a02e
   schedule:
     - cron: "41 4 * * 1"
 
@@ -18,7 +18,7 @@ permissions:
 
 concurrency:
   group: mise-environment-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  cancel-in-progress: true
 
 defaults:
   run:
@@ -27,8 +27,8 @@ defaults:
 env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: "1"
-  ZED_CLI_REF: ${{ github.event.inputs.zed_cli_ref || '4ccec25304cad8589f1ceab60c36a8d05c0cef32' }}
-  ZED_INTERFACES_REF: 19e6d74d9f9ff92d549d2072793ebe1116a25d90
+  ZED_CLI_REF: ${{ github.event.inputs.zed_cli_ref || '38921fc61ee63f5561062a53bfae0d3bc438a02e' }}
+  ZED_INTERFACES_REF: c2e049006453c26ca8ca291783f681fce75cb01f
 
 jobs:
   certify:
@@ -85,6 +85,7 @@ jobs:
       - name: Run the in-repository mise contract tests
         run: |
           set -euo pipefail
+          python -m py_compile harness/scripts/mise_environment.py harness/scripts/mise_lock_naming.py
           cargo fmt --all --check --manifest-path zed-cli/Cargo.toml
           cargo test --locked --manifest-path zed-cli/Cargo.toml --lib environment::tests
           cargo test --locked --manifest-path zed-cli/Cargo.toml --test mise_environment_cli
@@ -110,6 +111,9 @@ jobs:
           python harness/scripts/mise_environment.py \
             --zed "$ZED_BIN" \
             --work-root "$RUNNER_TEMP/zed-mise-environment"
+          python harness/scripts/mise_lock_naming.py \
+            --zed "$ZED_BIN" \
+            --work-root "$RUNNER_TEMP/zed-mise-lock-naming"
 
       - name: Collect failure diagnostics
         if: failure()
@@ -117,7 +121,9 @@ jobs:
           set +e
           mkdir -p "$RUNNER_TEMP/zed-mise-diagnostics"
           cp -R "$RUNNER_TEMP/zed-mise-environment" \
-            "$RUNNER_TEMP/zed-mise-diagnostics/work-root" 2>/dev/null || true
+            "$RUNNER_TEMP/zed-mise-diagnostics/environment-work-root" 2>/dev/null || true
+          cp -R "$RUNNER_TEMP/zed-mise-lock-naming" \
+            "$RUNNER_TEMP/zed-mise-diagnostics/lock-naming-work-root" 2>/dev/null || true
           git -C zed-cli status --porcelain=v1 --untracked-files=all \
             > "$RUNNER_TEMP/zed-mise-diagnostics/zed-cli-status.txt" 2>&1
           python --version \
