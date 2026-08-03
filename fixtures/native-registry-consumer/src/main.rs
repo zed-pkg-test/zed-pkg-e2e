@@ -82,10 +82,10 @@ fn meta_mut(record: &mut NativeRegistryAdapterRecord) -> &mut NativePublication 
         .expect("fixture contains one meta publication")
 }
 
-fn platform_mut(
-    record: &mut NativeRegistryAdapterRecord,
+fn platform_mut<'a>(
+    record: &'a mut NativeRegistryAdapterRecord,
     package_name: &str,
-) -> &mut NativePublication {
+) -> &'a mut NativePublication {
     record
         .publications
         .iter_mut()
@@ -190,7 +190,7 @@ fn assert_identity_rejections() {
         })
     ));
 
-    let mut invalid_cargo_name = NativeRegistryAdapterRecord {
+    let invalid_cargo_name = NativeRegistryAdapterRecord {
         schema: NATIVE_REGISTRY_ADAPTER_SCHEMA_V1.to_string(),
         registry: NativeRegistry::Cargo,
         source: ZedNativePackageIdentity {
