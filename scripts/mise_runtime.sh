@@ -2,6 +2,14 @@
 # Black-box certification for zed-pkg's runtime mise composition.
 set -euo pipefail
 
+report_error() {
+  local status=$?
+  printf 'mise runtime certification aborted at line %s: %s (status %s)\n' \
+    "$1" "$2" "$status" >&2
+  exit "$status"
+}
+trap 'report_error "$LINENO" "$BASH_COMMAND"' ERR
+
 usage() {
   echo "usage: $0 --zed /absolute/path/to/zed --work-root /fresh/path" >&2
   exit 64
@@ -129,7 +137,7 @@ log="$work_root/logs/required.log"
     -c 'test "$MISE_STUB_ACTIVE" = 1; test "$(mise-tool)" = mise-tool; test "$(zed-tool)" = zed-tool; case "$PATH" in "$PWD/zed_modules/.bin":*"$MISE_STUB_TOOL_DIR"*) ;; *) exit 46 ;; esac; printf required-ok'
 ) | grep -q required-ok
 [[ $(grep -c '^argv=' "$log") -eq 1 ]] || fail 'required mode did not enter mise exactly once'
-pass 'required activation and PATH coexistence'
+pass 'required activation, non-login PATH preservation, and Zed bin coexistence'
 
 project="$work_root/env-required"
 write_project "$project"
@@ -229,6 +237,17 @@ grep -qx "MISE_CEILING_PATHS=$work_root" "$log"
 grep -qx "ZED_DEV_MISE_ACTIVE=1" "$log"
 pass 'frozen lock enforcement, isolation, and config precedence'
 
+: > "$log"
+(
+  cd "$project"
+  run_capture 1 "$work_root/frozen-ambient.out" "$work_root/frozen-ambient.err" \
+    env "${base_env[@]}" "MISE_STUB_LOG=$log" __MISE_DIFF=ambient "$zed" dev \
+      --no-install --frozen --nix never --mise required --python-venv never --shell "$shell_bin" -c true
+)
+grep -q 'cannot verify an ambient mise activation' "$work_root/frozen-ambient.err"
+[[ ! -s "$log" ]] || fail 'frozen ambient-mise failure unexpectedly re-entered mise'
+pass 'frozen ambient mise fails closed before re-entry'
+
 project="$work_root/dot-config"
 write_project "$project"
 printf '%s\n' '[tools]' 'python = "3.12.4"' > "$project/.mise.toml"
@@ -286,7 +305,7 @@ log="$work_root/logs/mise-recursion-guard.log"
     -c 'test -z "${MISE_STUB_ACTIVE+x}"; printf mise-guard-ok'
 ) | grep -q mise-guard-ok
 [[ ! -s "$log" ]] || fail 'mise-native recursion guard still invoked mise'
-pass 'mise-native recursion guard'
+pass 'mise-native recursion guard in non-frozen mode'
 
 project="$work_root/exit-status"
 write_project "$project"
