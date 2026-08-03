@@ -51,6 +51,16 @@ addition explicit. No CLI source changes are committed by the canary.
 
 ## Stack
 
-The canary branch is stacked on the fully certified native dependency range and
-lifecycle repair branches. After those bases land, retarget this PR to `main`
-without changing the exact product commit or consumer behavior.
+The native dependency range canary branch now contains its reviewed lifecycle
+repair as a real merge parent rather than only as pull-request metadata. The
+exact inherited base commit is
+`61a1216ee6ef2e2c7fc95bed2c6e4160e384cf4d`, whose parents are the range canary
+head and lifecycle repair head.
+
+This lockfile canary is based on that branch. Fresh pull-request workflows after
+this documentation commit therefore exercise the exact combined source-map,
+native-range, and lockfile tree. Earlier runs that began before the ancestry
+correction are not used as final regression evidence.
+
+After the stacked bases land, retarget this PR to `main` without changing the
+exact product commit or consumer behavior.
