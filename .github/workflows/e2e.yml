@@ -21,8 +21,8 @@ env:
   # Every cross-repository input is immutable. Updating one of these pins is an
   # intentional dependency change, not an ambient change to a default branch.
   ZED_E2E_REF: 5ccd57316ae39c3a3692fb4cfbda2f8a4dd74aa0
-  ZED_CLI_REF: a7e14686b79bbd3e31dc658839ba348c7d2382a5
-  ZED_INTERFACES_REF: 3ffca44d2d93ed4caae5737fe4a38fb50e7f3f60
+  ZED_CLI_REF: 8929a58c6591c7a964d7f91412665d7c8a4afdf3
+  ZED_INTERFACES_REF: dc0e0a0620b9462817950b552d3d334a184b1cb1
   ZED_API_REF: 93de2808e0c19a39bf8350abc6cd3104b729e5bc
   ZED_WEB_REF: bb6d9a7094fd9a8d13224865b32e9c362eea1b03
   NODE_LIB_REF: 2d41e658a382fdff27ef87a0db24dbaff280a685
@@ -65,7 +65,9 @@ jobs:
           persist-credentials: false
           show-progress: false
 
-      # zed-cli path-depends on ../zed-interfaces, so they must be siblings.
+      # Keep production components as sibling checkouts. Each is pinned
+      # independently, and the candidate CLI's declared interface revision must
+      # match ZED_INTERFACES_REF.
       - name: Check out zed-cli
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
