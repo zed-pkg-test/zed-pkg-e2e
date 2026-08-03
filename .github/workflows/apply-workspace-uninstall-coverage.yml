@@ -38,47 +38,22 @@ jobs:
           persist-credentials: false
           show-progress: false
 
-      - name: Apply uninstall coverage and immutable implementation pin
+      - name: Apply and validate workspace uninstall coverage
         run: |
           set -euo pipefail
           python3 .github/augment_workspace_uninstall_coverage.py
-          python3 - <<'PY'
-          from pathlib import Path
-
-          old = "56e597b35deccc82bff7deee807f459a1def537d"
-          new = "8cc6745c75fd46dabf2e383cbcfc14db5ff933da"
-          workflows = [
-              Path(".github/workflows/recursive-installs.yml"),
-              Path(".github/workflows/recursive-installs-stress.yml"),
-              Path(".github/workflows/install-recovery.yml"),
-              Path(".github/workflows/org-app-installs.yml"),
-          ]
-          for path in workflows:
-              text = path.read_text(encoding="utf-8")
-              if text.count(old) != 2:
-                  raise RuntimeError(f"{path}: expected two old pins, found {text.count(old)}")
-              updated = text.replace(old, new)
-              if updated.count(new) != 2:
-                  raise RuntimeError(f"{path}: expected two new pins, found {updated.count(new)}")
-              path.write_text(updated, encoding="utf-8")
-          PY
           python3 -m py_compile scripts/org_app_installs.py
           grep -F 'workspace uninstall left projection' scripts/org_app_installs.py
           grep -F 'workspace post-uninstall restore accessed registry artifacts' scripts/org_app_installs.py
           grep -F 'workspace restored copy mode leaked symlinks' scripts/org_app_installs.py
           git diff --check
 
-      - name: Commit and publish the validated E2E changes
+      - name: Publish the validated script change
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          git add \
-            scripts/org_app_installs.py \
-            .github/workflows/recursive-installs.yml \
-            .github/workflows/recursive-installs-stress.yml \
-            .github/workflows/install-recovery.yml \
-            .github/workflows/org-app-installs.yml
+          git add scripts/org_app_installs.py
           git diff --cached --check
           if git diff --cached --quiet; then
             echo 'workspace uninstall coverage is already published'
@@ -90,11 +65,6 @@ jobs:
           git fetch --no-tags origin agent/recursive-install-e2e
           git rebase origin/agent/recursive-install-e2e
           python3 -m py_compile scripts/org_app_installs.py
-          grep -F '8cc6745c75fd46dabf2e383cbcfc14db5ff933da' \
-            .github/workflows/recursive-installs.yml \
-            .github/workflows/recursive-installs-stress.yml \
-            .github/workflows/install-recovery.yml \
-            .github/workflows/org-app-installs.yml
           git push \
             "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" \
             HEAD:agent/recursive-install-e2e
