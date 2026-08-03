@@ -10,7 +10,7 @@ on:
       zed_interfaces_ref:
         description: Immutable zed-interfaces commit to certify
         required: false
-        default: 3f1b1dbcd2266923a7b630313bd883fed16c590b
+        default: c9b547c39ea5b1be50eb8284b726b914ea2d6041
 
 permissions:
   contents: read
@@ -26,7 +26,7 @@ defaults:
 env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: "1"
-  ZED_INTERFACES_REF: ${{ github.event.inputs.zed_interfaces_ref || '3f1b1dbcd2266923a7b630313bd883fed16c590b' }}
+  ZED_INTERFACES_REF: ${{ github.event.inputs.zed_interfaces_ref || 'c9b547c39ea5b1be50eb8284b726b914ea2d6041' }}
 
 jobs:
   native-dependency-range:
@@ -65,14 +65,23 @@ jobs:
           rustc --version --verbose
           cargo --version --verbose
 
-      - name: Format candidate and generate schemas
+      - name: Verify formatter and deterministic schema
         run: |
           set -euo pipefail
           cd zed-interfaces
-          cargo fmt --all
-          cargo run --locked --example generate_schemas
+          cargo fmt --all -- --check
           test -s schemas/native-dependency-lock.json
-          git diff --check
+          cp schemas/native-dependency-lock.json \
+            "$RUNNER_TEMP/native-dependency-lock.checked-in.json"
+          cargo run --locked --example generate_schemas
+          git diff --exit-code -- schemas/native-dependency-lock.json
+          cmp "$RUNNER_TEMP/native-dependency-lock.checked-in.json" \
+            schemas/native-dependency-lock.json
+          sha256sum schemas/native-dependency-lock.json \
+            | tee "$RUNNER_TEMP/native-dependency-lock-schema.sha256"
+          cargo run --locked --example generate_schemas
+          sha256sum --check "$RUNNER_TEMP/native-dependency-lock-schema.sha256"
+          git diff --exit-code -- schemas/native-dependency-lock.json
 
       - name: Run complete interface gates
         run: |
@@ -80,6 +89,7 @@ jobs:
           cd zed-interfaces
           cargo test --locked --all-targets
           cargo clippy --locked --all-targets --all-features -- -D warnings
+          git diff --check
 
       - name: Compile and run external consumer offline
         run: |
@@ -88,7 +98,7 @@ jobs:
           cargo generate-lockfile --offline --manifest-path "$fixture/Cargo.toml"
           cargo run --locked --offline --manifest-path "$fixture/Cargo.toml"
 
-      - name: Capture materialization evidence
+      - name: Capture certification evidence
         if: always()
         run: |
           set +e
@@ -99,13 +109,12 @@ jobs:
           cp zed-interfaces/examples/generate_schemas.rs "$evidence/examples/" 2>/dev/null
           cp zed-interfaces/schemas/native-dependency-lock.json "$evidence/schemas/" 2>/dev/null
           cp harness/fixtures/native-dependency-consumer/Cargo.lock "$evidence/consumer/" 2>/dev/null
-          git -C zed-interfaces diff > "$evidence/formatted-and-schema.patch" 2>&1
+          cp "$RUNNER_TEMP/native-dependency-lock-schema.sha256" "$evidence/" 2>/dev/null
+          git -C zed-interfaces diff > "$evidence/certification.patch" 2>&1
           git -C zed-interfaces status --porcelain=v1 --untracked-files=all \
             > "$evidence/interfaces-status.txt" 2>&1
-          sha256sum zed-interfaces/schemas/native-dependency-lock.json \
-            > "$evidence/native-dependency-lock-schema.sha256" 2>/dev/null
 
-      - name: Upload materialization evidence
+      - name: Upload certification evidence
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
