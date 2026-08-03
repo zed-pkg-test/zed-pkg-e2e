@@ -9,7 +9,7 @@ on:
       zed_cli_ref:
         description: Immutable zed-cli commit to certify
         required: false
-        default: 2211b69e3c3b7e850dfcfb650936d0d4b9f5437c
+        default: 12fa84f11cef7ce2783683d6efc5b79409f62be7
   schedule:
     - cron: "23 4 * * 2"
 
@@ -27,7 +27,7 @@ defaults:
 env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: "1"
-  ZED_CLI_REF: ${{ github.event.inputs.zed_cli_ref || '2211b69e3c3b7e850dfcfb650936d0d4b9f5437c' }}
+  ZED_CLI_REF: ${{ github.event.inputs.zed_cli_ref || '12fa84f11cef7ce2783683d6efc5b79409f62be7' }}
 
 jobs:
   certify:
@@ -79,7 +79,9 @@ jobs:
           bash -n harness/scripts/mise_runtime.sh
           cargo fmt --all --check --manifest-path zed-cli/Cargo.toml
           cargo test --locked --manifest-path zed-cli/Cargo.toml \
-            --test develop_edge_cases --test develop_help_contract
+            --test develop_edge_cases \
+            --test develop_shell_edge_cases \
+            --test develop_help_contract
           cargo test --locked --manifest-path zed-cli/Cargo.toml dev::tests
           cargo build --locked --release --manifest-path zed-cli/Cargo.toml --bin zed
           test -x zed-cli/target/release/zed
