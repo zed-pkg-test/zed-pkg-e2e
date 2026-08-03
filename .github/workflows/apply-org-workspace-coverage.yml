@@ -41,6 +41,7 @@ jobs:
       - name: Apply and validate workspace coverage
         run: |
           set -euo pipefail
+          # The helper is intentionally exact and fail-closed before publishing.
           python3 .github/augment_org_workspace_installs.py
           python3 -m py_compile scripts/org_app_installs.py
           grep -F 'frozen workspace repair accessed registry artifacts' scripts/org_app_installs.py
