@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import importlib.util
 import os
+import sys
 import unittest
 from pathlib import Path
 from types import ModuleType
@@ -19,6 +20,7 @@ def load_lifecycle() -> ModuleType:
     if spec is None or spec.loader is None:
         raise RuntimeError(f"cannot load lifecycle module from {LIFECYCLE_PATH}")
     module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
     spec.loader.exec_module(module)
     return module
 
