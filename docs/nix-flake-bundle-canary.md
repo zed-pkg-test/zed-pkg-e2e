@@ -6,11 +6,20 @@ This repository independently certifies the public standalone-flake renderer fro
 `zed-pkg/zed-cli`. Here, **Zed** means the independent `zed-pkg` package manager;
 it is unrelated to the Zed text editor.
 
-The canary is intentionally outside the implementation repository. It pins one
-exact 40-character `zed-cli` commit, checks out that commit with persisted Git
-credentials disabled, and injects one temporary integration test that uses only
-the public `zed_cli::nix_export_bundle` and `zed_cli::nix_export_plan` APIs. The
-temporary test is removed before source-checkout cleanliness is asserted.
+The current reviewed stack is:
+
+- external planner canary pinned to merged planner
+  `zed-pkg/zed-cli@19841ece0bf3649a0ed4005c150fb3721d166605`;
+- this standalone-bundle canary pinned to renderer candidate
+  `zed-pkg/zed-cli@af4c44173ece59b799e77b1e1ed4e35268712b6e` from PR #83; and
+- immutable shared contract
+  `zed-pkg/zed-interfaces@c2e049006453c26ca8ca291783f681fce75cb01f`.
+
+The canary is intentionally outside the implementation repository. It checks out
+one exact CLI commit with persisted Git credentials disabled and injects one
+temporary integration test that uses only the public
+`zed_cli::nix_export_bundle` and `zed_cli::nix_export_plan` APIs. The temporary
+test is removed before source-checkout cleanliness is asserted.
 
 ## Contract under test
 
@@ -86,9 +95,14 @@ no OIDC or package permission, and never commits or pushes. Successful jobs
 retain only non-secret hashes, systems, selected output evidence, and Nix path
 information for seven days. Failure diagnostics are retained for three days.
 
+The complete workflow and external Rust consumer are scanned for prohibited write,
+secret, OIDC/package-publish, network-client, and process-spawning capabilities.
+The denylist tokens are assembled from fragments so the policy code does not
+falsely match its own rule declarations.
+
 The candidate pin may be overridden manually only with another exact lowercase
 40-character commit. Promotion to a durable baseline requires review and a
-follow-up pin to the exact post-merge implementation commit.
+follow-up pin to the exact post-merge renderer commit.
 
 ## Stack and merge order
 
@@ -100,6 +114,11 @@ acceptance path is ordered as:
 3. independently verified persistence and replay;
 4. explicit immutable closure acquisition followed by offline Nix replay; and
 5. later adapter attestation, overlay/cache publication, and registry storage.
+
+After the external planner canary merges, this branch must be rebuilt on `main`
+with exactly five bundle-specific files. After renderer PR #83 merges, the
+candidate pin must be advanced to its exact merge commit before this canary can
+become a durable baseline.
 
 The canary does not claim that locked dependency-graph assembly, source-builder
 inference, overlay publication, signed binary caches, or upstream Nixpkgs
