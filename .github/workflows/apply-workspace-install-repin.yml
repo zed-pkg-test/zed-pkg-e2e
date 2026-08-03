@@ -7,13 +7,19 @@ on:
     paths:
       - .github/repin_workspace_install_head.py
       - .github/workflows/apply-workspace-install-repin.yml
+  pull_request:
+    branches:
+      - main
+    paths:
+      - .github/repin_workspace_install_head.py
+      - .github/workflows/apply-workspace-install-repin.yml
   workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: apply-workspace-install-head-repin
+  group: apply-workspace-install-head-repin-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:
