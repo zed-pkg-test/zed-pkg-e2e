@@ -22,7 +22,7 @@ from pathlib import Path
 from typing import Mapping, Sequence
 
 ORG = "zed-pkg-test"
-NON_PACKAGE_REPOS = {"shared-schema", "zed-pkg-e2e"}
+NON_PACKAGE_REPOS = {"zed-pkg-e2e"}
 
 # Package -> (fixture repository, path containing .zpkg.toml). This is the
 # dependency graph boundary. Target packages all map to the one source repo
@@ -34,6 +34,7 @@ PACKAGE_SOURCES: dict[str, tuple[str, str]] = {
     "zed-pkg-test/python-lib": ("python-lib", "."),
     "zed-pkg-test/dart-lib": ("dart-lib", "."),
     "zed-pkg-test/gleam-lib": ("gleam-lib", "."),
+    "zedtest/shared-schema": ("shared-schema", "."),
     "zedtest/polyglot-lib-nodejs": ("polyglot-lib", "."),
     "zedtest/polyglot-lib-python": ("polyglot-lib", "."),
     "zedtest/polyglot-lib-golang": ("polyglot-lib", "."),
