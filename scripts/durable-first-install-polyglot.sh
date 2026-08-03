@@ -199,10 +199,16 @@ install_consumer() {
   grep -F "\"$package\" = \"^1.0.0\"" "$root/.zpkg.toml"
   grep -F "adapter = \"$ecosystem\"" "$root/.zpkg.toml"
   grep -F "target = \"$ecosystem\"" "$root/.zpkg.toml"
-  if grep -Fq "$work_root" "$root/.zpkg.toml" "$root/.zpkg.lock"; then
-    echo "generated project state leaked an absolute working path" >&2
+
+  # The generated manifest is portable and must never capture the disposable
+  # worktree. The lockfile has a different responsibility: it intentionally
+  # pins the exact immutable artifact URL, which is an absolute file:// URL in
+  # this isolated local-registry canary.
+  if grep -Fq "$work_root" "$root/.zpkg.toml"; then
+    echo "generated manifest leaked an absolute working path" >&2
     exit 1
   fi
+  grep -Fq "$file_registry" "$root/.zpkg.lock"
 
   assert_package_shape "$root"
   run_native_consumer "$root" "$work_root/${label}-native.log"
