@@ -9,7 +9,7 @@ on:
       zed_cli_ref:
         description: Immutable zed-cli commit to certify
         required: false
-        default: 151f23c0f565a9ff72a3cc44f094ff2354c65b98
+        default: 323ef670aac2fdb517f8554793c8cfa7f8bdffb2
   schedule:
     - cron: "23 4 * * 2"
 
@@ -18,7 +18,7 @@ permissions:
 
 concurrency:
   group: mise-runtime-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  cancel-in-progress: true
 
 defaults:
   run:
@@ -27,7 +27,7 @@ defaults:
 env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: "1"
-  ZED_CLI_REF: ${{ github.event.inputs.zed_cli_ref || '151f23c0f565a9ff72a3cc44f094ff2354c65b98' }}
+  ZED_CLI_REF: ${{ github.event.inputs.zed_cli_ref || '323ef670aac2fdb517f8554793c8cfa7f8bdffb2' }}
 
 jobs:
   certify:
