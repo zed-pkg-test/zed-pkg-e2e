@@ -1,0 +1,107 @@
+name: apply lifecycle catalog correction
+
+on:
+  push:
+    branches:
+      - alexanderdmills/den-1439-mise-environment-e2e
+  pull_request:
+    types: [opened, reopened, synchronize]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: lifecycle-catalog-correction-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  apply:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: alexanderdmills/den-1439-mise-environment-e2e
+          fetch-depth: 0
+          persist-credentials: true
+          show-progress: false
+
+      - name: Correct package classification and dependency source mapping
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path('scripts/lifecycle.py')
+          text = path.read_text(encoding='utf-8')
+
+          old_non_packages = 'NON_PACKAGE_REPOS = {"shared-schema", "zed-pkg-e2e"}'
+          new_non_packages = 'NON_PACKAGE_REPOS = {"zed-pkg-e2e"}'
+          if text.count(old_non_packages) != 1:
+              raise SystemExit('could not locate stale NON_PACKAGE_REPOS declaration')
+          text = text.replace(old_non_packages, new_non_packages, 1)
+
+          mapping_anchor = '''    "zedtest/polyglot-lib-rust": ("polyglot-lib", "."),
+          '''
+          mapping = mapping_anchor + '''    "zedtest/shared-schema": ("shared-schema", "."),
+          '''
+          if text.count(mapping_anchor) != 1:
+              raise SystemExit('could not locate PACKAGE_SOURCES insertion point')
+          text = text.replace(mapping_anchor, mapping, 1)
+
+          method_anchor = '''    def source_root(self, repo: str) -> Path:
+          '''
+          classification_method = '''    def validate_fixture_classification(self) -> None:
+              has_manifest = (self.fixture / ".zpkg.toml").is_file()
+              declared_non_package = self.repo in NON_PACKAGE_REPOS
+              if has_manifest and declared_non_package:
+                  raise AssertionError(
+                      f"{self.repo} has .zpkg.toml but is listed in NON_PACKAGE_REPOS"
+                  )
+              if not has_manifest and not declared_non_package:
+                  raise AssertionError(
+                      f"{self.repo} has no .zpkg.toml and is not listed in NON_PACKAGE_REPOS"
+                  )
+
+          '''
+          if text.count(method_anchor) != 1:
+              raise SystemExit('could not locate source_root method')
+          text = text.replace(method_anchor, classification_method + method_anchor, 1)
+
+          main_anchor = '''        if args.repo in NON_PACKAGE_REPOS:
+          '''
+          main_replacement = '''        harness.validate_fixture_classification()
+              if args.repo in NON_PACKAGE_REPOS:
+          '''
+          if text.count(main_anchor) != 1:
+              raise SystemExit('could not locate lifecycle classification branch')
+          text = text.replace(main_anchor, main_replacement, 1)
+
+          path.write_text(text, encoding='utf-8')
+          PY
+
+          python3 -m py_compile scripts/lifecycle.py scripts/lifecycle_catalog_test.py
+          python3 - <<'PY'
+          import importlib.util
+          import sys
+          from pathlib import Path
+
+          path = Path('scripts/lifecycle.py')
+          spec = importlib.util.spec_from_file_location('lifecycle_validation', path)
+          assert spec and spec.loader
+          module = importlib.util.module_from_spec(spec)
+          sys.modules[spec.name] = module
+          spec.loader.exec_module(module)
+          assert module.NON_PACKAGE_REPOS == {'zed-pkg-e2e'}
+          assert module.PACKAGE_SOURCES['zedtest/shared-schema'] == ('shared-schema', '.')
+          assert 'shared-schema' not in module.NON_PACKAGE_REPOS
+          PY
+          git diff --check
+
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add scripts/lifecycle.py
+          git commit -m 'fix: classify shared-schema as a package fixture'
+          git push origin HEAD:alexanderdmills/den-1439-mise-environment-e2e
