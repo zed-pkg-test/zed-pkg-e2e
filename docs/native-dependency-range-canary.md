@@ -62,6 +62,15 @@ in `zed-pkg-test/zed-pkg-e2e#24`. That repair promotes
 `PACKAGE_SOURCES`, allowing the existing Python consumer and the shared-schema
 matrix row to run their real package lifecycle.
 
+The reviewed lifecycle base is exact commit
+`b34f52b44f72118742f566829166bebd7358788d`. Its source-map, complete lifecycle,
+install/OCI, and browser/API/web workflows all passed:
+
+- https://github.com/zed-pkg-test/zed-pkg-e2e/actions/runs/30840374537
+- https://github.com/zed-pkg-test/zed-pkg-e2e/actions/runs/30840373114
+- https://github.com/zed-pkg-test/zed-pkg-e2e/actions/runs/30840376647
+- https://github.com/zed-pkg-test/zed-pkg-e2e/actions/runs/30840373646
+
 This stack is intentional: the focused native-range workflow remains independent
 of the lifecycle implementation, while the repository-wide regression suite is
 required to pass against the repaired fixture graph before either PR is promoted.
