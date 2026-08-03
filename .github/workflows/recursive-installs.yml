@@ -9,7 +9,7 @@ on:
       zed_cli_ref:
         description: Immutable zed-cli commit to test
         required: false
-        default: 58d688b1a1bfbbb9b1ff551a303b7360a8ca94be
+        default: 0b1e11ac2ae0af75fa31e969f8a58dda80be329e
 
 permissions:
   contents: read
@@ -25,7 +25,7 @@ defaults:
 env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: "1"
-  ZED_CLI_REF: ${{ github.event.inputs.zed_cli_ref || '58d688b1a1bfbbb9b1ff551a303b7360a8ca94be' }}
+  ZED_CLI_REF: ${{ github.event.inputs.zed_cli_ref || '0b1e11ac2ae0af75fa31e969f8a58dda80be329e' }}
   ZED_INTERFACES_REF: dc0e0a0620b9462817950b552d3d334a184b1cb1
 
 jobs:
@@ -79,8 +79,10 @@ jobs:
       - name: Format and unit-test recursive installer
         run: |
           set -euo pipefail
+          python3 -m py_compile harness/scripts/recursive_installs.py
           cargo fmt --all --check --manifest-path zed-cli/Cargo.toml
           cargo test --locked --manifest-path zed-cli/Cargo.toml --lib install_graph::tests
+          cargo test --locked --manifest-path zed-cli/Cargo.toml --lib config::tests
 
       - name: Build immutable zed binary
         run: |
@@ -111,9 +113,9 @@ jobs:
           find "$WORK_ROOT/registry" -maxdepth 9 -type f -print0 2>/dev/null \
             | sort -z | xargs -0 -r sha256sum \
             > "$WORK_ROOT/diagnostics/registry-sha256.txt" 2>&1
-          find "$WORK_ROOT/shared-home" -maxdepth 9 -type f -print0 2>/dev/null \
+          find "$WORK_ROOT" -path '*/cache/*.tar.gz' -type f -print0 2>/dev/null \
             | sort -z | xargs -0 -r sha256sum \
-            > "$WORK_ROOT/diagnostics/shared-home-sha256.txt" 2>&1
+            > "$WORK_ROOT/diagnostics/all-cache-sha256.txt" 2>&1
           true
 
       - name: Upload failure diagnostics
