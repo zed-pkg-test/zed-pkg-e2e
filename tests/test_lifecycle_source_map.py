@@ -85,6 +85,12 @@ class TransientPackCleanupTests(unittest.TestCase):
         path.parent.mkdir(parents=True, exist_ok=True)
         return path
 
+    def test_archive_name_matches_the_cli_package_identity_convention(self) -> None:
+        self.assertEqual(
+            lifecycle.publish_archive_name(self.package),
+            "zedtest-shared-schema-1.0.0.tar.gz",
+        )
+
     def test_removes_only_the_expected_untracked_publish_archive(self) -> None:
         archive = self.pack_path(lifecycle.publish_archive_name(self.package))
         archive.write_bytes(b"archive")
