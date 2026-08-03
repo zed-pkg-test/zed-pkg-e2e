@@ -61,12 +61,22 @@ Assertions are not converted to warnings or skipped unsupported behavior.
 
 ## Real Nix replay
 
-On Ubuntu 24.04 and macOS 15, the workflow performs one explicit
-`nix flake archive --no-update-lock-file` preparation step for each generated
-bundle. It then runs `nix flake check` and `nix build` offline with lock updates
-disabled. Both clean-room bundles must resolve to the same output path. The
-resulting executable runs with no `zed` command on `PATH`, and the output closure
-must not retain a `zed-cli` or `zed-pkg` runtime dependency.
+On Ubuntu 24.04 and macOS 15, the workflow archives both byte-identical flake
+sources and performs one explicit online realization of the exact locked package
+while the configured binary cache is available. It then runs `nix flake check`
+and `nix build` for both clean-room bundles with `--offline` and
+`--no-update-lock-file`. The primed output and both offline output paths must be
+identical.
+
+This split is deliberate. An empty Nix store does not contain the immutable
+Nixpkgs/stdenv closure. Asking it to build offline immediately tests whether a
+hosted runner can bootstrap all of Nixpkgs from source, not whether the generated
+Zed package is reproducible or network-independent after its declared closure is
+available. The one online realization is therefore a visible input-acquisition
+boundary; every replay assertion after that boundary is offline and lock-preserving.
+
+The resulting executable runs with no `zed` command on `PATH`, and the output
+closure must not retain a `zed-cli` or `zed-pkg` runtime dependency.
 
 ## CI and evidence policy
 
@@ -88,7 +98,7 @@ acceptance path is ordered as:
 1. immutable frozen plan;
 2. pure deterministic bundle rendering;
 3. independently verified persistence and replay;
-4. offline Nix evaluation/build; and
+4. explicit immutable closure acquisition followed by offline Nix replay; and
 5. later adapter attestation, overlay/cache publication, and registry storage.
 
 The canary does not claim that locked dependency-graph assembly, source-builder
