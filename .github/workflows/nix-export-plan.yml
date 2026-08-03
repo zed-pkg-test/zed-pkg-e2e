@@ -1,0 +1,151 @@
+name: external nix export plan
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/nix-export-plan.yml"
+      - ".zed-nix-plan-cli-ref"
+      - "scripts/nix_export_plan_canary.py"
+      - "docs/nix-export-plan-canary.md"
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/nix-export-plan.yml"
+      - ".zed-nix-plan-cli-ref"
+      - "scripts/nix_export_plan_canary.py"
+      - "docs/nix-export-plan-canary.md"
+  workflow_dispatch:
+    inputs:
+      zed_cli_ref:
+        description: Optional immutable zed-cli commit override
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+concurrency:
+  group: external-nix-export-plan-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  canary:
+    name: Independent frozen plan replay
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+
+    steps:
+      - name: Check out harness and reviewed pin
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          path: harness
+          persist-credentials: false
+          show-progress: false
+
+      - name: Load immutable CLI pin
+        id: pin
+        shell: bash
+        run: |
+          set -euo pipefail
+          override="${{ github.event.inputs.zed_cli_ref || '' }}"
+          if [[ -n "$override" ]]; then
+            ref="$override"
+          else
+            ref="$(tr -d '[:space:]' < harness/.zed-nix-plan-cli-ref)"
+          fi
+          [[ "$ref" =~ ^[0-9a-f]{40}$ ]]
+          printf 'ref=%s\n' "$ref" >> "$GITHUB_OUTPUT"
+          printf 'zed-cli=%s\n' "$ref"
+
+      - name: Check out exact zed-cli implementation
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: zed-pkg/zed-cli
+          ref: ${{ steps.pin.outputs.ref }}
+          path: zed-cli
+          persist-credentials: false
+          show-progress: false
+
+      - name: Check out real single-package fixture
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: zed-pkg-test/node-lib
+          ref: main
+          path: node-fixture
+          persist-credentials: false
+          show-progress: false
+
+      - name: Check out real polyglot fixture
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: zed-pkg-test/polyglot-lib
+          ref: main
+          path: polyglot-fixture
+          persist-credentials: false
+          show-progress: false
+
+      - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30
+        with:
+          components: rustfmt
+
+      - name: Verify reviewed interface pin and build exact CLI
+        run: |
+          set -euo pipefail
+          grep -F 'rev = "625ba7bdf4339df7d0880f791a0715ca894558fe"' zed-cli/Cargo.toml
+          grep -F '#625ba7bdf4339df7d0880f791a0715ca894558fe' zed-cli/Cargo.lock
+          cargo fmt --all --check --manifest-path zed-cli/Cargo.toml
+          cargo build --release --locked --manifest-path zed-cli/Cargo.toml --bin zed
+          install -Dm755 zed-cli/target/release/zed "$RUNNER_TEMP/zed-plan-bin/zed"
+          (cd "$RUNNER_TEMP/zed-plan-bin" && sha256sum zed | tee SHA256SUMS)
+          "$RUNNER_TEMP/zed-plan-bin/zed" --version
+
+      - name: Run single-package, prebuilt-bin, and polyglot canaries
+        env:
+          WORK_ROOT: ${{ runner.temp }}/zed-nix-export-plan-canary
+        run: |
+          set -euo pipefail
+          test ! -e "$WORK_ROOT"
+          python3 harness/scripts/nix_export_plan_canary.py \
+            --node-fixture node-fixture \
+            --polyglot-fixture polyglot-fixture \
+            --zed "$RUNNER_TEMP/zed-plan-bin/zed" \
+            --work-root "$WORK_ROOT"
+
+      - name: Prove repository and workflow are read-only
+        run: |
+          set -euo pipefail
+          test -z "$(git -C node-fixture status --porcelain=v1 --untracked-files=all)"
+          test -z "$(git -C polyglot-fixture status --porcelain=v1 --untracked-files=all)"
+          python3 - <<'PY'
+          from pathlib import Path
+
+          workflow = Path('harness/.github/workflows/nix-export-plan.yml').read_text()
+          assert 'contents: read' in workflow
+          assert 'persist-credentials: false' in workflow
+          for forbidden in ('contents: write', 'git push', 'pull_request_target:'):
+              assert forbidden not in workflow, forbidden
+          PY
+
+      - name: Collect failure diagnostics
+        if: failure()
+        env:
+          WORK_ROOT: ${{ runner.temp }}/zed-nix-export-plan-canary
+        run: |
+          set +e
+          mkdir -p "$WORK_ROOT/diagnostics"
+          git -C node-fixture status --porcelain=v1 --untracked-files=all \
+            > "$WORK_ROOT/diagnostics/node-fixture-status.txt" 2>&1
+          git -C polyglot-fixture status --porcelain=v1 --untracked-files=all \
+            > "$WORK_ROOT/diagnostics/polyglot-fixture-status.txt" 2>&1
+          find "$WORK_ROOT" -maxdepth 10 -printf '%y %P -> %l\n' 2>/dev/null \
+            | LC_ALL=C sort > "$WORK_ROOT/diagnostics/work-tree.txt" 2>&1
+
+      - name: Upload failure diagnostics
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: nix-export-plan-diagnostics-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/zed-nix-export-plan-canary/diagnostics
+          if-no-files-found: warn
+          retention-days: 14
+          include-hidden-files: false
