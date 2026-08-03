@@ -31,7 +31,8 @@ artifact actions, an exact 40-character zed-cli revision, disabled persisted
 checkout credentials, and failure-only diagnostics. The aggregate lifecycle
 gate requires the external fetch canary and every fixture lifecycle to pass.
 
-During development, `ZED_CLI_REF` points at the exact reviewed commit of the
-stacked zed-cli pull request. Before this canary merges to `main`, update that pin
-to the final merged zed-cli commit so scheduled and repository-dispatch runs
-never depend on an unmerged branch head.
+During development, `.zed-cli-ref` contains the exact reviewed commit of the
+stacked zed-cli pull request. A manual workflow dispatch may override it only
+with another full 40-character commit. Before this canary merges to `main`,
+update `.zed-cli-ref` to the final merged zed-cli commit so scheduled and
+repository-dispatch runs never depend on an unmerged branch head.
