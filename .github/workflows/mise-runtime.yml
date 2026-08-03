@@ -1,0 +1,130 @@
+name: mise runtime compatibility
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      zed_cli_ref:
+        description: Immutable zed-cli commit to certify
+        required: false
+        default: 151f23c0f565a9ff72a3cc44f094ff2354c65b98
+  schedule:
+    - cron: "23 4 * * 2"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mise-runtime-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: "1"
+  ZED_CLI_REF: ${{ github.event.inputs.zed_cli_ref || '151f23c0f565a9ff72a3cc44f094ff2354c65b98' }}
+
+jobs:
+  certify:
+    name: Runtime / ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-24.04
+          - macos-15
+    steps:
+      - name: Require an immutable CLI pin
+        run: |
+          set -euo pipefail
+          [[ "$ZED_CLI_REF" =~ ^[0-9a-f]{40}$ ]]
+
+      - name: Check out certification harness
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: harness
+          fetch-depth: 1
+          persist-credentials: false
+          show-progress: false
+
+      - name: Check out immutable zed CLI
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: zed-pkg/zed-cli
+          ref: ${{ env.ZED_CLI_REF }}
+          path: zed-cli
+          fetch-depth: 1
+          persist-credentials: false
+          show-progress: false
+
+      - name: Install the declared Rust toolchain
+        run: |
+          set -euo pipefail
+          rustup toolchain install stable --profile minimal --component rustfmt
+          rustup default stable
+          rustc --version --verbose
+          cargo --version --verbose
+          bash --version | head -1
+
+      - name: Build the immutable CLI and run direct runtime tests
+        run: |
+          set -euo pipefail
+          bash -n harness/scripts/mise_runtime.sh
+          cargo fmt --all --check --manifest-path zed-cli/Cargo.toml
+          cargo test --locked --manifest-path zed-cli/Cargo.toml dev::tests
+          cargo build --locked --release --manifest-path zed-cli/Cargo.toml --bin zed
+          test -x zed-cli/target/release/zed
+
+      - name: Certify consumer-visible mise runtime behavior
+        run: |
+          set -euo pipefail
+          bash harness/scripts/mise_runtime.sh \
+            --zed "$PWD/zed-cli/target/release/zed" \
+            --work-root "$RUNNER_TEMP/zed-mise-runtime"
+
+      - name: Collect failure diagnostics
+        if: failure()
+        run: |
+          set +e
+          diagnostics="$RUNNER_TEMP/zed-mise-runtime-diagnostics"
+          mkdir -p "$diagnostics"
+          cp -R "$RUNNER_TEMP/zed-mise-runtime" "$diagnostics/work-root" 2>/dev/null || true
+          git -C zed-cli status --porcelain=v1 --untracked-files=all \
+            > "$diagnostics/zed-cli-status.txt" 2>&1
+          git -C harness status --porcelain=v1 --untracked-files=all \
+            > "$diagnostics/harness-status.txt" 2>&1
+          rustc --version --verbose > "$diagnostics/rust-version.txt" 2>&1
+          cargo --version --verbose > "$diagnostics/cargo-version.txt" 2>&1
+          bash --version > "$diagnostics/bash-version.txt" 2>&1
+
+      - name: Upload failure diagnostics
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: mise-runtime-${{ matrix.os }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/zed-mise-runtime-diagnostics
+          if-no-files-found: warn
+          retention-days: 14
+          include-hidden-files: true
+
+  gate:
+    name: All mise runtime platforms passed
+    if: always()
+    needs: certify
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Enforce aggregate result
+        env:
+          MATRIX_RESULT: ${{ needs.certify.result }}
+        run: |
+          set -euo pipefail
+          printf 'mise-runtime=%s\n' "$MATRIX_RESULT"
+          test "$MATRIX_RESULT" = success
