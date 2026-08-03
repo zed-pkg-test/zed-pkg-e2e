@@ -62,12 +62,22 @@ Do not call a mutable branch or tag. The workflow receives no secrets and
 declares only read access to repository contents, so pull-request code cannot
 inherit publication credentials.
 
-## Today’s candidate
+## Initial candidate rollout
 
 The initial rollout exercises `zed-pkg/zed-cli#36` at
-`8d318ce457841c485e394575dee17fbf78fcc63c`, with
+`73e7d818741acb6d33ddfa5f5617ac7d0583865b`, with
 `zed-pkg/zed-interfaces` pinned to
 `dc0e0a0620b9462817950b552d3d334a184b1cb1`.
+
+The first smoke run, `30786114917`, tested the earlier CLI commit
+`8d318ce457841c485e394575dee17fbf78fcc63c`. The immutable contract, candidate
+build, checksum verification, and non-package refusal passed, while every
+package fixture independently exposed the same product regression: a frozen
+install moved `.zpkg.lock` into transaction staging and committed without
+rewriting it. The candidate now checkpoints that lockfile while leaving the
+source bytes visible and adds exact-byte commit and rollback tests. The smoke
+workflow is repinned to the fixed candidate; a successful rerun is still
+required before the candidate is treated as passing.
 
 Record the smoke workflow run and any later lifecycle, browser, and
 install-boundary runs on the owning Linear issue. A smoke failure must be
