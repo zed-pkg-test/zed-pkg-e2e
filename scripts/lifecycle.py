@@ -22,7 +22,7 @@ from pathlib import Path
 from typing import Mapping, Sequence
 
 ORG = "zed-pkg-test"
-NON_PACKAGE_REPOS = {"shared-schema", "zed-pkg-e2e"}
+NON_PACKAGE_REPOS = {"zed-pkg-e2e"}
 
 # Package -> (fixture repository, path containing .zpkg.toml). This is the
 # dependency graph boundary. Target packages all map to the one source repo
