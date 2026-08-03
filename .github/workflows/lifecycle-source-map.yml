@@ -1,0 +1,112 @@
+name: lifecycle fixture source-map contract
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: lifecycle-source-map-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  PYTHONDONTWRITEBYTECODE: "1"
+
+jobs:
+  source-map:
+    name: Package classification and live dependency map
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Check out lifecycle harness
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: harness
+          fetch-depth: 1
+          persist-credentials: false
+          show-progress: false
+
+      - name: Check out exact Python consumer fixture
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: zed-pkg-test/python-app
+          ref: ad26b7c7e9706ccec2905a31cbcef67a78e0c217
+          path: fixtures/python-app
+          fetch-depth: 1
+          persist-credentials: false
+          show-progress: false
+
+      - name: Check out exact shared-schema fixture
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: zed-pkg-test/shared-schema
+          ref: 41cec5076791555d4b72e72da0a42888da0522d0
+          path: fixtures/shared-schema
+          fetch-depth: 1
+          persist-credentials: false
+          show-progress: false
+
+      - name: Check out exact polyglot source fixture
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: zed-pkg-test/polyglot-lib
+          ref: 998964aa58e49595547650b4a8da407b7a2283a9
+          path: fixtures/polyglot-lib
+          fetch-depth: 1
+          persist-credentials: false
+          show-progress: false
+
+      - name: Parse and run source-map contract
+        env:
+          FIXTURE_ROOT: ${{ github.workspace }}/fixtures
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          for raw in (
+              "harness/scripts/lifecycle.py",
+              "harness/tests/test_lifecycle_source_map.py",
+          ):
+              path = Path(raw)
+              compile(path.read_text(encoding="utf-8"), str(path), "exec")
+          PY
+          python3 -B harness/tests/test_lifecycle_source_map.py -v 2>&1 \
+            | tee "$RUNNER_TEMP/lifecycle-source-map-test.log"
+
+      - name: Verify read-only fixture state
+        run: |
+          set -euo pipefail
+          test -z "$(git -C harness status --porcelain=v1 --untracked-files=all)"
+          test -z "$(git -C fixtures/python-app status --porcelain=v1 --untracked-files=all)"
+          test -z "$(git -C fixtures/shared-schema status --porcelain=v1 --untracked-files=all)"
+          test -z "$(git -C fixtures/polyglot-lib status --porcelain=v1 --untracked-files=all)"
+
+      - name: Capture source-map evidence
+        if: always()
+        run: |
+          set +e
+          evidence="$RUNNER_TEMP/lifecycle-source-map-evidence"
+          mkdir -p "$evidence"
+          cp "$RUNNER_TEMP/lifecycle-source-map-test.log" "$evidence/" 2>/dev/null
+          sha256sum harness/scripts/lifecycle.py > "$evidence/lifecycle.py.sha256"
+          git -C harness status --porcelain=v1 --untracked-files=all \
+            > "$evidence/harness-status.txt"
+
+      - name: Upload source-map evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: lifecycle-source-map-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/lifecycle-source-map-evidence
+          if-no-files-found: warn
+          retention-days: 14
+          include-hidden-files: false
