@@ -6,13 +6,13 @@ This suite certifies the project-local mise interoperability surface implemented
 
 ## Scope
 
-The workflow `.github/workflows/mise-environment.yml` builds one immutable `zed-cli` commit and runs the same black-box harness on:
+The workflow `.github/workflows/mise-environment.yml` builds immutable `zed-cli` commit `38921fc61ee63f5561062a53bfae0d3bc438a02e` against immutable `zed-interfaces` commit `c2e049006453c26ca8ca291783f681fce75cb01f`, then runs the same black-box suites on:
 
 - Ubuntu 24.04 x64;
 - macOS 15 arm64; and
 - Windows Server 2025 x64.
 
-The `zed-cli` and `zed-interfaces` revisions are full 40-character commit pins. A pull request that updates the certified CLI must update the pin explicitly and prove the new commit across the complete matrix.
+Both revisions are full 40-character pins. A pull request that updates the certified CLI must update the pin explicitly and prove the new commit across the complete matrix.
 
 ## Certified behavior
 
@@ -30,7 +30,17 @@ The `zed-cli` and `zed-interfaces` revisions are full 40-character commit pins. 
 - `.tool-versions` authoring import and frozen-lock rejection; and
 - project-root escape rejection through symlink canonicalization where the host permits symlink creation.
 
-The harness intentionally does not install runtimes or execute mise tasks, hooks, templates, plugins, or environment expressions. Those are separate compatibility and trust surfaces.
+`scripts/mise_lock_naming.py` independently certifies mise's current normalized adjacent-lock convention through implicit and explicit real-CLI calls:
+
+```text
+mise.toml       -> mise.lock
+.mise.toml      -> mise.lock
+mise.test.toml  -> mise.test.lock
+```
+
+It proves that `.mise.toml` discovers `mise.lock`, that the JSON result reports the normalized lock path, and that a legacy `.mise.lock`-only project fails closed rather than being silently accepted.
+
+The harnesses intentionally do not install runtimes or execute mise tasks, hooks, templates, plugins, or environment expressions. Those are separate compatibility and trust surfaces.
 
 ## Local execution
 
@@ -40,9 +50,13 @@ Build the exact `zed-cli` revision being certified, then run:
 python scripts/mise_environment.py \
   --zed ../zed-cli/target/release/zed \
   --work-root /tmp/zed-mise-environment
+
+python scripts/mise_lock_naming.py \
+  --zed ../zed-cli/target/release/zed \
+  --work-root /tmp/zed-mise-lock-naming
 ```
 
-The work root must not already exist. On success, the harness emits one JSON certification summary. On failure, it reports the exact command, working directory, exit status, stdout, and stderr.
+Each work root must not already exist. On success, each harness emits a JSON certification summary. On failure, it reports the exact failing command or invariant; GitHub Actions also uploads the disposable work roots and toolchain diagnostics.
 
 ## Promotion rule
 
