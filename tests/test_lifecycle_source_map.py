@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
-"""Contract tests for the lifecycle fixture package source registry."""
+"""Contract tests for lifecycle package sources and transient outputs."""
 
 from __future__ import annotations
 
 import importlib.util
 import os
+import subprocess
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 from types import ModuleType
@@ -51,6 +53,68 @@ class SourceMapShapeTests(unittest.TestCase):
                 self.assertRegex(repo, r"^[A-Za-z0-9_.-]+$")
                 self.assertFalse(Path(relative).is_absolute())
                 self.assertNotIn("..", Path(relative).parts)
+
+
+class TransientPackCleanupTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.temporary = tempfile.TemporaryDirectory()
+        self.root = Path(self.temporary.name)
+        self.git("init", "-q")
+        self.git("config", "user.name", "Lifecycle Contract")
+        self.git("config", "user.email", "lifecycle-contract@example.invalid")
+        (self.root / "tracked.txt").write_text("tracked\n", encoding="utf-8")
+        self.git("add", "tracked.txt")
+        self.git("commit", "-qm", "initial fixture")
+        self.package = lifecycle.PackageRef("zedtest/shared-schema", "1.0.0")
+
+    def tearDown(self) -> None:
+        self.temporary.cleanup()
+
+    def git(self, *args: str) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            ["git", *args],
+            cwd=self.root,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=True,
+        )
+
+    def pack_path(self, name: str) -> Path:
+        path = self.root / ".zed" / "pack" / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        return path
+
+    def test_removes_only_the_expected_untracked_publish_archive(self) -> None:
+        archive = self.pack_path(lifecycle.publish_archive_name(self.package))
+        archive.write_bytes(b"archive")
+
+        lifecycle.remove_transient_pack_outputs(self.root, [self.package])
+
+        self.assertFalse(archive.exists())
+        status = self.git("status", "--porcelain=v1", "--untracked-files=all")
+        self.assertEqual(status.stdout, "")
+
+    def test_refuses_an_unexpected_untracked_pack_file(self) -> None:
+        unexpected = self.pack_path("unexpected.tar.gz")
+        unexpected.write_bytes(b"unexpected")
+
+        with self.assertRaisesRegex(AssertionError, "unexpected pack output"):
+            lifecycle.remove_transient_pack_outputs(self.root, [self.package])
+
+        self.assertTrue(unexpected.is_file())
+
+    def test_refuses_to_delete_a_tracked_pack_archive(self) -> None:
+        archive = self.pack_path(lifecycle.publish_archive_name(self.package))
+        archive.write_bytes(b"tracked archive")
+        self.git("add", archive.relative_to(self.root).as_posix())
+        self.git("commit", "-qm", "track archive")
+        archive.write_bytes(b"modified archive")
+
+        with self.assertRaisesRegex(AssertionError, "tracked or modified"):
+            lifecycle.remove_transient_pack_outputs(self.root, [self.package])
+
+        self.assertEqual(archive.read_bytes(), b"modified archive")
 
 
 @unittest.skipUnless(FIXTURE_ROOT, "FIXTURE_ROOT is required for live fixture checks")
