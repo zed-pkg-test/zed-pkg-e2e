@@ -4,12 +4,12 @@ on:
   pull_request:
     paths:
       - '.github/workflows/windows-develop-clean-room.yml'
-      - 'README.md'
+      - 'docs/windows-develop-clean-room.md'
   push:
     branches: [main]
     paths:
       - '.github/workflows/windows-develop-clean-room.yml'
-      - 'README.md'
+      - 'docs/windows-develop-clean-room.md'
   schedule:
     - cron: '17 9 * * 3'
   workflow_dispatch:
@@ -22,7 +22,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  ZED_E2E_REF: 2a7524efca3300495dd4f8c438fd666c1b24f0a1
+  ZED_E2E_REF: 144d17e28afa9586bc71ec43f340a0e0328a54b4
   ZED_CLI_REF: fd3b3e487b2bdd129dd67403ad51f7299cfe6828
   ZED_INTERFACES_REF: c2e049006453c26ca8ca291783f681fce75cb01f
   FLAGS2ENV_REF: 2f62e40932a0fcb8b9bf1b4c84473e34fa3c51c7
