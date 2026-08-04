@@ -382,6 +382,46 @@ class Contract:
         self.assert_no_archives(out)
         self.checks.append(check)
 
+    def certify_indirect_gitmodules_rejected(self, source: Path) -> None:
+        symlink_project = self.runs / "symlinked-gitmodules"
+        self.clone_no_submodules(source, symlink_project)
+        gitmodules = symlink_project / ".gitmodules"
+        external = self.runs / "external-gitmodules"
+        external.write_text(gitmodules.read_text(encoding="utf-8"), encoding="utf-8")
+        gitmodules.unlink()
+        os.symlink(external, gitmodules)
+
+        output = self.zed_cmd(
+            symlink_project,
+            "symlinked-gitmodules",
+            "install",
+            "--git-submodules",
+            should_fail=True,
+        )
+        assert "must be a regular file" in output.lower(), output
+        assert not (symlink_project / ".zpkg.lock").exists()
+        assert not (symlink_project / "zed_modules").exists()
+        self.checks.append("symlinked .gitmodules fails before sync or lock mutation")
+
+        directory_project = self.runs / "directory-gitmodules"
+        self.clone_no_submodules(source, directory_project)
+        gitmodules = directory_project / ".gitmodules"
+        gitmodules.unlink()
+        gitmodules.mkdir()
+
+        out = self.runs / "directory-gitmodules-pack"
+        output = self.zed_cmd(
+            directory_project,
+            "directory-gitmodules",
+            "pack",
+            "--out",
+            out,
+            should_fail=True,
+        )
+        assert "must be a regular file" in output.lower(), output
+        self.assert_no_archives(out)
+        self.checks.append("directory .gitmodules fails before archive creation")
+
     def finish(self) -> None:
         version = self.run([self.zed, "--version"]).strip()
         record = {
@@ -395,7 +435,7 @@ class Contract:
         (self.evidence / "evidence.json").write_text(
             json.dumps(record, indent=2, sort_keys=True) + "\n", encoding="utf-8"
         )
-        assert len(self.checks) == 12, self.checks
+        assert len(self.checks) == 14, self.checks
         self.log(f"\ncertified {len(self.checks)} Git-submodule packaging checks")
 
 
@@ -433,6 +473,7 @@ def main() -> int:
     )
 
     contract.certify_uninitialized_rejection(included)
+    contract.certify_indirect_gitmodules_rejected(included)
     initialized = contract.certify_initialized_archive(included)
     contract.certify_dirty_rejection(initialized)
     contract.certify_excluded_uninitialized(excluded, home_name="publish-excluded")
