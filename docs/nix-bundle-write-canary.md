@@ -2,7 +2,7 @@
 
 Tracking: DEN-1592
 
-This repository independently certifies the product command:
+This repository independently certifies the merged product command:
 
 ```bash
 zed interop nix bundle write \
@@ -11,13 +11,13 @@ zed interop nix bundle write \
   --out ./exports/package-flake
 ```
 
-The canary imports no Rust implementation module. It checks out one immutable
-`zed-pkg/zed-cli` commit, builds the release binary, constructs a disposable
-package project, and drives only that executable plus Nix.
+The workflow pins `zed-pkg/zed-cli@1b282b94efc994bb9352b572c9652d5a078787f2`.
+The canaries import no Rust implementation module: they build that exact release
+binary and drive only the executable plus Nix.
 
-## Certified boundaries
+## Synthetic full-command contract
 
-On Ubuntu 24.04 and macOS 15, the harness proves:
+On Ubuntu 24.04 and macOS 15, `scripts/nix_bundle_write_canary.py` proves:
 
 - invocation below the project root discovers `.zpkg.toml` and `.zpkg.lock`;
 - a missing output is created as a deterministic standalone flake;
@@ -37,18 +37,43 @@ On Ubuntu 24.04 and macOS 15, the harness proves:
   `nix flake check --offline` and reproduces the same `nix build --offline`
   store output.
 
+## Immutable real-fixture replay
+
+`scripts/nix_bundle_write_fixture_canary.py` independently checks out
+`zed-pkg-test/node-lib@222cdf57f48530fce8e6c1f58632d9676203512e`,
+creates two clean copies below unrelated absolute paths, adds the same explicit
+artifact-only Nix intent and empty frozen lock, and requires the command to emit
+byte-identical standalone bundles.
+
+The real-fixture canary independently verifies:
+
+- public package identity `zed-pkg-test/node-lib@1.0.0`;
+- canonical `node_lib` Nix attribute and current runner system;
+- exact artifact SHA-256 and size agreement with the retained plan;
+- sorted, unique inventory entries whose bytes and sizes are independently
+  rehashed;
+- immutable Nixpkgs revision and NAR hash evidence;
+- identical domain-separated bundle identity across absolute project paths;
+- no symlinks in either output;
+- no source, temporary, home, credential, or invalid-registry value in generated
+  text;
+- unchanged disposable project copies;
+- a clean immutable fixture checkout; and
+- non-creation of the configured Zed home.
+
 ## Reproducibility and trust
 
-`.zed-nix-bundle-write-cli-ref` contains the default full commit pin. Manual
-workflow overrides must also be full 40-character commits. The shared
+`.zed-nix-bundle-write-cli-ref` contains the default full merged commit pin.
+Manual workflow overrides must also be full 40-character commits. The shared
 `zed-interfaces` revision is asserted in both `Cargo.toml` and `Cargo.lock`.
+The real fixture and every third-party Action are also full-commit pins.
 
-The workflow has read-only repository permissions, uses full-SHA Action pins,
-disables persisted checkout credentials, owns all package/Nix/Zed state below a
-fresh runner-temporary directory, and uploads bounded diagnostics only on
-failure. It never publishes to a Zed registry, Cachix, Attic, GitHub release, or
-OCI registry.
+The workflow has read-only repository permissions, disables persisted checkout
+credentials, owns all package, Nix, output, and Zed state below fresh
+runner-temporary directories, and uploads bounded diagnostics only on failure.
+It never publishes to a Zed registry, Cachix, Attic, GitHub release, package
+namespace, or OCI registry.
 
-The canary complements product-repository unit and integration tests. It does
-not replace them: a candidate is mergeable only after its exact product checks
-and this independent binary-level contract agree.
+The canaries complement product-repository unit and integration tests. They are
+persistent post-merge drift gates for the actual merged binary and immutable
+external package inputs.
