@@ -7,6 +7,7 @@ import argparse
 import hashlib
 import json
 import os
+import struct
 import subprocess
 import sys
 from pathlib import Path
@@ -247,22 +248,76 @@ class Contract:
         self.assert_no_archives(out)
         self.checks.append("worktree directory fails before archive creation")
 
+    def rewrite_index_mode(self, project: Path, path: str, mode: int) -> None:
+        """Create a valid but non-porcelain index entry for a security fixture."""
+        self.git(project, "update-index", "--index-version", "2")
+        object_format = self.git(
+            project, "rev-parse", "--show-object-format"
+        ).strip()
+        if object_format not in {"sha1", "sha256"}:
+            raise AssertionError(f"unsupported Git object format: {object_format}")
+        hash_size = 20 if object_format == "sha1" else 32
+
+        index_path = project / ".git/index"
+        data = bytearray(index_path.read_bytes())
+        if len(data) < 12 + hash_size or data[:4] != b"DIRC":
+            raise AssertionError("unrecognized Git index header")
+        version, entry_count = struct.unpack(">II", data[4:12])
+        if version != 2:
+            raise AssertionError(f"expected Git index version 2, found {version}")
+
+        checksum_start = len(data) - hash_size
+        expected_checksum = bytes(data[checksum_start:])
+        actual_checksum = hashlib.new(object_format, data[:checksum_start]).digest()
+        if actual_checksum != expected_checksum:
+            raise AssertionError("Git index checksum is invalid before fixture mutation")
+
+        position = 12
+        matched = 0
+        fixed_size = 40 + hash_size + 2
+        for _ in range(entry_count):
+            entry_start = position
+            if entry_start + fixed_size > checksum_start:
+                raise AssertionError("Git index entry overruns its checksum boundary")
+            flags_offset = entry_start + 40 + hash_size
+            flags = struct.unpack(">H", data[flags_offset : flags_offset + 2])[0]
+            if flags & 0x4000:
+                raise AssertionError("unexpected extended Git index entry in version 2")
+
+            name_start = entry_start + fixed_size
+            try:
+                name_end = data.index(0, name_start, checksum_start)
+            except ValueError as error:
+                raise AssertionError("unterminated Git index pathname") from error
+            name = bytes(data[name_start:name_end]).decode("utf-8")
+            if name == path:
+                data[entry_start + 24 : entry_start + 28] = struct.pack(
+                    ">I", mode
+                )
+                matched += 1
+
+            unpadded_size = name_end + 1 - entry_start
+            position = entry_start + ((unpadded_size + 7) // 8) * 8
+
+        if matched != 1:
+            raise AssertionError(
+                f"expected exactly one Git index entry for {path!r}, found {matched}"
+            )
+        data[checksum_start:] = hashlib.new(
+            object_format, data[:checksum_start]
+        ).digest()
+        index_path.write_bytes(data)
+
     def certify_index_symlink_mode(self, source: Path) -> None:
         project = self.runs / "index-symlink"
         self.clone(source, project)
         gitmodules = project / ".gitmodules"
         assert gitmodules.is_file() and not gitmodules.is_symlink()
 
-        target = project / "symlink-target"
-        target.write_text("external-gitmodules\n", encoding="utf-8")
-        blob = self.git(project, "hash-object", "-w", "--", target.name).strip()
-        self.git(
-            project,
-            "update-index",
-            "--add",
-            "--cacheinfo",
-            f"120000,{blob},.gitmodules",
-        )
+        # Git porcelain intentionally refuses to create a symlink-mode
+        # .gitmodules entry. Mutate the documented version-2 index format and
+        # recompute its checksum so the product sees a valid hostile index.
+        self.rewrite_index_mode(project, ".gitmodules", 0o120000)
         mode = self.git(project, "ls-files", "--stage", "--", ".gitmodules")
         assert mode.startswith("120000 "), mode
         assert gitmodules.is_file() and not gitmodules.is_symlink()
