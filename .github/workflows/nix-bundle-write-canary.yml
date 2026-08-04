@@ -1,0 +1,230 @@
+name: external nix bundle write
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/nix-bundle-write-canary.yml"
+      - ".zed-nix-bundle-write-cli-ref"
+      - "scripts/nix_bundle_write_canary.py"
+      - "scripts/nix_bundle_write_fixture_canary.py"
+      - "docs/nix-bundle-write-canary.md"
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/nix-bundle-write-canary.yml"
+      - ".zed-nix-bundle-write-cli-ref"
+      - "scripts/nix_bundle_write_canary.py"
+      - "scripts/nix_bundle_write_fixture_canary.py"
+      - "docs/nix-bundle-write-canary.md"
+  workflow_dispatch:
+    inputs:
+      zed_cli_ref:
+        description: Optional immutable zed-cli commit override
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+concurrency:
+  group: external-nix-bundle-write-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  canary:
+    name: Black-box bundle and offline replay / ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-15]
+
+    steps:
+      - name: Check out harness and reviewed pin
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: harness
+          persist-credentials: false
+          show-progress: false
+
+      - name: Load immutable CLI pin
+        id: pin
+        shell: bash
+        run: |
+          set -euo pipefail
+          override="${{ github.event.inputs.zed_cli_ref || '' }}"
+          if [[ -n "$override" ]]; then
+            ref="$override"
+          else
+            ref="$(tr -d '[:space:]' < harness/.zed-nix-bundle-write-cli-ref)"
+          fi
+          [[ "$ref" =~ ^[0-9a-f]{40}$ ]]
+          printf 'ref=%s\n' "$ref" >> "$GITHUB_OUTPUT"
+          printf 'zed-cli=%s\n' "$ref"
+
+      - name: Check out exact zed-cli implementation
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: zed-pkg/zed-cli
+          ref: ${{ steps.pin.outputs.ref }}
+          path: zed-cli
+          persist-credentials: false
+          show-progress: false
+
+      - name: Check out immutable real package fixture
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: zed-pkg-test/node-lib
+          ref: 222cdf57f48530fce8e6c1f58632d9676203512e
+          path: node-fixture
+          persist-credentials: false
+          show-progress: false
+
+      - name: Install pinned Rust toolchain action
+        uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30
+        with:
+          components: rustfmt
+
+      - name: Install pinned Nix action
+        uses: cachix/install-nix-action@630ae543ea3a38a9a4166f03376c02c50f408342
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+            accept-flake-config = false
+
+      - name: Verify immutable inputs and build exact CLI
+        shell: bash
+        run: |
+          set -euo pipefail
+          {
+            test "$(git -C zed-cli rev-parse HEAD)" = "${{ steps.pin.outputs.ref }}"
+            test "$(git -C node-fixture rev-parse HEAD)" = 222cdf57f48530fce8e6c1f58632d9676203512e
+            grep -F 'rev = "c2e049006453c26ca8ca291783f681fce75cb01f"' zed-cli/Cargo.toml
+            grep -F '#c2e049006453c26ca8ca291783f681fce75cb01f' zed-cli/Cargo.lock
+            python3 - <<'PY'
+          from pathlib import Path
+
+          for source in (
+              Path('harness/scripts/nix_bundle_write_canary.py'),
+              Path('harness/scripts/nix_bundle_write_fixture_canary.py'),
+          ):
+              compile(source.read_text(encoding='utf-8'), str(source), 'exec')
+          PY
+            cargo fmt --all --check --manifest-path zed-cli/Cargo.toml
+            cargo build --release --locked --manifest-path zed-cli/Cargo.toml --bin zed
+            mkdir -p "$RUNNER_TEMP/zed-bundle-write-bin"
+            install -m 0755 zed-cli/target/release/zed "$RUNNER_TEMP/zed-bundle-write-bin/zed"
+            python3 - "$RUNNER_TEMP/zed-bundle-write-bin/zed" \
+              "$RUNNER_TEMP/zed-bundle-write-bin/SHA256SUMS" <<'PY'
+          import hashlib
+          import sys
+          from pathlib import Path
+
+          binary = Path(sys.argv[1])
+          output = Path(sys.argv[2])
+          output.write_text(
+              f"{hashlib.sha256(binary.read_bytes()).hexdigest()}  zed\n",
+              encoding="utf-8",
+          )
+          PY
+            cat "$RUNNER_TEMP/zed-bundle-write-bin/SHA256SUMS"
+            "$RUNNER_TEMP/zed-bundle-write-bin/zed" --version
+            nix --version
+          } 2>&1 | tee "$RUNNER_TEMP/zed-nix-bundle-write-build.log"
+
+      - name: Run synthetic command and offline Nix canary
+        env:
+          WORK_ROOT: ${{ runner.temp }}/zed-nix-bundle-write-canary
+        run: |
+          set -euo pipefail
+          test ! -e "$WORK_ROOT"
+          python3 harness/scripts/nix_bundle_write_canary.py \
+            --zed "$RUNNER_TEMP/zed-bundle-write-bin/zed" \
+            --work-root "$WORK_ROOT" \
+            2>&1 | tee "$RUNNER_TEMP/zed-nix-bundle-write-canary.log"
+
+      - name: Run immutable real-fixture path-independence canary
+        env:
+          WORK_ROOT: ${{ runner.temp }}/zed-nix-bundle-write-fixture-canary
+        run: |
+          set -euo pipefail
+          test ! -e "$WORK_ROOT"
+          python3 harness/scripts/nix_bundle_write_fixture_canary.py \
+            --zed "$RUNNER_TEMP/zed-bundle-write-bin/zed" \
+            --fixture node-fixture \
+            --work-root "$WORK_ROOT" \
+            2>&1 | tee "$RUNNER_TEMP/zed-nix-bundle-write-fixture-canary.log"
+
+      - name: Prove checkouts and workflow remain immutable and read-only
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -z "$(git -C harness status --porcelain=v1 --untracked-files=all)"
+          test -z "$(git -C zed-cli status --porcelain=v1 --untracked-files=all)"
+          test -z "$(git -C node-fixture status --porcelain=v1 --untracked-files=all)"
+          python3 - <<'PY'
+          import re
+          from pathlib import Path
+
+          workflow = Path('harness/.github/workflows/nix-bundle-write-canary.yml').read_text()
+          pin = Path('harness/.zed-nix-bundle-write-cli-ref').read_text().strip()
+          assert re.fullmatch(r'[0-9a-f]{40}', pin)
+          assert 'permissions:\n  contents: read' in workflow
+          assert 'persist-credentials: false' in workflow
+          assert 'ubuntu-24.04' in workflow and 'macos-15' in workflow
+          for exact in (
+              '222cdf57f48530fce8e6c1f58632d9676203512e',
+              'c2e049006453c26ca8ca291783f681fce75cb01f',
+          ):
+              assert exact in workflow
+          action_token = 'us' + 'es'
+          pattern = rf'^\s*{action_token}:\s*([^\s]+)$'
+          for match in re.finditer(pattern, workflow, re.MULTILINE):
+              assert re.search(r'@[0-9a-f]{40}$', match.group(1)), match.group(1)
+          for forbidden in (
+              'contents' + ': write',
+              'git' + ' push',
+              'pull_request' + '_target:',
+              'id-token' + ': write',
+              'packages' + ': write',
+              'secrets' + ': inherit',
+              'ref:' + ' main',
+          ):
+              assert forbidden not in workflow, forbidden
+          PY
+
+      - name: Collect bounded failure diagnostics
+        if: failure()
+        env:
+          SYNTHETIC_ROOT: ${{ runner.temp }}/zed-nix-bundle-write-canary
+          FIXTURE_ROOT: ${{ runner.temp }}/zed-nix-bundle-write-fixture-canary
+        shell: bash
+        run: |
+          set +e
+          diagnostics="$RUNNER_TEMP/zed-nix-bundle-write-diagnostics"
+          mkdir -p "$diagnostics"
+          cp "$RUNNER_TEMP/zed-nix-bundle-write-build.log" \
+            "$diagnostics/build.log" 2>/dev/null || true
+          cp "$RUNNER_TEMP/zed-nix-bundle-write-canary.log" \
+            "$diagnostics/synthetic.log" 2>/dev/null || true
+          cp "$RUNNER_TEMP/zed-nix-bundle-write-fixture-canary.log" \
+            "$diagnostics/fixture.log" 2>/dev/null || true
+          git -C harness status --porcelain=v1 --untracked-files=all \
+            > "$diagnostics/harness-status.txt" 2>&1
+          git -C zed-cli status --porcelain=v1 --untracked-files=all \
+            > "$diagnostics/zed-cli-status.txt" 2>&1
+          git -C node-fixture status --porcelain=v1 --untracked-files=all \
+            > "$diagnostics/node-fixture-status.txt" 2>&1
+          find "$SYNTHETIC_ROOT" "$FIXTURE_ROOT" -maxdepth 6 -print \
+            > "$diagnostics/work-tree.txt" 2>&1 || true
+
+      - name: Upload failure diagnostics
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: nix-bundle-write-diagnostics-${{ runner.os }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/zed-nix-bundle-write-diagnostics
+          if-no-files-found: warn
+          retention-days: 3
+          include-hidden-files: false
