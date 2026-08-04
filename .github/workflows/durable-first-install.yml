@@ -1,0 +1,160 @@
+name: durable first-install acceptance
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/durable-first-install.yml"
+      - "scripts/durable-first-install.sh"
+      - "README.md"
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/durable-first-install.yml"
+      - "scripts/durable-first-install.sh"
+      - "README.md"
+  workflow_dispatch:
+    inputs:
+      zed_cli_ref:
+        description: Immutable zed-cli commit containing the first-install implementation
+        required: false
+        default: 73f9f9b054e0fa22cbb01312a21c38512de10b58
+
+permissions:
+  contents: read
+
+concurrency:
+  group: durable-first-install-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: "1"
+  ZED_CLI_REF: ${{ github.event.inputs.zed_cli_ref || '73f9f9b054e0fa22cbb01312a21c38512de10b58' }}
+  ZED_INTERFACES_REF: c2e049006453c26ca8ca291783f681fce75cb01f
+  NODE_LIB_REF: 222cdf57f48530fce8e6c1f58632d9676203512e
+  NODE_APP_REF: ef794674647b3620e711f4f855865f8ad3340498
+
+jobs:
+  acceptance:
+    name: durable and explicit ephemeral installs / ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-15]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 40
+    steps:
+      - name: Require immutable component pins
+        run: |
+          set -euo pipefail
+          for pin in \
+            "$ZED_CLI_REF" \
+            "$ZED_INTERFACES_REF" \
+            "$NODE_LIB_REF" \
+            "$NODE_APP_REF"
+          do
+            [[ "$pin" =~ ^[0-9a-f]{40}$ ]]
+          done
+
+      - name: Check out this acceptance harness
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: harness
+          fetch-depth: 1
+          persist-credentials: false
+          show-progress: false
+
+      - name: Check out the exact zed-cli implementation
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: zed-pkg/zed-cli
+          ref: ${{ env.ZED_CLI_REF }}
+          path: zed-cli
+          fetch-depth: 1
+          persist-credentials: false
+          show-progress: false
+
+      - name: Check out the exact manifest and lock contract
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: zed-pkg/zed-interfaces
+          ref: ${{ env.ZED_INTERFACES_REF }}
+          path: zed-interfaces
+          fetch-depth: 1
+          persist-credentials: false
+          show-progress: false
+
+      - name: Check out the exact package-author fixture
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: zed-pkg-test/node-lib
+          ref: ${{ env.NODE_LIB_REF }}
+          path: node-lib
+          fetch-depth: 1
+          persist-credentials: false
+          show-progress: false
+
+      - name: Check out the exact consumer fixture
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: zed-pkg-test/node-app
+          ref: ${{ env.NODE_APP_REF }}
+          path: node-app
+          fetch-depth: 1
+          persist-credentials: false
+          show-progress: false
+
+      - name: Install the declared Rust toolchain
+        run: |
+          set -euo pipefail
+          rustup toolchain install stable --profile minimal --component rustfmt
+          rustup default stable
+          rustc --version --verbose
+          cargo --version --verbose
+
+      - name: Verify the harness and focused Rust contract
+        run: |
+          set -euo pipefail
+          bash -n harness/scripts/durable-first-install.sh
+          cargo fmt --all --check --manifest-path zed-cli/Cargo.toml
+          cargo test --locked --manifest-path zed-cli/Cargo.toml \
+            --lib managed_install::tests
+          cargo test --locked --manifest-path zed-cli/Cargo.toml \
+            --lib cli_model::tests
+
+      - name: Build the exact release binary under test
+        run: |
+          set -euo pipefail
+          cargo build --locked --release \
+            --manifest-path zed-cli/Cargo.toml \
+            --bin zed
+          test -x zed-cli/target/release/zed
+          zed-cli/target/release/zed --version
+
+      - name: Run the cross-organization acceptance canary
+        run: |
+          set -o pipefail
+          bash harness/scripts/durable-first-install.sh \
+            "$GITHUB_WORKSPACE/zed-cli/target/release/zed" \
+            "$GITHUB_WORKSPACE/node-lib" \
+            "$GITHUB_WORKSPACE/node-app" \
+            "$RUNNER_TEMP/den-1413-e2e" \
+            2>&1 | tee "$RUNNER_TEMP/den-1413-e2e.log"
+
+      - name: Upload bounded failure diagnostics
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: durable-first-install-${{ matrix.os }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/den-1413-e2e.log
+            ${{ runner.temp }}/den-1413-e2e/**/*.log
+            ${{ runner.temp }}/den-1413-e2e/**/.zpkg.toml
+            ${{ runner.temp }}/den-1413-e2e/**/.zpkg.lock
+          if-no-files-found: warn
+          retention-days: 7
+          include-hidden-files: true
