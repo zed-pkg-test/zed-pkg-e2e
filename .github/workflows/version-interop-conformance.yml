@@ -101,6 +101,7 @@ jobs:
       - name: Generate locked external consumer
         run: |
           set -euo pipefail
+          export CARGO_TARGET_DIR="$RUNNER_TEMP/version-interop-target"
           fixture=harness/fixtures/version-interop-corpus
           cargo generate-lockfile --offline --manifest-path "$fixture/Cargo.toml"
           cargo fmt --all --manifest-path "$fixture/Cargo.toml" -- --check
@@ -108,6 +109,7 @@ jobs:
       - name: Run external corpus offline
         run: |
           set -euo pipefail
+          export CARGO_TARGET_DIR="$RUNNER_TEMP/version-interop-target"
           fixture=harness/fixtures/version-interop-corpus
           cargo clippy --locked --offline --manifest-path "$fixture/Cargo.toml" -- -D warnings
           cargo run --locked --offline --manifest-path "$fixture/Cargo.toml" 2>&1 \
