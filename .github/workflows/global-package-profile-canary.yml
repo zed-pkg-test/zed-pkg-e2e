@@ -15,7 +15,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  ZED_CLI_COMMIT: 1e2ae0e37c107f4577f3a5de939df46a35e0a076
+  ZED_CLI_COMMIT: bcef6f0e5c0162e948e92c9ccb529ee95bdd6962
 
 jobs:
   canary:
@@ -67,6 +67,7 @@ jobs:
         run: |
           set -euo pipefail
           cargo fmt --all --check
+          cargo test --locked --test frozen_offline_prefetch
           cargo test --locked --lib global::tests
           cargo test --locked --test global_cli
           cargo clippy --locked --all-targets --all-features -- -D warnings
