@@ -9,7 +9,7 @@ on:
       zed_cli_ref:
         description: Immutable zed-cli commit to certify
         required: false
-        default: 93ff1cce4a0ed1a29a8172e1ba01c1cc12fddd01
+        default: ada14c922d439eeb994b85a9b3ae6b9474d9ab44
   schedule:
     - cron: "41 4 * * 1"
 
@@ -27,14 +27,14 @@ defaults:
 env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: "1"
-  ZED_CLI_REF: ${{ github.event.inputs.zed_cli_ref || '93ff1cce4a0ed1a29a8172e1ba01c1cc12fddd01' }}
+  ZED_CLI_REF: ${{ github.event.inputs.zed_cli_ref || 'ada14c922d439eeb994b85a9b3ae6b9474d9ab44' }}
   ZED_INTERFACES_REF: c2e049006453c26ca8ca291783f681fce75cb01f
 
 jobs:
   certify:
     name: mise contract / ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 35
+    timeout-minutes: 40
     strategy:
       fail-fast: false
       matrix:
@@ -85,7 +85,10 @@ jobs:
       - name: Run the in-repository mise contract tests
         run: |
           set -euo pipefail
-          python -m py_compile harness/scripts/mise_environment.py harness/scripts/mise_lock_naming.py
+          python -m py_compile \
+            harness/scripts/mise_environment.py \
+            harness/scripts/mise_lock_naming.py \
+            harness/scripts/mise_frozen_identity.py
           cargo fmt --all --check --manifest-path zed-cli/Cargo.toml
           cargo test --locked --manifest-path zed-cli/Cargo.toml --lib environment::tests
           cargo test --locked --manifest-path zed-cli/Cargo.toml --test mise_environment_cli
@@ -101,7 +104,7 @@ jobs:
             test -x zed-cli/target/release/zed
           fi
 
-      - name: Certify project-local mise import and frozen verification
+      - name: Certify project-local mise import and frozen identity
         run: |
           set -euo pipefail
           ZED_BIN="zed-cli/target/release/zed"
@@ -114,6 +117,9 @@ jobs:
           python harness/scripts/mise_lock_naming.py \
             --zed "$ZED_BIN" \
             --work-root "$RUNNER_TEMP/zed-mise-lock-naming"
+          python harness/scripts/mise_frozen_identity.py \
+            --zed "$ZED_BIN" \
+            --work-root "$RUNNER_TEMP/zed-mise-frozen-identity"
 
       - name: Collect failure diagnostics
         if: failure()
@@ -124,12 +130,18 @@ jobs:
             "$RUNNER_TEMP/zed-mise-diagnostics/environment-work-root" 2>/dev/null || true
           cp -R "$RUNNER_TEMP/zed-mise-lock-naming" \
             "$RUNNER_TEMP/zed-mise-diagnostics/lock-naming-work-root" 2>/dev/null || true
+          cp -R "$RUNNER_TEMP/zed-mise-frozen-identity" \
+            "$RUNNER_TEMP/zed-mise-diagnostics/frozen-identity-work-root" 2>/dev/null || true
           git -C zed-cli status --porcelain=v1 --untracked-files=all \
             > "$RUNNER_TEMP/zed-mise-diagnostics/zed-cli-status.txt" 2>&1
+          git -C harness status --porcelain=v1 --untracked-files=all \
+            > "$RUNNER_TEMP/zed-mise-diagnostics/harness-status.txt" 2>&1
           python --version \
             > "$RUNNER_TEMP/zed-mise-diagnostics/python-version.txt" 2>&1
           rustc --version --verbose \
             > "$RUNNER_TEMP/zed-mise-diagnostics/rust-version.txt" 2>&1
+          cargo --version --verbose \
+            > "$RUNNER_TEMP/zed-mise-diagnostics/cargo-version.txt" 2>&1
 
       - name: Upload failure diagnostics
         if: failure()

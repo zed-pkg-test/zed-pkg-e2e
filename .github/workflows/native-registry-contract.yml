@@ -30,7 +30,7 @@ env:
 jobs:
   native-registry-contract:
     name: Native registry schema and consumer
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
       - name: Require immutable interface pin
@@ -114,13 +114,15 @@ jobs:
           cargo clippy --locked --all-targets --all-features -- -D warnings
           git diff --check
 
-      - name: Compile public contract from an external crate
+      - name: Compile and test public contract from an external crate
         run: |
           set -euo pipefail
           fixture=harness/fixtures/native-registry-consumer
           cp zed-interfaces/Cargo.lock "$fixture/Cargo.lock"
           cargo run --offline --manifest-path "$fixture/Cargo.toml"
           cargo run --locked --offline --manifest-path "$fixture/Cargo.toml"
+          cargo test --offline --manifest-path "$fixture/Cargo.toml"
+          cargo test --locked --offline --manifest-path "$fixture/Cargo.toml"
 
       - name: Record evidence
         if: always()
@@ -135,6 +137,8 @@ jobs:
             "$RUNNER_TEMP/native-registry-contract-evidence/consumer-Cargo.lock" 2>/dev/null
           git -C zed-interfaces status --porcelain=v1 --untracked-files=all \
             > "$RUNNER_TEMP/native-registry-contract-evidence/interfaces-status.txt" 2>&1
+          printf '%s\n' "$ZED_INTERFACES_REF" \
+            > "$RUNNER_TEMP/native-registry-contract-evidence/zed-interfaces-ref.txt"
 
       - name: Upload contract evidence
         if: always()
