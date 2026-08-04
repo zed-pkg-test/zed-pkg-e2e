@@ -72,6 +72,29 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          # Register the six reviewed new files as intent-to-add before the
+          # materializer copies their bytes. Ordinary `git diff` then includes
+          # them in the exact allowlist, patch, and artifact inventory without
+          # staging any content or mutating the source commit.
+          while IFS= read -r relative; do
+            mkdir -p "product/$(dirname "$relative")"
+            : > "product/$relative"
+          done <<'EOF'
+          .github/workflows/global-packages.yml
+          .zpkg.lock
+          .zpkg.toml
+          docs/global-packages.md
+          src/global.rs
+          tests/global_cli.rs
+          EOF
+          git -C product add -N -- \
+            .github/workflows/global-packages.yml \
+            .zpkg.lock \
+            .zpkg.toml \
+            docs/global-packages.md \
+            src/global.rs \
+            tests/global_cli.rs
+
           python3 -m py_compile scripts/materialize_global_packages_current_main.py
           python3 scripts/materialize_global_packages_current_main.py \
             --product product \
