@@ -1,0 +1,146 @@
+name: Materialize global packages on current main
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - .github/workflows/materialize-global-packages-current-main.yml
+      - scripts/materialize_global_packages_current_main.py
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: materialize-global-packages-current-main-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  PRODUCT_MAIN: 9b8e5f3d3b98845436899b9a8645f3ce19689f85
+  REVIEWED_FEATURE: c5ed46eb80c348aa5b766e9b00d7c50bfb94e0ab
+
+jobs:
+  materialize:
+    name: Current-main product materialization
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - name: Check out materializer without credentials
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+          show-progress: false
+
+      - name: Check out exact product main
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: zed-pkg/zed-cli
+          ref: ${{ env.PRODUCT_MAIN }}
+          path: product
+          fetch-depth: 1
+          persist-credentials: false
+          show-progress: false
+
+      - name: Check out exact reviewed feature source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: zed-pkg/zed-cli
+          ref: ${{ env.REVIEWED_FEATURE }}
+          path: feature
+          fetch-depth: 1
+          persist-credentials: false
+          show-progress: false
+
+      - name: Verify immutable inputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "${#PRODUCT_MAIN}" -eq 40
+          test "${#REVIEWED_FEATURE}" -eq 40
+          test "$(git -C product rev-parse HEAD)" = "$PRODUCT_MAIN"
+          test "$(git -C feature rev-parse HEAD)" = "$REVIEWED_FEATURE"
+
+      - name: Install repository Rust toolchain
+        uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30
+        with:
+          toolchain: stable
+          components: rustfmt,clippy
+
+      - name: Assemble ordinary current-main source
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m py_compile scripts/materialize_global_packages_current_main.py
+          python3 scripts/materialize_global_packages_current_main.py \
+            --product product \
+            --feature feature
+
+      - name: Verify focused and complete product gates
+        working-directory: product
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo fmt --all --check
+          cargo test --locked --lib global::tests
+          cargo test --locked frozen_local_metadata_preserves_lock_identity_and_provenance
+          cargo test --locked --test global_cli
+          cargo clippy --locked --all-targets --all-features -- -D warnings
+          cargo test --locked --all-targets --all-features
+          cargo build --release --locked --bin zed
+          ./target/release/zed --version
+
+      - name: Produce exact ordinary-source artifact
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts
+          git -C product diff --binary > artifacts/global-packages-current-main.patch
+          git -C product diff --name-only -z > artifacts/changed-files.zlist
+          python3 - <<'PY'
+          import json
+          import subprocess
+          from pathlib import Path
+
+          product = Path('product')
+          names = [
+              item.decode()
+              for item in subprocess.check_output(
+                  ['git', '-C', str(product), 'diff', '--name-only', '-z']
+              ).split(b'\0')
+              if item
+          ]
+          Path('artifacts/changed-files.json').write_text(
+              json.dumps(names, indent=2) + '\n'
+          )
+          Path('artifacts/materialization.json').write_text(
+              json.dumps(
+                  {
+                      'schema': 'zed.global-packages-materialization/v1',
+                      'product_base': '9b8e5f3d3b98845436899b9a8645f3ce19689f85',
+                      'reviewed_feature': 'c5ed46eb80c348aa5b766e9b00d7c50bfb94e0ab',
+                      'changed_files': names,
+                  },
+                  sort_keys=True,
+                  indent=2,
+              ) + '\n'
+          )
+          PY
+          tar --null -czf artifacts/global-packages-current-main-files.tar.gz \
+            -C product -T artifacts/changed-files.zlist
+          sha256sum \
+            artifacts/global-packages-current-main.patch \
+            artifacts/global-packages-current-main-files.tar.gz \
+            artifacts/changed-files.json \
+            artifacts/materialization.json \
+            > artifacts/SHA256SUMS
+          test -z "$(git -C feature status --porcelain)"
+
+      - name: Upload validated source delta
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: global-packages-current-main-source
+          path: artifacts/
+          if-no-files-found: error
+          retention-days: 3
