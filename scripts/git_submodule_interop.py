@@ -7,7 +7,6 @@ import argparse
 import hashlib
 import json
 import os
-import shutil
 import subprocess
 import sys
 import tomllib
@@ -266,7 +265,7 @@ class Contract:
         self.checks.append("takeover writes workspace, dependency, and Git provenance")
 
         self.git(adopted, "add", MANIFEST, LOCKFILE)
-        self.git(adopted, "commit", "adopt submodule into Zed authority")
+        self.git(adopted, "commit", "-m", "adopt submodule into Zed authority")
 
         frozen = self.runs / "frozen"
         self.clone_no_submodules(adopted, frozen)
@@ -309,7 +308,7 @@ class Contract:
             "alternate",
         )
         self.git(frozen, "add", ".gitmodules")
-        self.git(frozen, "commit", "change submodule branch metadata")
+        self.git(frozen, "commit", "-m", "change submodule branch metadata")
         self.zed_cmd(
             frozen,
             "frozen",
