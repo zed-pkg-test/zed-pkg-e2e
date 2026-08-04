@@ -125,6 +125,45 @@ bash scripts/durable-first-install.sh \
   /tmp/zed-durable-first-install
 ```
 
+### Polyglot durable first-install acceptance
+
+`.github/workflows/durable-first-install-polyglot.yml` verifies the same default
+manifest-creation contract against immutable real Go, Python, and Rust
+app/library pairs on Linux and macOS. It is intentionally separate from the full
+lifecycle matrix because it removes each consumer's authored `.zpkg.toml` before
+installation and treats the resulting generated manifest as the artifact under
+test.
+
+For every ecosystem, `scripts/durable-first-install-polyglot.sh`:
+
+- publishes the pinned library to a fresh credential-free `file://` registry;
+- invokes `zed install` from a nested directory below the native project root;
+- verifies that one deterministic, non-publishable `.zpkg.toml` is created only
+  at the inferred root;
+- checks inferred target and adapter metadata plus the direct dependency;
+- compares an explicit `@^1.0.0` install with an unversioned latest-resolution
+  install and requires byte-identical manifest and lockfile output;
+- executes the real native application through Go, Python, or Cargo;
+- proves copy-mode output contains no symlinks;
+- uninstalls materialized content while retaining managed state; and
+- performs a frozen nested-directory reinstall without changing manifest or
+  lockfile bytes.
+
+All source repositories, the CLI implementation, the shared interface contract,
+and third-party actions are pinned to immutable commit SHAs. Each matrix entry
+owns isolated registry, home, build, consumer, and diagnostics directories.
+
+Run one ecosystem locally after building the selected CLI:
+
+```bash
+bash scripts/durable-first-install-polyglot.sh \
+  ../zed-cli/target/release/zed \
+  go \
+  ../go-lib \
+  ../go-app \
+  /tmp/zed-durable-go
+```
+
 ## Browser suites
 
 | Suite | What it covers |
