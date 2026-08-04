@@ -282,9 +282,7 @@ fn error_name(error: &NativeRegistryError) -> &'static str {
         NativeRegistryError::DuplicateMetaPlatform { .. } => "DuplicateMetaPlatform",
         NativeRegistryError::DuplicatePackageVersion { .. } => "DuplicatePackageVersion",
         NativeRegistryError::MultipleMetaPackages => "MultipleMetaPackages",
-        NativeRegistryError::DuplicatePlatformPublication { .. } => {
-            "DuplicatePlatformPublication"
-        }
+        NativeRegistryError::DuplicatePlatformPublication { .. } => "DuplicatePlatformPublication",
         NativeRegistryError::PlatformPackageMismatch { .. } => "PlatformPackageMismatch",
         NativeRegistryError::MissingPlatformPublication { .. } => "MissingPlatformPublication",
         NativeRegistryError::Serialization(_) => "Serialization",
