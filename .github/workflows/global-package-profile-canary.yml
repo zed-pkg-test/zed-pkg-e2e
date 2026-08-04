@@ -15,7 +15,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  ZED_CLI_COMMIT: ec3baff4a443440da872e56ad2e1b21260b4bc96
+  ZED_CLI_COMMIT: 7b3a9c7d00147fcc0b45255cef7c52d7d663b023
 
 jobs:
   canary:
@@ -50,6 +50,10 @@ jobs:
           set -euo pipefail
           test "${#ZED_CLI_COMMIT}" -eq 40
           test "$(git -C product/zed-cli rev-parse HEAD)" = "$ZED_CLI_COMMIT"
+          mkdir -p artifacts
+          printf 'candidate=%s\nos=%s\narch=%s\n' \
+            "$ZED_CLI_COMMIT" "$RUNNER_OS" "$RUNNER_ARCH" \
+            > "artifacts/candidate-${RUNNER_OS}.txt"
 
       - name: Install repository Rust toolchain
         uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30
