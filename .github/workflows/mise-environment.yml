@@ -1,0 +1,157 @@
+name: mise environment interoperability
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      zed_cli_ref:
+        description: Immutable zed-cli commit to certify
+        required: false
+        default: 93ff1cce4a0ed1a29a8172e1ba01c1cc12fddd01
+  schedule:
+    - cron: "41 4 * * 1"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mise-environment-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: "1"
+  ZED_CLI_REF: ${{ github.event.inputs.zed_cli_ref || '93ff1cce4a0ed1a29a8172e1ba01c1cc12fddd01' }}
+  ZED_INTERFACES_REF: c2e049006453c26ca8ca291783f681fce75cb01f
+
+jobs:
+  certify:
+    name: mise contract / ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-24.04
+          - macos-15
+          - windows-2025
+    steps:
+      - name: Require immutable component pins
+        run: |
+          set -euo pipefail
+          [[ "$ZED_CLI_REF" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$ZED_INTERFACES_REF" =~ ^[0-9a-f]{40}$ ]]
+
+      - name: Check out certification harness
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: harness
+          fetch-depth: 1
+          persist-credentials: false
+          show-progress: false
+
+      - name: Check out immutable zed CLI
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: zed-pkg/zed-cli
+          ref: ${{ env.ZED_CLI_REF }}
+          path: zed-cli
+          fetch-depth: 1
+          persist-credentials: false
+          show-progress: false
+
+      - name: Verify the canonical EnvironmentPlan contract pin
+        run: |
+          set -euo pipefail
+          grep -F "$ZED_INTERFACES_REF" zed-cli/Cargo.toml
+          grep -F "$ZED_INTERFACES_REF" zed-cli/Cargo.lock
+
+      - name: Install the declared Rust toolchain
+        run: |
+          set -euo pipefail
+          rustup toolchain install stable --profile minimal --component rustfmt,clippy
+          rustup default stable
+          rustc --version --verbose
+          cargo --version --verbose
+          python --version
+
+      - name: Run the in-repository mise contract tests
+        run: |
+          set -euo pipefail
+          python -m py_compile harness/scripts/mise_environment.py harness/scripts/mise_lock_naming.py
+          cargo fmt --all --check --manifest-path zed-cli/Cargo.toml
+          cargo test --locked --manifest-path zed-cli/Cargo.toml --lib environment::tests
+          cargo test --locked --manifest-path zed-cli/Cargo.toml --test mise_environment_cli
+          cargo clippy --locked --manifest-path zed-cli/Cargo.toml --all-targets -- -D warnings
+
+      - name: Build the immutable zed executable
+        run: |
+          set -euo pipefail
+          cargo build --locked --release --manifest-path zed-cli/Cargo.toml --bin zed
+          if [[ "$RUNNER_OS" == "Windows" ]]; then
+            test -x zed-cli/target/release/zed.exe || test -f zed-cli/target/release/zed.exe
+          else
+            test -x zed-cli/target/release/zed
+          fi
+
+      - name: Certify project-local mise import and frozen verification
+        run: |
+          set -euo pipefail
+          ZED_BIN="zed-cli/target/release/zed"
+          if [[ "$RUNNER_OS" == "Windows" ]]; then
+            ZED_BIN="${ZED_BIN}.exe"
+          fi
+          python harness/scripts/mise_environment.py \
+            --zed "$ZED_BIN" \
+            --work-root "$RUNNER_TEMP/zed-mise-environment"
+          python harness/scripts/mise_lock_naming.py \
+            --zed "$ZED_BIN" \
+            --work-root "$RUNNER_TEMP/zed-mise-lock-naming"
+
+      - name: Collect failure diagnostics
+        if: failure()
+        run: |
+          set +e
+          mkdir -p "$RUNNER_TEMP/zed-mise-diagnostics"
+          cp -R "$RUNNER_TEMP/zed-mise-environment" \
+            "$RUNNER_TEMP/zed-mise-diagnostics/environment-work-root" 2>/dev/null || true
+          cp -R "$RUNNER_TEMP/zed-mise-lock-naming" \
+            "$RUNNER_TEMP/zed-mise-diagnostics/lock-naming-work-root" 2>/dev/null || true
+          git -C zed-cli status --porcelain=v1 --untracked-files=all \
+            > "$RUNNER_TEMP/zed-mise-diagnostics/zed-cli-status.txt" 2>&1
+          python --version \
+            > "$RUNNER_TEMP/zed-mise-diagnostics/python-version.txt" 2>&1
+          rustc --version --verbose \
+            > "$RUNNER_TEMP/zed-mise-diagnostics/rust-version.txt" 2>&1
+
+      - name: Upload failure diagnostics
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: mise-environment-${{ matrix.os }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/zed-mise-diagnostics
+          if-no-files-found: warn
+          retention-days: 14
+          include-hidden-files: true
+
+  gate:
+    name: All mise environment platforms passed
+    if: always()
+    needs: certify
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Enforce aggregate result
+        env:
+          MATRIX_RESULT: ${{ needs.certify.result }}
+        run: |
+          set -euo pipefail
+          printf 'mise-environment=%s\n' "$MATRIX_RESULT"
+          test "$MATRIX_RESULT" = success
