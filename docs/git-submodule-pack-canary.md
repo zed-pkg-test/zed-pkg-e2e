@@ -46,6 +46,13 @@ A separate three-check metadata contract proves:
 15. a `120000` symlink entry in the Git index rejects pack even when the
     worktree `.gitmodules` is still a regular file.
 
+Modern Git porcelain intentionally refuses to create the third hostile state.
+The canary therefore rewrites one entry in a valid version-2 index, supports
+both SHA-1 and SHA-256 repository formats, recomputes the index checksum, and
+then proves `git ls-files --stage` accepts the resulting `120000` entry before
+invoking Zed. This keeps the contract at the actual Git/product boundary instead
+of mocking command output.
+
 An uninitialized submodule is optional only when one authored canonical
 recursive rule conclusively excludes its complete subtree under the exact glob
 syntax used by the packer. Sampling filenames, stripping path prefixes, changing
