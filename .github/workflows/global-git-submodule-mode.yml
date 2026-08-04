@@ -18,7 +18,7 @@ defaults:
 env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: "1"
-  ZED_CLI_REF: 74fd40b7716301c88d56db29afefe2a918642375
+  ZED_CLI_REF: ff166471338e46729b7cf892b44240452a56ace6
   ZED_INTERFACES_REF: c2e049006453c26ca8ca291783f681fce75cb01f
 
 jobs:
@@ -40,7 +40,7 @@ jobs:
           persist-credentials: false
           show-progress: false
 
-      - name: Check out exact zed-cli candidate
+      - name: Check out exact merged zed-cli
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: zed-pkg/zed-cli
