@@ -2,7 +2,8 @@
 
 Linear: [DEN-1553](https://linear.app/denman/issue/DEN-1553/zed-cli-solve-overlapping-compatible-transitive-constraints-before)
 
-Product candidate: `zed-pkg/zed-cli#89`.
+Product candidate: `zed-pkg/zed-cli#89` at immutable commit
+`3ab7656d6dedc28066e1ffe5d40db583b355d04b`.
 
 ## Purpose
 
@@ -45,14 +46,15 @@ Newest-first selection initially chooses incompatible `a@1.1.0` and
 ### Rejected-candidate constraint removal
 
 The newest `stale-chooser` candidate contributes both a conflicting shared
-version and an `stale-obsolete` dependency. A peer forces the other shared
+version and a `stale-obsolete` dependency. A peer forces the other shared
 version. The canary requires the solver to backtrack to the older chooser,
 materialize `stale-replacement`, and omit `stale-obsolete` from both the lock
 and project tree.
 
-Candidate artifact downloads that occurred during search may remain in the
-immutable global store. Only project materialization and the selected lock
-graph are required to exclude rejected candidates.
+Non-yanked candidate artifacts inspected during a rejected search branch may
+remain in the immutable global store. They must never appear in `.zpkg.lock` or
+the consumer project. Yanked candidates have a stricter boundary described
+below: immutable metadata must reject them before archive acquisition.
 
 ### Deterministic unsatisfiable provenance
 
@@ -68,17 +70,28 @@ package. The canary runs opposite root declaration orders and requires:
 A two-package cycle must terminate with exactly one selected version for each
 coordinate and materialize both packages once.
 
-## Acquisition and replay boundaries
+## Acquisition, policy, and replay boundaries
 
 The canary retains the existing recursive-installer contracts while exercising
 the new solver:
 
 - the reported worker bound remains five;
+- a cold wide frontier actually reaches the bounded acquisition pool instead of
+  serializing candidate downloads;
 - selected artifacts use the existing per-SHA acquisition and global store;
 - project output remains symlink-first;
 - warm frozen replay downloads zero artifacts;
 - fresh frozen replay uses the exact lock graph;
-- failure does not create `.zpkg.lock`, `zed_modules`, or transaction staging.
+- failure does not create `.zpkg.lock`, `zed_modules`, or transaction staging;
+- a freshly solved graph whose only common version is yanked fails with
+  `--frozen` guidance;
+- the yanked archive SHA never enters a fresh home before that failure; and
+- an existing exact lock remains authoritative after the selected version is
+  subsequently marked yanked.
+
+The product's ordinary integration suite separately retains the opaque-version
+compatibility boundary: opaque package identifiers are exact-only and a semver
+range such as `^1` cannot match an opaque tag such as `legacy-api`.
 
 The workflow uses one hosted Ubuntu job by default to conserve Actions usage.
 A manual `run_arc_smoke` input repeats the same executable canary on the
@@ -88,7 +101,16 @@ an unregistered runner.
 
 ## Promotion rule
 
-Keep this pull request draft while the product candidate is still moving.
-Whenever `zed-cli#89` advances, update the immutable `ZED_CLI_REF` only, rerun
-this canary, and record the exact head and workflow evidence on DEN-1553.
-Do not weaken graph or diagnostic assertions to make a candidate pass.
+Keep this pull request draft until all of the following are true on the exact
+product commit above:
+
+1. the hosted black-box canary passes without weakened assertions;
+2. every inherited lifecycle, recursive, browser, durable-manifest, and mise
+   workflow in this repository passes on the certification head;
+3. every product workflow passes on the same immutable `zed-cli` SHA;
+4. no unresolved review thread or change request remains; and
+5. this certification PR merges before `zed-pkg/zed-cli#89`.
+
+Whenever the product head advances, update the immutable `ZED_CLI_REF` and this
+document together. Branch names and abbreviated SHAs are not valid promotion
+evidence.
