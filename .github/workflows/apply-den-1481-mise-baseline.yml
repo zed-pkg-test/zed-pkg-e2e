@@ -1,0 +1,84 @@
+name: apply DEN-1481 mise baseline
+
+on:
+  push:
+    branches:
+      - test/den-1481-mise-frozen-identity
+    paths:
+      - .github/workflows/apply-den-1481-mise-baseline.yml
+
+permissions:
+  contents: write
+
+concurrency:
+  group: den-1481-mise-baseline-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  apply:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Check out certification branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: test/den-1481-mise-frozen-identity
+          fetch-depth: 0
+          persist-credentials: true
+          show-progress: false
+
+      - name: Give every baseline tool every requested platform
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path('scripts/mise_environment.py')
+          text = path.read_text(encoding='utf-8')
+          start = text.index('def baseline_lock(')
+          end = text.index('\ndef write_locked_project', start)
+          replacement = '''def baseline_lock(*, reordered: bool = False, node_url: str = "https://example.invalid/node") -> str:
+              node = f"""[[tools.node]]
+          version = "22.4.0"
+          backend = "core:node"
+
+          [tools.node.platforms.linux-x64]
+          checksum = "{sha256_hex('a')}"
+          size = 100
+          url = "{node_url}/linux-x64"
+
+          [tools.node.platforms.macos-arm64]
+          url = "{node_url}/macos-arm64"
+          size = 101
+          checksum = "{sha256_hex('c')}"
+          """
+              python = f"""[[tools.python]]
+          version = "3.12.4"
+          backend = "core:python"
+
+          [tools.python.platforms.linux-x64]
+          checksum = "{sha256_hex('d')}"
+          size = 199
+          url = "https://example.invalid/python-linux"
+
+          [tools.python.platforms.macos-arm64]
+          url = "https://example.invalid/python-macos"
+          size = 200
+          checksum = "{sha256_hex('b')}"
+          """
+              return (python + "\\n" + node) if reordered else (node + "\\n" + python)
+
+          '''
+          path.write_text(text[:start] + replacement + text[end + 1 :], encoding='utf-8')
+          PY
+
+          python3 -m py_compile scripts/mise_environment.py scripts/mise_frozen_identity.py
+          git diff --check
+
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add scripts/mise_environment.py
+          git commit -m 'test(DEN-1481): complete requested-platform baseline'
+          git push origin HEAD:test/den-1481-mise-frozen-identity
