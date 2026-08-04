@@ -15,9 +15,13 @@ concurrency:
 
 jobs:
   evidence:
-    name: format exact production Nix bundle files
-    runs-on: ubuntu-22.04
-    timeout-minutes: 25
+    name: format exact production Nix bundle files / ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, windows-2022, macos-13]
     steps:
       - name: Check out evidence workflow
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -100,7 +104,7 @@ jobs:
       - name: Upload exact formatted files
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: nix-bundle-rustfmt-production-${{ github.run_id }}
+          name: nix-bundle-rustfmt-production-${{ runner.os }}-${{ github.run_id }}
           path: ${{ runner.temp }}/nix-bundle-rustfmt
           if-no-files-found: error
           retention-days: 1
