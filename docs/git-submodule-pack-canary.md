@@ -5,11 +5,12 @@ This contract independently certifies the archive and publication boundary in
 inspects the resulting `tar.gz` bytes with Python's standard library.
 
 The workflow pins exact CLI candidate
-`71baaf6e9442a47bbcf05e0a698c7cc1c066e282` and exact interface contract
+`8ec2d4cccfcb260130aa5bd37b8999a58b284c17` and exact interface contract
 `c2e049006453c26ca8ca291783f681fce75cb01f`. The candidate is the reviewed
 semantic merge of the package guard with current `main`, including the latest
-mixed-submodule, Dart-wiring, and mise-identity changes. Ubuntu 24.04 and macOS
-15 build that source, run the focused product tests, and execute disposable
+mixed-submodule, Dart-wiring, and mise-identity changes, plus the regression fix
+that asserts the complete contextual verification error chain. Ubuntu 24.04 and
+macOS 15 build that source, run the focused product tests, and execute disposable
 local Git fixtures. Linux additionally runs all-target Clippy with warnings
 denied.
 
