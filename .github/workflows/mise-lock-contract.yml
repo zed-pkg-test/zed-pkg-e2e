@@ -98,6 +98,12 @@ jobs:
             mise_lock::tests::compact_checksum_and_table_forms_have_the_same_identity
           cargo test --locked --manifest-path zed-cli/Cargo.toml \
             mise_lock::tests::ordered_additional_artifacts_change_semantic_identity
+          cargo test --locked --manifest-path zed-cli/Cargo.toml \
+            --test mise_lock_contract \
+            pinned_current_mise_wire_fixture_round_trips_without_platform_key_loss
+          cargo test --locked --manifest-path zed-cli/Cargo.toml \
+            --test mise_lock_contract \
+            provenance_mutation_in_current_wire_changes_semantic_identity
 
   gate:
     name: All current mise lock platforms passed
