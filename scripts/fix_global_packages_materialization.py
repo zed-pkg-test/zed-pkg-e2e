@@ -4,9 +4,10 @@
 The main materializer intentionally copies the reviewed feature files before
 composing them with current main. This verifier preserves the current lockfile
 import surface, normalizes the root-help adapter to the `Result<i32>` contract
-expected by the modular dispatcher, and boxes the large install payload so the
-public command enum remains Clippy-clean. It is idempotent and fails on unknown
-source shapes rather than guessing.
+expected by the modular dispatcher, boxes the large install payload so the
+public command enum remains Clippy-clean, and removes a redundant Zed package
+dependency while Cargo still owns that dependency through an immutable Git pin.
+It is idempotent and fails on unknown source shapes rather than guessing.
 """
 
 from __future__ import annotations
@@ -89,6 +90,20 @@ def patch_global(product: Path) -> None:
     path.write_text(text)
 
 
+def patch_package_manifest(product: Path) -> None:
+    path = product / ".zpkg.toml"
+    text = path.read_text()
+    redundant = '''[dependencies]
+"zed-pkg/zed-interfaces" = "^0.1.0"
+
+'''
+    if redundant in text:
+        text = text.replace(redundant, "", 1)
+    elif "zed-pkg/zed-interfaces" in text:
+        raise SystemExit(".zpkg.toml has an unknown zed-interfaces dependency shape")
+    path.write_text(text)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--product", type=Path, required=True)
@@ -96,8 +111,9 @@ def main() -> None:
     product = args.product.resolve()
     patch_ops(product)
     patch_global(product)
+    patch_package_manifest(product)
     print(
-        "preserved LockedPackage import, normalized root help, and boxed the install payload"
+        "preserved current-main imports, normalized root help, boxed the install payload, and aligned package metadata with Cargo"
     )
 
 
