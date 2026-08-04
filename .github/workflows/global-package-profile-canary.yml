@@ -15,7 +15,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  ZED_CLI_COMMIT: 7b3a9c7d00147fcc0b45255cef7c52d7d663b023
+  ZED_CLI_COMMIT: 575d12272fdd7066171d2b8f458a4a672676b603
 
 jobs:
   canary:
