@@ -1,17 +1,17 @@
 # Git-submodule interoperability canary
 
-This repository independently certifies the consolidated Git-submodule surface
-in `zed-pkg/zed-cli#108` rather than relying only on product-repository tests.
-The workflow pins these immutable inputs:
+This repository independently certifies the Git-submodule implementation merged
+by `zed-pkg/zed-cli#108` rather than relying only on product-repository tests.
+The workflow pins these immutable shipped inputs:
 
 ```text
-zed-pkg/zed-cli@b2ec50cd1d7c182bd9219795cd2918387c9c4cd8
+zed-pkg/zed-cli@b427e11fa9f592de88907320eff3293d0837b2b3
 zed-pkg/zed-interfaces@c2e049006453c26ca8ca291783f681fce75cb01f
 ```
 
-The same CLI commit is recorded in `.zed-cli-ref`, so this PR also exercises the
-candidate through the repository's full lifecycle suite across all maintained
-fixture repositories.
+The same merged CLI commit is recorded in `.zed-cli-ref`, so this PR also
+exercises the shipped implementation through the repository's full lifecycle
+suite across all maintained fixture repositories.
 
 ## Contract
 
