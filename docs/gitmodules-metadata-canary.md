@@ -2,13 +2,14 @@
 
 This canary independently certifies the metadata hardening added to
 `zed-pkg/zed-cli#110`. It pins exact CLI candidate
-`82c9d0e0b9e96402afa76f3b85c4b9e16c3cb101` and exact interface contract
+`0786987fe3a173659463940f4f905dc3b5bd19a8` and exact interface contract
 `c2e049006453c26ca8ca291783f681fce75cb01f`.
 
 The earlier package-boundary canary proves that initialized and clean submodule
 source is packaged while nested Git control data is omitted. This follow-up
 focuses on the trustworthiness of `.gitmodules` itself before any parser,
-checkout, lock refresh, archive, or publication path consumes it.
+checkout, lock refresh, archive, or publication path consumes it. The candidate
+also includes the exact rustfmt repair found by the first three-platform run.
 
 ## Unix black-box contract
 
