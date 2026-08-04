@@ -14,7 +14,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  ZED_CLI_REF: 5fcc278ff508df2a0c039796ee68acd97fc5a10c
+  ZED_CLI_REF: 46519548a84c9fa3a1c1d7d43208b3c396803643
   ZED_INTERFACES_REF: 2082012d1903783a89200c3bd44d2659a6daf872
 
 jobs:
@@ -66,6 +66,7 @@ jobs:
             zed-cli/src/completion.rs \
             zed-cli/src/nix_export_bundle/archive.rs \
             zed-cli/src/nix_export_bundle/templates.rs \
+            zed-cli/tests/nix_export_bundle/common.rs \
             evidence/formatted-tree/
           git -C zed-cli diff --binary > evidence/formatted.patch
           sha256sum evidence/formatted-tree/zed-cli/Cargo.lock > evidence/SHA256SUMS
