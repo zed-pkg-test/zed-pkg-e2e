@@ -75,11 +75,11 @@ jobs:
         working-directory: zed-cli
         run: cargo clippy --locked --all-targets -- -D warnings
 
-      - name: Repeat deterministic real-fixture identity
+      - name: Repeat deterministic normalized lock identity
         working-directory: zed-cli
         run: |
-          cargo test --locked mise_lock::tests::current_mise_fixture_round_trips -- --exact --nocapture
-          cargo test --locked mise_lock::tests::current_mise_fixture_round_trips -- --exact --nocapture
+          cargo test --locked mise_lock::tests::complete_current_lock_round_trips_and_is_frozen_portable -- --exact --nocapture
+          cargo test --locked mise_lock::tests::complete_current_lock_round_trips_and_is_frozen_portable -- --exact --nocapture
 
       - name: Prove the certification lane is read-only and credential-free
         shell: bash
