@@ -46,6 +46,14 @@ class Contract:
 
     def env(self, extra: Mapping[str, str] | None = None) -> dict[str, str]:
         env = os.environ.copy()
+        for key in (
+            "ZED_PKG_GIT_SUBMODULES",
+            "ZED_PKG_TOKEN",
+            "ZED_TOKEN",
+            "GH_TOKEN",
+            "GITHUB_TOKEN",
+        ):
+            env.pop(key, None)
         env.update(
             {
                 "CI": "true",
@@ -60,7 +68,6 @@ class Contract:
                 "GIT_CONFIG_COUNT": "1",
                 "GIT_CONFIG_KEY_0": "protocol.file.allow",
                 "GIT_CONFIG_VALUE_0": "always",
-                "ZED_PKG_TOKEN": "",
             }
         )
         if extra:
@@ -322,6 +329,166 @@ class Contract:
 
         (self.evidence / "adopted-lock.toml").write_bytes(lock_bytes)
 
+    def build_mixed_fixture(self) -> Path:
+        zed_child = self.repos / "mixed-client"
+        self.init_repo(zed_child)
+        self.write_package(zed_child, org="acme", name="mixed-client")
+        (zed_child / "lib.txt").write_text("mixed Zed package\n", encoding="utf-8")
+        self.commit_all(zed_child, "mixed Zed package")
+
+        legacy_child = self.repos / "legacy-docs"
+        self.init_repo(legacy_child)
+        (legacy_child / "README.md").write_text(
+            "ordinary Git submodule\n", encoding="utf-8"
+        )
+        self.commit_all(legacy_child, "legacy documentation")
+
+        root = self.repos / "mixed-root"
+        self.init_repo(root)
+        self.write_package(root, org="acme", name="mixed-root")
+        self.add_submodule(root, zed_child, "vendor/client")
+        self.add_submodule(root, legacy_child, "vendor/legacy")
+        self.commit_all(root, "mixed Git and Zed submodules")
+        return root
+
+    def certify_mixed_repository_contract(self) -> None:
+        root_source = self.build_mixed_fixture()
+        adopted = self.runs / "mixed-adopted"
+        self.clone_no_submodules(root_source, adopted)
+        output = self.zed_cmd(
+            adopted,
+            "mixed-adopted",
+            "overtake",
+            "--git-submodules",
+        )
+        assert "overtook 1 Git submodule package(s)" in output
+        assert "left 1 non-Zed submodule(s) under Git authority" in output
+        assert "vendor/legacy" in output
+
+        manifest_before_commit = (adopted / MANIFEST).read_bytes()
+        manifest = tomllib.loads(manifest_before_commit.decode("utf-8"))
+        assert manifest["dependencies"]["acme/mixed-client"] == "=1.2.3"
+        assert "vendor/client" in manifest["workspace"]["members"]
+        assert "vendor/legacy" not in manifest["workspace"]["members"]
+
+        lock_before_commit = (adopted / LOCKFILE).read_bytes()
+        lock = tomllib.loads(lock_before_commit.decode("utf-8"))
+        entries = lock.get("git-submodule")
+        assert isinstance(entries, list) and len(entries) == 1
+        assert entries[0]["package"] == "acme/mixed-client"
+        assert entries[0]["path"] == "vendor/client"
+        assert "vendor/legacy" not in lock_before_commit.decode("utf-8")
+        assert (adopted / "zed_modules/acme/mixed-client/lib.txt").is_file()
+        assert (adopted / "vendor/legacy/README.md").is_file()
+        self.checks.append("mixed takeover adopts only explicit Zed packages")
+
+        self.git(adopted, "add", MANIFEST, LOCKFILE)
+        self.git(adopted, "commit", "-m", "adopt only the Zed submodule")
+
+        frozen = self.runs / "mixed-frozen"
+        self.clone_no_submodules(adopted, frozen)
+        manifest_before = (frozen / MANIFEST).read_bytes()
+        lock_before = (frozen / LOCKFILE).read_bytes()
+        assert not (frozen / "vendor/client/lib.txt").exists()
+        assert not (frozen / "vendor/legacy/README.md").exists()
+
+        self.zed_cmd(
+            frozen,
+            "mixed-frozen",
+            "install",
+            "--frozen",
+            extra_env={"ZED_PKG_GIT_SUBMODULES": "yes"},
+        )
+        assert (frozen / MANIFEST).read_bytes() == manifest_before
+        assert (frozen / LOCKFILE).read_bytes() == lock_before
+        assert (frozen / "vendor/client/lib.txt").read_text(
+            encoding="utf-8"
+        ) == "mixed Zed package\n"
+        assert (frozen / "vendor/legacy/README.md").read_text(
+            encoding="utf-8"
+        ) == "ordinary Git submodule\n"
+        assert (frozen / "zed_modules/acme/mixed-client/lib.txt").read_text(
+            encoding="utf-8"
+        ) == "mixed Zed package\n"
+        recursive_status = self.git(frozen, "submodule", "status", "--recursive")
+        for line in recursive_status.splitlines():
+            if line:
+                assert line[0] not in "-+U", recursive_status
+        self.checks.append(
+            "mixed frozen replay restores adopted and Git-only transports byte-exactly"
+        )
+
+        (self.evidence / "mixed-manifest.toml").write_bytes(manifest_before_commit)
+        (self.evidence / "mixed-lock.toml").write_bytes(lock_before_commit)
+
+    def certify_git_only_boundary(self) -> None:
+        legacy_child = self.repos / "git-only-child"
+        self.init_repo(legacy_child)
+        (legacy_child / "README.md").write_text(
+            "ordinary Git submodule\n", encoding="utf-8"
+        )
+        self.commit_all(legacy_child, "Git-only child")
+
+        root = self.runs / "git-only-root"
+        self.init_repo(root)
+        original = self.write_package(root, org="acme", name="git-only-root")
+        self.add_submodule(root, legacy_child, "vendor/legacy")
+        self.commit_all(root, "Git-only submodule root")
+        self.git(
+            root,
+            "submodule",
+            "deinit",
+            "--force",
+            "--",
+            "vendor/legacy",
+        )
+        assert not (root / "vendor/legacy/README.md").exists()
+
+        output = self.zed_cmd(
+            root,
+            "git-only",
+            "overtake",
+            "--git-submodules",
+            should_fail=True,
+        )
+        assert "no overtake-compatible Zed submodules" in output
+        assert "vendor/legacy" in output
+        assert (root / MANIFEST).read_bytes() == original
+        self.assert_no_install_state(root)
+        assert (root / "vendor/legacy/README.md").read_text(
+            encoding="utf-8"
+        ) == "ordinary Git submodule\n"
+        self.checks.append(
+            "Git-only takeover synchronizes transport without publishing Zed state"
+        )
+
+    def certify_invalid_manifest_boundary(self) -> None:
+        invalid_child = self.repos / "invalid-manifest-child"
+        self.init_repo(invalid_child)
+        (invalid_child / MANIFEST).write_text(
+            "[package]\nname = [this is not valid TOML\n",
+            encoding="utf-8",
+        )
+        self.commit_all(invalid_child, "invalid package intent")
+
+        root = self.runs / "invalid-manifest-root"
+        self.init_repo(root)
+        original = self.write_package(root, org="acme", name="invalid-root")
+        self.add_submodule(root, invalid_child, "vendor/invalid")
+        self.commit_all(root, "invalid package submodule root")
+
+        output = self.zed_cmd(
+            root,
+            "invalid-manifest",
+            "overtake",
+            "--git-submodules",
+            should_fail=True,
+        )
+        assert "contains an invalid .zpkg.toml" in output
+        assert (root / MANIFEST).read_bytes() == original
+        self.assert_no_install_state(root)
+        self.checks.append("invalid package intent fails closed before Zed mutation")
+
     def build_broken_child(self) -> Path:
         broken = self.repos / "broken-client"
         self.init_repo(broken)
@@ -383,7 +550,7 @@ class Contract:
         version = self.run([self.zed, "--version"]).strip()
         zed_sha256 = hashlib.sha256(self.zed.read_bytes()).hexdigest()
         record = {
-            "schema": "zed.git-submodule-interop-evidence/v1",
+            "schema": "zed.git-submodule-interop-evidence/v2",
             "zed_version": version,
             "zed_sha256": zed_sha256,
             "checks": self.checks,
@@ -393,7 +560,7 @@ class Contract:
         (self.evidence / "evidence.json").write_text(
             json.dumps(record, indent=2, sort_keys=True) + "\n", encoding="utf-8"
         )
-        assert len(self.checks) == 8, self.checks
+        assert len(self.checks) == 12, self.checks
         self.log(f"\ncertified {len(self.checks)} Git-submodule interoperability checks")
 
 
@@ -410,6 +577,9 @@ def main() -> int:
     _, _, root, child_commit = contract.build_fixture_graph()
     contract.certify_cooperative_install(root)
     contract.certify_takeover_and_frozen_replay(root, child_commit)
+    contract.certify_mixed_repository_contract()
+    contract.certify_git_only_boundary()
+    contract.certify_invalid_manifest_boundary()
     broken = contract.build_broken_child()
     contract.certify_failure_atomic_takeover(broken)
     contract.finish()
