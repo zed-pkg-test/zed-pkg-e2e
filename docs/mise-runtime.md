@@ -12,19 +12,17 @@ This runtime suite exercises a separate contract: `zed dev --mise auto|never|req
 
 Neither suite may substitute for the other.
 
-## Lifecycle stack prerequisite
+## Lifecycle baseline
 
-This pull request is stacked on `zed-pkg-e2e#24`, branch `agent/lifecycle-shared-schema-source`, exact head `b34f52b44f72118742f566829166bebd7358788d`.
+The canonical shared-schema lifecycle/source-map correction from `zed-pkg-e2e#24` is merged on `main` as `636fbe87aa26cf25a1c22d8f64383d4b5b8e6da8`.
 
-PR #24 is the canonical shared-schema lifecycle/source-map correction. It classifies `shared-schema` as a package fixture, maps `zedtest/shared-schema`, removes only the exact untracked publish archive with fail-closed checks, and has a green 22-fixture lifecycle matrix. The runtime suite does not duplicate those changes.
-
-After PR #24 merges, retarget this pull request to `main` without changing the immutable `zed-cli` candidate, then require the same runtime and ordinary lifecycle checks on the new synthetic merge.
+That baseline classifies `shared-schema` as a package fixture, maps `zedtest/shared-schema`, removes only the exact untracked publish archive with fail-closed checks, and passed the complete 22-fixture lifecycle matrix. This runtime suite is now based directly on `main`; it does not duplicate or carry a private copy of the lifecycle repair.
 
 ## Immutable candidate
 
 `.github/workflows/mise-runtime.yml` builds a full 40-character `zed-cli` commit pin and runs the same black-box harness on Ubuntu 24.04 and macOS 15. The workflow does not install mise or download language runtimes. Instead, it supplies a deterministic executable stub whose arguments and relevant environment values are observable.
 
-The current candidate is `12fa84f11cef7ce2783683d6efc5b79409f62be7`, the exact clean head of `zed-pkg/zed-cli#70`. Update the pin whenever that pull request changes, and never promote this certification against a branch name or abbreviated SHA.
+The current candidate is `854b55c348307d00e2fd2ec8309792c249208192`, the current-main integration head of `zed-pkg/zed-cli#70`. That head preserves the six reviewed mise runtime paths while incorporating the merged recursive installer, strict frozen lock/fetch, Nix export/fetch/flake, OCI, and related current-main history. Update the pin whenever that pull request changes, and never promote this certification against a branch name or abbreviated SHA.
 
 ## Certified behavior
 
@@ -66,11 +64,11 @@ The work root must not already exist. On success, the harness emits TAP-style as
 
 Keep this pull request draft until:
 
-1. lifecycle base PR #24 is green and merged;
-2. `zed-pkg/zed-cli#70` has a final immutable head;
-3. the workflow pin matches that head exactly;
-4. Ubuntu and macOS runtime jobs pass on that pin;
-5. ordinary stacked lifecycle checks pass with PR #24;
+1. the pull request is based directly on current `main` containing merged PR #24;
+2. `zed-pkg/zed-cli#70` has a final immutable current-main integration head;
+3. the workflow and documentation pins match that head exactly;
+4. Ubuntu and macOS runtime jobs plus the aggregate gate pass on that pin;
+5. ordinary lifecycle, install/OCI, browser, and policy checks pass on the retargeted pull request;
 6. the static suite in `zed-pkg-e2e#7` remains green for its own declared surface;
-7. ordinary `zed-cli` CI, development-shell, policy, and hardening checks are green; and
+7. ordinary `zed-cli` CI, development-shell, policy, hardening, Nix, OCI, and formal-review checks are green; and
 8. DEN-1420 and DEN-1449 link both pull requests and their exact candidate SHA.
