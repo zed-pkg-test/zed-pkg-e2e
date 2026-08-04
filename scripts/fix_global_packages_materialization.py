@@ -3,9 +3,10 @@
 
 The main materializer intentionally copies the reviewed feature files before
 composing them with current main. This verifier preserves the current lockfile
-import surface and normalizes the root-help adapter to the `Result<i32>` contract
-expected by the modular dispatcher. It is idempotent and fails on unknown source
-shapes rather than guessing.
+import surface, normalizes the root-help adapter to the `Result<i32>` contract
+expected by the modular dispatcher, and boxes the large install payload so the
+public command enum remains Clippy-clean. It is idempotent and fails on unknown
+source shapes rather than guessing.
 """
 
 from __future__ import annotations
@@ -67,6 +68,24 @@ def patch_global(product: Path) -> None:
         else:
             raise SystemExit("src/global.rs has an unknown print_root_help shape")
 
+    boxed_variant = "    Install(Box<GlobalInstallArgs>),"
+    plain_variant = "    Install(GlobalInstallArgs),"
+    if boxed_variant not in text:
+        if plain_variant not in text:
+            raise SystemExit("src/global.rs has an unknown GlobalAction::Install shape")
+        text = text.replace(plain_variant, boxed_variant, 1)
+
+    boxed_match = (
+        "            GlobalAction::Install(options) => install(&cfg, &bin_dir, *options),"
+    )
+    plain_match = (
+        "            GlobalAction::Install(options) => install(&cfg, &bin_dir, options),"
+    )
+    if boxed_match not in text:
+        if plain_match not in text:
+            raise SystemExit("src/global.rs has an unknown install dispatch shape")
+        text = text.replace(plain_match, boxed_match, 1)
+
     path.write_text(text)
 
 
@@ -77,7 +96,9 @@ def main() -> None:
     product = args.product.resolve()
     patch_ops(product)
     patch_global(product)
-    print("preserved LockedPackage import and normalized root-help result contract")
+    print(
+        "preserved LockedPackage import, normalized root help, and boxed the install payload"
+    )
 
 
 if __name__ == "__main__":
