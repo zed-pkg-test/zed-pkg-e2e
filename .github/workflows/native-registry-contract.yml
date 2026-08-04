@@ -9,7 +9,7 @@ on:
       zed_interfaces_ref:
         description: Immutable zed-interfaces commit to certify
         required: false
-        default: a6aaad6911c845be7d8069d67f9bef82c85452b7
+        default: ac8b36c0261ad59cf73b3b06c78c13be8370fcfa
 
 permissions:
   contents: read
@@ -25,7 +25,7 @@ defaults:
 env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: "1"
-  ZED_INTERFACES_REF: ${{ github.event.inputs.zed_interfaces_ref || 'a6aaad6911c845be7d8069d67f9bef82c85452b7' }}
+  ZED_INTERFACES_REF: ${{ github.event.inputs.zed_interfaces_ref || 'ac8b36c0261ad59cf73b3b06c78c13be8370fcfa' }}
 
 jobs:
   native-registry-contract:
