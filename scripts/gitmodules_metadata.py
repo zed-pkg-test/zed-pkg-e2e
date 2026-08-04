@@ -150,18 +150,8 @@ class Contract:
         self.git(path, "commit", "-m", message)
         return self.git(path, "rev-parse", "HEAD").strip()
 
-    def clone(
-        self,
-        source: Path,
-        destination: Path,
-        *,
-        checkout_symlinks: bool = True,
-    ) -> None:
-        command: list[str | Path] = ["git"]
-        if not checkout_symlinks:
-            command.extend(["-c", "core.symlinks=false"])
-        command.extend(["clone", "--no-recurse-submodules", source, destination])
-        self.run(command)
+    def clone(self, source: Path, destination: Path) -> None:
+        self.run(["git", "clone", "--no-recurse-submodules", source, destination])
         self.git(destination, "config", "user.name", "Zed Metadata Contract")
         self.git(
             destination,
@@ -205,19 +195,6 @@ class Contract:
         )
         self.commit_all(root, "root with child")
         return root
-
-    def build_symlink_index_source(self, regular_source: Path) -> Path:
-        source = self.repos / "symlink-index-root"
-        self.clone(regular_source, source)
-        gitmodules = source / ".gitmodules"
-        actual = source / "actual-gitmodules"
-        actual.write_text(gitmodules.read_text(encoding="utf-8"), encoding="utf-8")
-        gitmodules.unlink()
-        os.symlink("actual-gitmodules", gitmodules)
-        self.commit_all(source, "commit symlinked Git metadata")
-        mode = self.git(source, "ls-files", "--stage", "--", ".gitmodules")
-        assert mode.startswith("120000 "), mode
-        return source
 
     @staticmethod
     def assert_no_install_state(project: Path) -> None:
@@ -270,13 +247,25 @@ class Contract:
         self.assert_no_archives(out)
         self.checks.append("worktree directory fails before archive creation")
 
-    def certify_committed_symlink_mode(self, source: Path) -> None:
+    def certify_index_symlink_mode(self, source: Path) -> None:
         project = self.runs / "index-symlink"
-        self.clone(source, project, checkout_symlinks=False)
+        self.clone(source, project)
         gitmodules = project / ".gitmodules"
         assert gitmodules.is_file() and not gitmodules.is_symlink()
+
+        target = project / "symlink-target"
+        target.write_text("external-gitmodules\n", encoding="utf-8")
+        blob = self.git(project, "hash-object", "-w", "--", target.name).strip()
+        self.git(
+            project,
+            "update-index",
+            "--add",
+            "--cacheinfo",
+            f"120000,{blob},.gitmodules",
+        )
         mode = self.git(project, "ls-files", "--stage", "--", ".gitmodules")
         assert mode.startswith("120000 "), mode
+        assert gitmodules.is_file() and not gitmodules.is_symlink()
 
         out = self.runs / "index-symlink-pack"
         output = self.zed_cmd(
@@ -289,7 +278,7 @@ class Contract:
         )
         assert "regular git blob" in output.lower(), output
         self.assert_no_archives(out)
-        self.checks.append("committed symlink mode fails even when checkout is a regular file")
+        self.checks.append("symlink index mode fails with a regular worktree file")
 
     def finish(self) -> None:
         version = self.run([self.zed, "--version"]).strip()
@@ -319,10 +308,9 @@ def main() -> int:
     args = parse_args()
     contract = Contract(args.zed, args.work_root)
     regular = contract.build_regular_source()
-    symlink_index = contract.build_symlink_index_source(regular)
     contract.certify_worktree_symlink(regular)
     contract.certify_worktree_directory(regular)
-    contract.certify_committed_symlink_mode(symlink_index)
+    contract.certify_index_symlink_mode(regular)
     contract.finish()
     return 0
 
