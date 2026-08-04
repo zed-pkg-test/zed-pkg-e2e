@@ -16,7 +16,7 @@ concurrency:
 jobs:
   evidence:
     name: format exact production Nix bundle files
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-22.04
     timeout-minutes: 25
     steps:
       - name: Check out evidence workflow
