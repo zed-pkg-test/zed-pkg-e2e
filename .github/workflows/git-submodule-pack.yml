@@ -61,7 +61,7 @@ jobs:
           persist-credentials: false
           show-progress: false
 
-      - name: Verify immutable inputs and Python source
+      - name: Verify immutable inputs and Python sources
         run: |
           set -euo pipefail
           test "$(git -C zed-cli rev-parse HEAD)" = "$ZED_CLI_REF"
@@ -69,7 +69,9 @@ jobs:
           grep -F "rev = \"$ZED_INTERFACES_REF\"" zed-cli/Cargo.toml
           test -z "${ZED_PKG_TOKEN:-}"
           PYTHONPYCACHEPREFIX="$RUNNER_TEMP/pycache" \
-            python3 -m py_compile harness/scripts/git_submodule_pack.py
+            python3 -m py_compile \
+              harness/scripts/git_submodule_pack.py \
+              harness/scripts/gitmodules_metadata.py
 
       - name: Install the declared Rust toolchain
         run: |
@@ -86,6 +88,7 @@ jobs:
         run: |
           set -euo pipefail
           cargo test --locked --manifest-path zed-cli/Cargo.toml --lib pack_guard
+          cargo test --locked --manifest-path zed-cli/Cargo.toml --lib manifest_kind_tests
 
       - name: Run all-target lint gate
         if: runner.os == 'Linux'
@@ -94,12 +97,21 @@ jobs:
       - name: Build the exact release binary
         run: cargo build --locked --release --manifest-path zed-cli/Cargo.toml --bin zed
 
-      - name: Run the real archive contract
+      - name: Run the twelve-check archive contract
         env:
           WORK_ROOT: ${{ runner.temp }}/zed-git-submodule-pack
         run: |
           set -euo pipefail
           python3 harness/scripts/git_submodule_pack.py \
+            --zed zed-cli/target/release/zed \
+            --work-root "$WORK_ROOT"
+
+      - name: Run the three-check Git-metadata contract
+        env:
+          WORK_ROOT: ${{ runner.temp }}/zed-gitmodules-metadata
+        run: |
+          set -euo pipefail
+          python3 harness/scripts/gitmodules_metadata.py \
             --zed zed-cli/target/release/zed \
             --work-root "$WORK_ROOT"
 
@@ -115,7 +127,9 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: git-submodule-pack-${{ matrix.os }}-${{ github.run_id }}-${{ github.run_attempt }}
-          path: ${{ runner.temp }}/zed-git-submodule-pack/evidence
+          path: |
+            ${{ runner.temp }}/zed-git-submodule-pack/evidence
+            ${{ runner.temp }}/zed-gitmodules-metadata/evidence
           if-no-files-found: warn
           retention-days: 14
           include-hidden-files: false
