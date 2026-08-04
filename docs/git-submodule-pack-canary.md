@@ -5,14 +5,14 @@ This contract independently certifies the archive and publication boundary in
 inspects the resulting `tar.gz` bytes with Python's standard library.
 
 The workflow pins exact CLI candidate
-`8ec2d4cccfcb260130aa5bd37b8999a58b284c17` and exact interface contract
+`b930209c56bde698033ab9ae07f7746f4a519624` and exact interface contract
 `c2e049006453c26ca8ca291783f681fce75cb01f`. The candidate is the reviewed
 semantic merge of the package guard with current `main`, including the latest
-mixed-submodule, Dart-wiring, and mise-identity changes, plus the regression fix
-that asserts the complete contextual verification error chain. Ubuntu 24.04 and
-macOS 15 build that source, run the focused product tests, and execute disposable
-local Git fixtures. Linux additionally runs all-target Clippy with warnings
-denied.
+mixed-submodule, Dart-wiring, mise-identity, and Windows test-gating changes,
+plus the full contextual-error and conservative exclusion-regression fixes.
+Ubuntu 24.04 and macOS 15 build that source, run the focused product tests, and
+execute disposable local Git fixtures. Linux additionally runs all-target
+Clippy with warnings denied.
 
 ## Certified behavior
 
@@ -31,12 +31,16 @@ itself contains a nested ordinary Git submodule. The black-box contract proves:
 7. a dirty included submodule fails before archive creation;
 8. a dirty nested submodule also fails before archive creation;
 9. an authored `publish.exclude = ["vendor/client/**"]` permits that entire
-   subtree to remain uninitialized and omitted; and
-10. a project `.zedignore` with the same recursive boundary behaves identically.
+   subtree to remain uninitialized and omitted;
+10. a project `.zedignore` with the same recursive boundary behaves identically;
+11. a misleading `./vendor/client/**` pattern cannot bypass initialization; and
+12. a misleading `/vendor/client/**` pattern cannot bypass initialization.
 
-An uninitialized submodule is optional only when one authored recursive rule
-conclusively excludes its complete subtree. Sampling a few likely filenames is
-not treated as proof that an unknown runtime file cannot enter the package.
+An uninitialized submodule is optional only when one authored canonical
+recursive rule conclusively excludes its complete subtree under the exact glob
+syntax used by the packer. Sampling filenames, stripping path prefixes, changing
+path separators, or otherwise normalizing an authored pattern is not treated as
+proof that an unknown runtime file cannot enter the package.
 
 ## Isolation and evidence
 
@@ -49,7 +53,7 @@ only through process-local Git configuration for its own fixtures.
 No public registry, package namespace, account, token, container daemon, or
 persistent runner state is used. Each operating-system job retains only the
 bounded command transcript and JSON evidence containing the exact binary
-version, binary SHA-256, and ten completed checks.
+version, binary SHA-256, and twelve completed checks.
 
 The workflow itself has `contents: read`, disables persisted checkout
 credentials, and pins all third-party Actions and product inputs to full commit
