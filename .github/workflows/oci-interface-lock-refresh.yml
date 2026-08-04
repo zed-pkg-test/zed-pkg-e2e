@@ -14,7 +14,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  ZED_CLI_REF: af3a4c9ffa7ac4bf0a2ca24b0bb1b87c266c4901
+  ZED_CLI_REF: 172cdbc39a72cbf28fc3170d35bc4d3fd832f65d
   ZED_INTERFACES_REF: 2082012d1903783a89200c3bd44d2659a6daf872
 
 jobs:
@@ -49,12 +49,13 @@ jobs:
             -p zed-interfaces \
             --precise "$ZED_INTERFACES_REF"
           grep -F "rev=$ZED_INTERFACES_REF#$ZED_INTERFACES_REF" zed-cli/Cargo.lock
-          cargo check --locked --manifest-path zed-cli/Cargo.toml --all-targets
           mkdir -p evidence
           cp zed-cli/Cargo.lock evidence/Cargo.lock
           sha256sum evidence/Cargo.lock > evidence/SHA256SUMS
+          cargo check --locked --manifest-path zed-cli/Cargo.toml --all-targets
 
       - name: Upload exact generated lockfile
+        if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: oci-interface-lock-${{ github.run_id }}-${{ github.run_attempt }}
