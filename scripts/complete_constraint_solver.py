@@ -354,10 +354,10 @@ def main() -> int:
         publish(zed, registry, publish_home, sources, package, environment)
 
     # 1. Overlapping ranges resolve to the common older version, regardless of
-    # root declaration order, and emit byte-identical lockfiles. The complete
-    # solver deterministically acquires the rejected 1.9.0 candidate while
-    # searching, so each cold home contains four immutable artifacts even
-    # though only three are selected and materialized.
+    # root declaration order, and emit byte-identical lockfiles. Unresolved
+    # root packages must contribute their constraints before the deeper shared
+    # coordinate is acquired, so each cold home downloads only the three
+    # selected artifacts and never speculates into rejected shared@1.9.0.
     overlap_expected = {
         "overlap-left": "1.0.0",
         "overlap-right": "1.0.0",
@@ -391,9 +391,9 @@ def main() -> int:
     )
     require_success(overlap_first)
     require_success(overlap_second)
-    if parse_prefetch(overlap_first.output) != (3, 5, 4):
+    if parse_prefetch(overlap_first.output) != (3, 5, 3):
         raise AssertionError(f"unexpected first overlap summary: {overlap_first.output}")
-    if parse_prefetch(overlap_second.output) != (3, 5, 4):
+    if parse_prefetch(overlap_second.output) != (3, 5, 3):
         raise AssertionError(f"unexpected second overlap summary: {overlap_second.output}")
     assert_lock(overlap_a, overlap_expected)
     assert_lock(overlap_b, overlap_expected)
