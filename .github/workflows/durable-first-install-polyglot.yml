@@ -1,0 +1,198 @@
+name: durable first-install polyglot acceptance
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/durable-first-install-polyglot.yml"
+      - "scripts/durable-first-install-polyglot.sh"
+      - "README.md"
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/durable-first-install-polyglot.yml"
+      - "scripts/durable-first-install-polyglot.sh"
+      - "README.md"
+  workflow_dispatch:
+    inputs:
+      zed_cli_ref:
+        description: Immutable zed-cli commit containing the durable first-install implementation
+        required: false
+        default: fe4b4662fb252166b18c48f9c048f5888ec8df44
+
+permissions:
+  contents: read
+
+concurrency:
+  group: durable-first-install-polyglot-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: "1"
+  ZED_CLI_REF: ${{ github.event.inputs.zed_cli_ref || 'fe4b4662fb252166b18c48f9c048f5888ec8df44' }}
+  ZED_INTERFACES_REF: c2e049006453c26ca8ca291783f681fce75cb01f
+
+jobs:
+  acceptance:
+    name: ${{ matrix.ecosystem }} durable manifest / ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - ecosystem: go
+            os: ubuntu-24.04
+            lib_ref: e09dec6790a60ba75d5d338eece1068a4b8454b1
+            app_ref: 8e035feb84cf80a294e631bda4ea7a44b1c4d7cf
+          - ecosystem: go
+            os: macos-15
+            lib_ref: e09dec6790a60ba75d5d338eece1068a4b8454b1
+            app_ref: 8e035feb84cf80a294e631bda4ea7a44b1c4d7cf
+          - ecosystem: python
+            os: ubuntu-24.04
+            lib_ref: b2db8ce2962fbaae690db7a9dabd14eb1d0362de
+            app_ref: a0c58cc6942a8cd30ad5eb318b9ada2fa9b2edb1
+          - ecosystem: python
+            os: macos-15
+            lib_ref: b2db8ce2962fbaae690db7a9dabd14eb1d0362de
+            app_ref: a0c58cc6942a8cd30ad5eb318b9ada2fa9b2edb1
+          - ecosystem: rust
+            os: ubuntu-24.04
+            lib_ref: f2534ffafbc4f7e900075dfc8e48b9259aced2fe
+            app_ref: 38b0a5425176a53621d1c07be791701dbd30eefe
+          - ecosystem: rust
+            os: macos-15
+            lib_ref: f2534ffafbc4f7e900075dfc8e48b9259aced2fe
+            app_ref: 38b0a5425176a53621d1c07be791701dbd30eefe
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    steps:
+      - name: Require immutable component pins
+        env:
+          LIB_REF: ${{ matrix.lib_ref }}
+          APP_REF: ${{ matrix.app_ref }}
+        run: |
+          set -euo pipefail
+          for pin in "$ZED_CLI_REF" "$ZED_INTERFACES_REF" "$LIB_REF" "$APP_REF"; do
+            [[ "$pin" =~ ^[0-9a-f]{40}$ ]]
+          done
+
+      - name: Check out this acceptance harness
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: harness
+          fetch-depth: 1
+          persist-credentials: false
+          show-progress: false
+
+      - name: Check out the exact zed-cli implementation
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: zed-pkg/zed-cli
+          ref: ${{ env.ZED_CLI_REF }}
+          path: zed-cli
+          fetch-depth: 1
+          persist-credentials: false
+          show-progress: false
+
+      - name: Check out the exact interface contract
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: zed-pkg/zed-interfaces
+          ref: ${{ env.ZED_INTERFACES_REF }}
+          path: zed-interfaces
+          fetch-depth: 1
+          persist-credentials: false
+          show-progress: false
+
+      - name: Check out the immutable library fixture
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: zed-pkg-test/${{ matrix.ecosystem }}-lib
+          ref: ${{ matrix.lib_ref }}
+          path: fixture-lib
+          fetch-depth: 1
+          persist-credentials: false
+          show-progress: false
+
+      - name: Check out the immutable application fixture
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: zed-pkg-test/${{ matrix.ecosystem }}-app
+          ref: ${{ matrix.app_ref }}
+          path: fixture-app
+          fetch-depth: 1
+          persist-credentials: false
+          show-progress: false
+
+      - name: Install the pinned Rust toolchain action
+        uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30
+        with:
+          toolchain: stable
+          components: rustfmt
+
+      - name: Set up Go 1.22
+        if: matrix.ecosystem == 'go'
+        uses: actions/setup-go@41dfa10bad2bb2ae585af6ee5bb4d7d973ad74ed # v5
+        with:
+          go-version: "1.22"
+          cache: false
+
+      - name: Set up Python 3.12
+        if: matrix.ecosystem == 'python'
+        uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c # v6
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: fixture-lib/pyproject.toml
+
+      - name: Restore Rust build cache
+        uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32
+        with:
+          workspaces: zed-cli
+          shared-key: den-1413-polyglot-${{ matrix.os }}
+
+      - name: Verify harness syntax and focused Rust contract
+        run: |
+          set -euo pipefail
+          bash -n harness/scripts/durable-first-install-polyglot.sh
+          cargo fmt --all --check --manifest-path zed-cli/Cargo.toml
+          cargo test --locked --manifest-path zed-cli/Cargo.toml \
+            --lib managed_install::tests
+
+      - name: Build the exact release binary under test
+        run: |
+          set -euo pipefail
+          cargo build --locked --release \
+            --manifest-path zed-cli/Cargo.toml \
+            --bin zed
+          test -x zed-cli/target/release/zed
+          zed-cli/target/release/zed --version
+
+      - name: Run the polyglot durable first-install canary
+        run: |
+          set -o pipefail
+          bash harness/scripts/durable-first-install-polyglot.sh \
+            "$GITHUB_WORKSPACE/zed-cli/target/release/zed" \
+            "${{ matrix.ecosystem }}" \
+            "$GITHUB_WORKSPACE/fixture-lib" \
+            "$GITHUB_WORKSPACE/fixture-app" \
+            "$RUNNER_TEMP/den-1413-${{ matrix.ecosystem }}" \
+            2>&1 | tee "$RUNNER_TEMP/den-1413-${{ matrix.ecosystem }}.log"
+
+      - name: Upload bounded failure diagnostics
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: durable-first-install-${{ matrix.ecosystem }}-${{ matrix.os }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/den-1413-${{ matrix.ecosystem }}.log
+            ${{ runner.temp }}/den-1413-${{ matrix.ecosystem }}/*.log
+            ${{ runner.temp }}/den-1413-${{ matrix.ecosystem }}/**/.zpkg.toml
+            ${{ runner.temp }}/den-1413-${{ matrix.ecosystem }}/**/.zpkg.lock
+          if-no-files-found: warn
+          retention-days: 7
+          include-hidden-files: true

@@ -1,0 +1,131 @@
+name: recursive install stress
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      zed_cli_ref:
+        description: Immutable zed-cli commit to test
+        required: false
+        default: 8cc6745c75fd46dabf2e383cbcfc14db5ff933da
+
+permissions:
+  contents: read
+
+concurrency:
+  group: recursive-install-stress-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: "1"
+  ZED_CLI_REF: ${{ github.event.inputs.zed_cli_ref || '8cc6745c75fd46dabf2e383cbcfc14db5ff933da' }}
+  ZED_INTERFACES_REF: dc0e0a0620b9462817950b552d3d334a184b1cb1
+
+jobs:
+  recursive-install-stress:
+    name: Five-worker and four-process stress
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - name: Require immutable component pins
+        run: |
+          set -euo pipefail
+          [[ "$ZED_CLI_REF" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$ZED_INTERFACES_REF" =~ ^[0-9a-f]{40}$ ]]
+
+      - name: Check out e2e harness
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: harness
+          fetch-depth: 1
+          persist-credentials: false
+          show-progress: false
+
+      - name: Check out zed-cli
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: zed-pkg/zed-cli
+          ref: ${{ env.ZED_CLI_REF }}
+          path: zed-cli
+          fetch-depth: 1
+          persist-credentials: false
+          show-progress: false
+
+      - name: Check out zed-interfaces sibling
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: zed-pkg/zed-interfaces
+          ref: ${{ env.ZED_INTERFACES_REF }}
+          path: zed-interfaces
+          fetch-depth: 1
+          persist-credentials: false
+          show-progress: false
+
+      - name: Install the declared Rust toolchain
+        run: |
+          set -euo pipefail
+          rustup toolchain install stable --profile minimal --component rustfmt
+          rustup default stable
+          rustc --version --verbose
+          cargo --version --verbose
+
+      - name: Prove five live HTTP artifact transfers
+        env:
+          ZED_PKG_INSTALL_CONCURRENCY: "5"
+        run: |
+          set -euo pipefail
+          python3 -m py_compile harness/scripts/recursive_installs_stress.py
+          cargo fmt --all --check --manifest-path zed-cli/Cargo.toml
+          cargo test --locked --manifest-path zed-cli/Cargo.toml \
+            --test recursive_install_concurrency -- --nocapture
+
+      - name: Build immutable zed binary
+        run: |
+          set -euo pipefail
+          cargo build --locked --release --manifest-path zed-cli/Cargo.toml --bin zed
+          install -Dm755 zed-cli/target/release/zed "$RUNNER_TEMP/zed-bin/zed"
+          "$RUNNER_TEMP/zed-bin/zed" --version
+
+      - name: Run four-process and frozen stress contract
+        env:
+          WORK_ROOT: ${{ runner.temp }}/zed-recursive-stress
+        run: |
+          set -euo pipefail
+          test ! -e "$WORK_ROOT"
+          python3 harness/scripts/recursive_installs_stress.py \
+            --zed "$RUNNER_TEMP/zed-bin/zed" \
+            --work-root "$WORK_ROOT"
+
+      - name: Collect failure diagnostics
+        if: failure()
+        env:
+          WORK_ROOT: ${{ runner.temp }}/zed-recursive-stress
+        run: |
+          set +e
+          mkdir -p "$WORK_ROOT/diagnostics"
+          find "$WORK_ROOT" -maxdepth 10 -printf '%y %P -> %l\n' \
+            | LC_ALL=C sort > "$WORK_ROOT/diagnostics/work-tree.txt" 2>&1
+          find "$WORK_ROOT/registry" -maxdepth 10 -type f -print0 2>/dev/null \
+            | sort -z | xargs -0 -r sha256sum \
+            > "$WORK_ROOT/diagnostics/registry-sha256.txt" 2>&1
+          find "$WORK_ROOT" -path '*/cache/*.tar.gz' -type f -print0 2>/dev/null \
+            | sort -z | xargs -0 -r sha256sum \
+            > "$WORK_ROOT/diagnostics/all-cache-sha256.txt" 2>&1
+          true
+
+      - name: Upload failure diagnostics
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: recursive-install-stress-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/zed-recursive-stress/diagnostics
+          if-no-files-found: warn
+          retention-days: 14
+          include-hidden-files: false
