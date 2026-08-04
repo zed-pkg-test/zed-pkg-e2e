@@ -82,7 +82,8 @@ jobs:
       - name: Verify source, formatting, and focused product tests
         run: |
           set -euo pipefail
-          python3 -m py_compile harness/scripts/git_submodule_interop.py
+          PYTHONPYCACHEPREFIX="$RUNNER_TEMP/python-cache" \
+            python3 -m py_compile harness/scripts/git_submodule_interop.py
           git -C harness diff --check
           git -C zed-cli diff --check
           cargo fmt --all --check --manifest-path zed-cli/Cargo.toml
@@ -180,7 +181,8 @@ jobs:
           [[ "$ZED_CLI_REF" =~ ^[0-9a-f]{40}$ ]]
           rustup toolchain install stable --profile minimal
           rustup default stable
-          python3 -m py_compile harness/scripts/git_submodule_interop.py
+          PYTHONPYCACHEPREFIX="$RUNNER_TEMP/python-cache" \
+            python3 -m py_compile harness/scripts/git_submodule_interop.py
           cargo build --locked --release --manifest-path zed-cli/Cargo.toml --bin zed
           test ! -e "$WORK_ROOT"
           python3 harness/scripts/git_submodule_interop.py \
