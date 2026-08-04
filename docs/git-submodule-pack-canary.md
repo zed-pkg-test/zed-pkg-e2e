@@ -5,14 +5,14 @@ boundaries in `zed-pkg/zed-cli#110`. It invokes only the compiled public
 executable and inspects resulting `tar.gz` bytes with Python's standard library.
 
 The workflow pins exact CLI candidate
-`82c9d0e0b9e96402afa76f3b85c4b9e16c3cb101` and exact interface contract
-`c2e049006453c26ca8ca291783f681fce75cb01f`. The candidate is the reviewed
-semantic merge of the package guard with current `main`, including the latest
-mixed-submodule, Dart-wiring, mise-identity, Windows test-gating, and atomic Nix
-bundle changes, plus the contextual-error, conservative exclusion, and indirect
-`.gitmodules` metadata hardening. Ubuntu 24.04 and macOS 15 build that source,
-run the focused product tests, and execute disposable local Git fixtures. Linux
-additionally runs all-target Clippy with warnings denied.
+`0786987fe3a173659463940f4f905dc3b5bd19a8` and exact interface contract
+`c2e049006453c26ca8ca291783f681fce75cb01f`. The candidate is the formatter-clean,
+locally tested product head merged with current `main`, including mixed-submodule
+takeover, Dart wiring, mise frozen identity, Windows test gating, atomic Nix
+bundle behavior, conservative package exclusions, and indirect `.gitmodules`
+metadata hardening. Ubuntu 24.04 and macOS 15 build that exact source, run the
+focused product tests, and execute disposable local Git fixtures. Linux also
+runs all-target Clippy with warnings denied.
 
 ## Certified behavior
 
