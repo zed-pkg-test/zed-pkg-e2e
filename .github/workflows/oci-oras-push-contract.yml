@@ -13,7 +13,7 @@ on:
       zed_cli_ref:
         description: Exact 40-character zed-pkg/zed-cli ORAS push candidate
         required: true
-        default: 38fe787da951e32afd39674e34349032f0673c20
+        default: d25cd5f038b1402621e7634f07d3f8089abcb268
         type: string
 
 permissions:
@@ -31,8 +31,9 @@ env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: "1"
   HARNESS_REF: ${{ github.event.pull_request.head.sha || github.sha }}
-  ZED_CLI_REF: ${{ inputs.zed_cli_ref || '38fe787da951e32afd39674e34349032f0673c20' }}
+  ZED_CLI_REF: ${{ inputs.zed_cli_ref || 'd25cd5f038b1402621e7634f07d3f8089abcb268' }}
   NODE_LIB_REF: 2d41e658a382fdff27ef87a0db24dbaff280a685
+  REGISTRY_IMAGE: registry@sha256:a3d8aaa63ed8681a604f1dea0aa03f100d5895b6a58ace528858a7b332415373
   REGISTRY_HOST: 127.0.0.1:5000
   REGISTRY_USERNAME: zed-contract
   REGISTRY_PASSWORD: zed-contract-password-not-a-secret
@@ -49,6 +50,7 @@ jobs:
           [[ "$HARNESS_REF" =~ ^[0-9a-f]{40}$ ]]
           [[ "$ZED_CLI_REF" =~ ^[0-9a-f]{40}$ ]]
           [[ "$NODE_LIB_REF" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$REGISTRY_IMAGE" =~ ^registry@sha256:[0-9a-f]{64}$ ]]
 
       - name: Check out exact harness
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -132,7 +134,7 @@ jobs:
             --env REGISTRY_AUTH=htpasswd \
             --env REGISTRY_AUTH_HTPASSWD_REALM='Zed OCI Contract' \
             --env REGISTRY_AUTH_HTPASSWD_PATH=/auth/htpasswd \
-            registry:2.8.3
+            "$REGISTRY_IMAGE"
 
           for attempt in $(seq 1 60); do
             status=$(curl --silent --output /dev/null --write-out '%{http_code}' \
