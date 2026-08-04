@@ -5,7 +5,7 @@ This canary independently certifies the mixed Git/Zed submodule behavior in
 immutable CLI commit:
 
 ```text
-zed-pkg/zed-cli@043ab2b8d08e2073dd6b0a2d8ca1aeca87f76b87
+zed-pkg/zed-cli@0a810a84a7c48a88cf0034c7f2b46be558d2be43
 ```
 
 The product feature builds on the merged cooperative-install and takeover work
@@ -15,16 +15,16 @@ in `zed-pkg/zed-cli#96` plus the failure-atomic migration hardening in #101.
 
 A superproject may use Git submodules for different purposes at the same time:
 
-- a submodule containing a valid `.zpkg.toml` can be adopted into the root Zed
-  workspace, direct dependency intent, deterministic materialization, and
-  additive `[[git-submodule]]` lock provenance;
+- a submodule containing a valid regular-file `.zpkg.toml` can be adopted into
+  the root Zed workspace, direct dependency intent, deterministic
+  materialization, and additive `[[git-submodule]]` lock provenance;
 - a submodule without `.zpkg.toml` remains Git-managed and never appears in the
   Zed manifest or lock; and
 - ordinary `zed install --git-submodules` still initializes every configured
   Git submodule, whether Zed adopted it or not.
 
-Missing package intent is the only skip condition. A present but invalid package
-manifest remains an error.
+Missing package intent is the only skip condition. A present but invalid,
+directory-valued, dangling, or symlinked package manifest remains an error.
 
 ## Black-box scenarios
 
@@ -66,7 +66,8 @@ migration.
 
 A submodule containing malformed `.zpkg.toml` is not silently treated as
 Git-only. Takeover fails before changing the root manifest, producing a lock, or
-materializing a package.
+materializing a package. Product-focused tests at the same pinned commit also
+prove that directory and symlink manifest entries fail the regular-file gate.
 
 ## Workflow gates
 
