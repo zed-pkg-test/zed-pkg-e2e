@@ -1,0 +1,188 @@
+name: Git submodule interoperability
+
+on:
+  pull_request:
+    paths:
+      - scripts/git_submodule_interop.py
+      - docs/git-submodule-interop-canary.md
+      - .github/workflows/git-submodule-interop.yml
+  push:
+    branches: [main]
+    paths:
+      - scripts/git_submodule_interop.py
+      - docs/git-submodule-interop-canary.md
+      - .github/workflows/git-submodule-interop.yml
+  workflow_dispatch:
+    inputs:
+      zed_cli_ref:
+        description: Immutable zed-cli commit to certify
+        required: false
+        default: 043ab2b8d08e2073dd6b0a2d8ca1aeca87f76b87
+      run_arc_smoke:
+        description: Repeat the canary on the registered sonus-ci ARC scale set
+        type: boolean
+        required: true
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: git-submodule-interop-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: "1"
+  ZED_CLI_REF: ${{ github.event.inputs.zed_cli_ref || '043ab2b8d08e2073dd6b0a2d8ca1aeca87f76b87' }}
+
+jobs:
+  hosted:
+    name: Mixed takeover, Git-only boundary, and frozen replay
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - name: Require an immutable product pin
+        run: |
+          set -euo pipefail
+          [[ "$ZED_CLI_REF" =~ ^[0-9a-f]{40}$ ]]
+
+      - name: Check out the canary
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: harness
+          fetch-depth: 1
+          persist-credentials: false
+          show-progress: false
+
+      - name: Check out zed-cli
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: zed-pkg/zed-cli
+          ref: ${{ env.ZED_CLI_REF }}
+          path: zed-cli
+          fetch-depth: 1
+          persist-credentials: false
+          show-progress: false
+
+      - name: Install stable Rust
+        run: |
+          set -euo pipefail
+          rustup toolchain install stable --profile minimal --component rustfmt --component clippy
+          rustup default stable
+          rustc --version --verbose
+          cargo --version --verbose
+          git --version
+          python3 --version
+
+      - name: Verify source, formatting, and focused product tests
+        run: |
+          set -euo pipefail
+          python3 -m py_compile harness/scripts/git_submodule_interop.py
+          git -C harness diff --check
+          git -C zed-cli diff --check
+          cargo fmt --all --check --manifest-path zed-cli/Cargo.toml
+          cargo test --locked --manifest-path zed-cli/Cargo.toml --test git_submodule_interop
+          cargo clippy --locked --manifest-path zed-cli/Cargo.toml --all-targets -- -D warnings
+
+      - name: Build the exact product executable
+        run: |
+          set -euo pipefail
+          cargo build --locked --release --manifest-path zed-cli/Cargo.toml --bin zed
+          install -Dm755 zed-cli/target/release/zed "$RUNNER_TEMP/zed-bin/zed"
+          test "$("$RUNNER_TEMP/zed-bin/zed" --version)" = "zed 0.1.0"
+
+      - name: Run the independent black-box canary
+        env:
+          WORK_ROOT: ${{ runner.temp }}/zed-git-submodule-interop
+          EVIDENCE: ${{ runner.temp }}/zed-git-submodule-evidence
+        run: |
+          set -euo pipefail
+          test ! -e "$WORK_ROOT"
+          mkdir -p "$EVIDENCE"
+          python3 harness/scripts/git_submodule_interop.py \
+            --zed "$RUNNER_TEMP/zed-bin/zed" \
+            --work-root "$WORK_ROOT" \
+            | tee "$EVIDENCE/result.json"
+          sha256sum "$RUNNER_TEMP/zed-bin/zed" > "$EVIDENCE/zed.sha256"
+          git -C zed-cli rev-parse HEAD > "$EVIDENCE/zed-cli.commit"
+          test "$(cat "$EVIDENCE/zed-cli.commit")" = "$ZED_CLI_REF"
+          test -z "$(git -C harness status --porcelain=v1)"
+          test -z "$(git -C zed-cli status --porcelain=v1)"
+
+      - name: Collect bounded failure diagnostics
+        if: failure()
+        env:
+          WORK_ROOT: ${{ runner.temp }}/zed-git-submodule-interop
+          EVIDENCE: ${{ runner.temp }}/zed-git-submodule-evidence
+        run: |
+          set +e
+          mkdir -p "$EVIDENCE"
+          find "$WORK_ROOT" -maxdepth 7 -printf '%y %P -> %l\n' 2>/dev/null \
+            | LC_ALL=C sort > "$EVIDENCE/work-tree.txt"
+          find "$WORK_ROOT" \( -name '.zpkg.toml' -o -name '.zpkg.lock' -o -name '.gitmodules' \) \
+            -type f -print 2>/dev/null \
+            | LC_ALL=C sort > "$EVIDENCE/managed-files.txt"
+          while IFS= read -r file; do
+            printf '\n===== %s =====\n' "$file"
+            sed -n '1,240p' "$file"
+          done < "$EVIDENCE/managed-files.txt" > "$EVIDENCE/managed-file-contents.txt" 2>&1
+          git -C harness status --short > "$EVIDENCE/harness-status.txt" 2>&1
+          git -C zed-cli status --short > "$EVIDENCE/zed-cli-status.txt" 2>&1
+          true
+
+      - name: Upload certification evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: git-submodule-interop-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/zed-git-submodule-evidence
+          if-no-files-found: warn
+          retention-days: 14
+          include-hidden-files: false
+
+  arc-parity:
+    name: Optional self-hosted ARC parity
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.run_arc_smoke }}
+    runs-on: [self-hosted, linux, sonus-ci]
+    timeout-minutes: 40
+    steps:
+      - name: Check out the canary
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: harness
+          fetch-depth: 1
+          persist-credentials: false
+          show-progress: false
+
+      - name: Check out zed-cli
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: zed-pkg/zed-cli
+          ref: ${{ env.ZED_CLI_REF }}
+          path: zed-cli
+          fetch-depth: 1
+          persist-credentials: false
+          show-progress: false
+
+      - name: Run the same canary on the ephemeral ARC runner
+        env:
+          WORK_ROOT: ${{ runner.temp }}/zed-git-submodule-interop-arc
+        run: |
+          set -euo pipefail
+          test "$RUNNER_OS" = Linux
+          test -n "$RUNNER_NAME"
+          test ! -e /var/run/docker.sock
+          [[ "$ZED_CLI_REF" =~ ^[0-9a-f]{40}$ ]]
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+          python3 -m py_compile harness/scripts/git_submodule_interop.py
+          cargo build --locked --release --manifest-path zed-cli/Cargo.toml --bin zed
+          test ! -e "$WORK_ROOT"
+          python3 harness/scripts/git_submodule_interop.py \
+            --zed zed-cli/target/release/zed \
+            --work-root "$WORK_ROOT"
