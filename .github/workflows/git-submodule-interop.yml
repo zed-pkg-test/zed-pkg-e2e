@@ -17,7 +17,7 @@ on:
       zed_cli_ref:
         description: Immutable zed-cli commit to certify
         required: false
-        default: 043ab2b8d08e2073dd6b0a2d8ca1aeca87f76b87
+        default: 0a810a84a7c48a88cf0034c7f2b46be558d2be43
       run_arc_smoke:
         description: Repeat the canary on the registered sonus-ci ARC scale set
         type: boolean
@@ -38,7 +38,7 @@ defaults:
 env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: "1"
-  ZED_CLI_REF: ${{ github.event.inputs.zed_cli_ref || '043ab2b8d08e2073dd6b0a2d8ca1aeca87f76b87' }}
+  ZED_CLI_REF: ${{ github.event.inputs.zed_cli_ref || '0a810a84a7c48a88cf0034c7f2b46be558d2be43' }}
 
 jobs:
   hosted:
