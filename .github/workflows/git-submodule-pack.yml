@@ -1,0 +1,121 @@
+name: git submodule package boundary
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: zed-git-submodule-pack-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: "1"
+  ZED_CLI_REF: 08827a11147355cdeedb68cedcc05c1104265c1f
+  ZED_INTERFACES_REF: c2e049006453c26ca8ca291783f681fce75cb01f
+
+jobs:
+  contract:
+    name: Archive contract / ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-15]
+    steps:
+      - name: Check out acceptance harness
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: harness
+          fetch-depth: 1
+          persist-credentials: false
+          show-progress: false
+
+      - name: Check out exact zed-cli candidate
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: zed-pkg/zed-cli
+          ref: ${{ env.ZED_CLI_REF }}
+          path: zed-cli
+          fetch-depth: 1
+          persist-credentials: false
+          show-progress: false
+
+      - name: Check out exact interface contract
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: zed-pkg/zed-interfaces
+          ref: ${{ env.ZED_INTERFACES_REF }}
+          path: zed-interfaces
+          fetch-depth: 1
+          persist-credentials: false
+          show-progress: false
+
+      - name: Verify immutable inputs and Python source
+        run: |
+          set -euo pipefail
+          test "$(git -C zed-cli rev-parse HEAD)" = "$ZED_CLI_REF"
+          test "$(git -C zed-interfaces rev-parse HEAD)" = "$ZED_INTERFACES_REF"
+          grep -F "rev = \"$ZED_INTERFACES_REF\"" zed-cli/Cargo.toml
+          test -z "${ZED_PKG_TOKEN:-}"
+          PYTHONPYCACHEPREFIX="$RUNNER_TEMP/pycache" \
+            python3 -m py_compile harness/scripts/git_submodule_pack.py
+
+      - name: Install the declared Rust toolchain
+        run: |
+          set -euo pipefail
+          rustup toolchain install stable --profile minimal --component rustfmt --component clippy
+          rustup default stable
+          rustc --version --verbose
+          cargo --version --verbose
+
+      - name: Enforce formatting
+        run: cargo fmt --all --check --manifest-path zed-cli/Cargo.toml
+
+      - name: Run focused package-boundary tests
+        run: |
+          set -euo pipefail
+          cargo test --locked --manifest-path zed-cli/Cargo.toml --lib pack_guard
+
+      - name: Run all-target lint gate
+        if: runner.os == 'Linux'
+        run: cargo clippy --locked --manifest-path zed-cli/Cargo.toml --all-targets -- -D warnings
+
+      - name: Build the exact release binary
+        run: cargo build --locked --release --manifest-path zed-cli/Cargo.toml --bin zed
+
+      - name: Run the real archive contract
+        env:
+          WORK_ROOT: ${{ runner.temp }}/zed-git-submodule-pack
+        run: |
+          set -euo pipefail
+          python3 harness/scripts/git_submodule_pack.py \
+            --zed zed-cli/target/release/zed \
+            --work-root "$WORK_ROOT"
+
+      - name: Require clean product and harness checkouts
+        run: |
+          set -euo pipefail
+          test -z "$(git -C harness status --porcelain=v1 --untracked-files=all)"
+          test -z "$(git -C zed-cli status --porcelain=v1 --untracked-files=all)"
+          test -z "$(git -C zed-interfaces status --porcelain=v1 --untracked-files=all)"
+
+      - name: Upload bounded contract evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: git-submodule-pack-${{ matrix.os }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/zed-git-submodule-pack/evidence
+          if-no-files-found: warn
+          retention-days: 14
+          include-hidden-files: false
