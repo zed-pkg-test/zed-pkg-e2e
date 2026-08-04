@@ -5,7 +5,7 @@ This canary independently certifies the mixed Git/Zed submodule behavior in
 immutable CLI commit:
 
 ```text
-zed-pkg/zed-cli@0a810a84a7c48a88cf0034c7f2b46be558d2be43
+zed-pkg/zed-cli@fdffbd31b1d764f6d86499a5ae70e4a231df824d
 ```
 
 The product feature builds on the merged cooperative-install and takeover work
