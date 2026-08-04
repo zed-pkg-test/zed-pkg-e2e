@@ -1,0 +1,64 @@
+name: OCI interface lock refresh evidence
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/oci-interface-lock-refresh.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: oci-interface-lock-refresh-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  ZED_CLI_REF: af3a4c9ffa7ac4bf0a2ca24b0bb1b87c266c4901
+  ZED_INTERFACES_REF: 2082012d1903783a89200c3bd44d2659a6daf872
+
+jobs:
+  refresh:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Check out exact product candidate
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: zed-pkg/zed-cli
+          ref: ${{ env.ZED_CLI_REF }}
+          path: zed-cli
+          fetch-depth: 1
+          persist-credentials: false
+          show-progress: false
+
+      - name: Install declared Rust toolchain
+        run: |
+          set -euo pipefail
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+          rustc --version --verbose
+          cargo --version --verbose
+
+      - name: Generate exact lockfile for combined interface contract
+        run: |
+          set -euo pipefail
+          test "$(git -C zed-cli rev-parse HEAD)" = "$ZED_CLI_REF"
+          grep -F "rev = \"$ZED_INTERFACES_REF\"" zed-cli/Cargo.toml
+          cargo update --manifest-path zed-cli/Cargo.toml \
+            -p zed-interfaces \
+            --precise "$ZED_INTERFACES_REF"
+          grep -F "rev=$ZED_INTERFACES_REF#$ZED_INTERFACES_REF" zed-cli/Cargo.lock
+          cargo check --locked --manifest-path zed-cli/Cargo.toml --all-targets
+          mkdir -p evidence
+          cp zed-cli/Cargo.lock evidence/Cargo.lock
+          sha256sum evidence/Cargo.lock > evidence/SHA256SUMS
+
+      - name: Upload exact generated lockfile
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: oci-interface-lock-${{ github.run_id }}-${{ github.run_attempt }}
+          path: evidence
+          if-no-files-found: error
+          retention-days: 7
+          include-hidden-files: false
