@@ -4,12 +4,14 @@ on:
   pull_request:
     paths:
       - scripts/complete_constraint_solver.py
+      - scripts/complete-constraint-solver.sh
       - docs/complete-constraint-solver-canary.md
       - .github/workflows/complete-constraint-solver.yml
   push:
     branches: [main]
     paths:
       - scripts/complete_constraint_solver.py
+      - scripts/complete-constraint-solver.sh
       - docs/complete-constraint-solver-canary.md
       - .github/workflows/complete-constraint-solver.yml
   workflow_dispatch:
@@ -17,7 +19,7 @@ on:
       zed_cli_ref:
         description: Immutable zed-cli commit to certify
         required: false
-        default: 7d21d6ca3af455acb72db0bc926ea32bacff7d91
+        default: 2cf69147ece5cdcc649de62dd043491de773a59b
       run_arc_smoke:
         description: Repeat the canary on the registered sonus-ci ARC scale set
         type: boolean
@@ -38,14 +40,14 @@ defaults:
 env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: "1"
-  ZED_CLI_REF: ${{ github.event.inputs.zed_cli_ref || '7d21d6ca3af455acb72db0bc926ea32bacff7d91' }}
+  ZED_CLI_REF: ${{ github.event.inputs.zed_cli_ref || '2cf69147ece5cdcc649de62dd043491de773a59b' }}
   ZED_INTERFACES_REF: c2e049006453c26ca8ca291783f681fce75cb01f
 
 jobs:
   hosted:
-    name: Overlap, backtracking, stale constraints, diagnostics, and cycles
+    name: Overlap, backtracking, stale constraints, diagnostics, cycles, and yank policy
     runs-on: ubuntu-24.04
-    timeout-minutes: 35
+    timeout-minutes: 40
     steps:
       - name: Require immutable component pins
         run: |
@@ -90,10 +92,11 @@ jobs:
           cargo --version --verbose
           python3 --version
 
-      - name: Compile the canary and verify Rust formatting
+      - name: Compile canaries and verify Rust formatting
         run: |
           set -euo pipefail
           python3 -m py_compile harness/scripts/complete_constraint_solver.py
+          bash -n harness/scripts/complete-constraint-solver.sh
           cargo fmt --all --check --manifest-path zed-cli/Cargo.toml
 
       - name: Build the immutable zed binary
@@ -113,6 +116,15 @@ jobs:
             --zed "$RUNNER_TEMP/zed-bin/zed" \
             --work-root "$WORK_ROOT"
 
+      - name: Enforce yanked-candidate pre-acquisition boundary
+        env:
+          WORK_ROOT: ${{ runner.temp }}/zed-complete-constraint-solver
+        run: |
+          set -euo pipefail
+          bash harness/scripts/complete-constraint-solver.sh \
+            "$RUNNER_TEMP/zed-bin/zed" \
+            "$WORK_ROOT/yanked-candidate"
+
       - name: Collect failure diagnostics
         if: failure()
         env:
@@ -122,7 +134,8 @@ jobs:
           mkdir -p "$WORK_ROOT/diagnostics"
           find "$WORK_ROOT" -maxdepth 12 -printf '%y %P -> %l\n' \
             | LC_ALL=C sort > "$WORK_ROOT/diagnostics/work-tree.txt" 2>&1
-          find "$WORK_ROOT/registry" -maxdepth 10 -type f -print0 2>/dev/null \
+          find "$WORK_ROOT/registry" "$WORK_ROOT/yanked-candidate/registry" \
+            -maxdepth 10 -type f -print0 2>/dev/null \
             | sort -z | xargs -0 -r sha256sum \
             > "$WORK_ROOT/diagnostics/registry-sha256.txt" 2>&1
           find "$WORK_ROOT" -path '*/.zpkg.lock' -type f -print \
@@ -131,6 +144,9 @@ jobs:
           find "$WORK_ROOT" -path '*/cache/*.tar.gz' -type f -print0 2>/dev/null \
             | sort -z | xargs -0 -r sha256sum \
             > "$WORK_ROOT/diagnostics/cache-sha256.txt" 2>&1
+          find "$WORK_ROOT" -name '*.log' -type f -print \
+            -exec sed -n '1,400p' {} \; \
+            > "$WORK_ROOT/diagnostics/logs.txt" 2>&1
           true
 
       - name: Upload failure diagnostics
@@ -147,7 +163,7 @@ jobs:
     name: Optional self-hosted ARC parity
     if: ${{ github.event_name == 'workflow_dispatch' && inputs.run_arc_smoke }}
     runs-on: [self-hosted, linux, sonus-ci]
-    timeout-minutes: 35
+    timeout-minutes: 40
     steps:
       - name: Check out the canary
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -167,7 +183,7 @@ jobs:
           persist-credentials: false
           show-progress: false
 
-      - name: Verify ephemeral runner and execute the same canary
+      - name: Verify ephemeral runner and execute the same canaries
         env:
           WORK_ROOT: ${{ runner.temp }}/zed-complete-constraint-solver-arc
         run: |
@@ -183,3 +199,6 @@ jobs:
           python3 harness/scripts/complete_constraint_solver.py \
             --zed zed-cli/target/release/zed \
             --work-root "$WORK_ROOT"
+          bash harness/scripts/complete-constraint-solver.sh \
+            zed-cli/target/release/zed \
+            "$WORK_ROOT/yanked-candidate"
