@@ -97,19 +97,26 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test "$(git -C zed-cli rev-parse HEAD)" = "${{ steps.pin.outputs.ref }}"
-          test "$(git -C node-fixture rev-parse HEAD)" = 222cdf57f48530fce8e6c1f58632d9676203512e
-          grep -F 'rev = "c2e049006453c26ca8ca291783f681fce75cb01f"' zed-cli/Cargo.toml
-          grep -F '#c2e049006453c26ca8ca291783f681fce75cb01f' zed-cli/Cargo.lock
-          python3 -m py_compile \
-            harness/scripts/nix_bundle_write_canary.py \
-            harness/scripts/nix_bundle_write_fixture_canary.py
-          cargo fmt --all --check --manifest-path zed-cli/Cargo.toml
-          cargo build --release --locked --manifest-path zed-cli/Cargo.toml --bin zed
-          mkdir -p "$RUNNER_TEMP/zed-bundle-write-bin"
-          install -m 0755 zed-cli/target/release/zed "$RUNNER_TEMP/zed-bundle-write-bin/zed"
-          python3 - "$RUNNER_TEMP/zed-bundle-write-bin/zed" \
-            "$RUNNER_TEMP/zed-bundle-write-bin/SHA256SUMS" <<'PY'
+          {
+            test "$(git -C zed-cli rev-parse HEAD)" = "${{ steps.pin.outputs.ref }}"
+            test "$(git -C node-fixture rev-parse HEAD)" = 222cdf57f48530fce8e6c1f58632d9676203512e
+            grep -F 'rev = "c2e049006453c26ca8ca291783f681fce75cb01f"' zed-cli/Cargo.toml
+            grep -F '#c2e049006453c26ca8ca291783f681fce75cb01f' zed-cli/Cargo.lock
+            python3 - <<'PY'
+          from pathlib import Path
+
+          for source in (
+              Path('harness/scripts/nix_bundle_write_canary.py'),
+              Path('harness/scripts/nix_bundle_write_fixture_canary.py'),
+          ):
+              compile(source.read_text(encoding='utf-8'), str(source), 'exec')
+          PY
+            cargo fmt --all --check --manifest-path zed-cli/Cargo.toml
+            cargo build --release --locked --manifest-path zed-cli/Cargo.toml --bin zed
+            mkdir -p "$RUNNER_TEMP/zed-bundle-write-bin"
+            install -m 0755 zed-cli/target/release/zed "$RUNNER_TEMP/zed-bundle-write-bin/zed"
+            python3 - "$RUNNER_TEMP/zed-bundle-write-bin/zed" \
+              "$RUNNER_TEMP/zed-bundle-write-bin/SHA256SUMS" <<'PY'
           import hashlib
           import sys
           from pathlib import Path
@@ -121,9 +128,10 @@ jobs:
               encoding="utf-8",
           )
           PY
-          cat "$RUNNER_TEMP/zed-bundle-write-bin/SHA256SUMS"
-          "$RUNNER_TEMP/zed-bundle-write-bin/zed" --version
-          nix --version
+            cat "$RUNNER_TEMP/zed-bundle-write-bin/SHA256SUMS"
+            "$RUNNER_TEMP/zed-bundle-write-bin/zed" --version
+            nix --version
+          } 2>&1 | tee "$RUNNER_TEMP/zed-nix-bundle-write-build.log"
 
       - name: Run synthetic command and offline Nix canary
         env:
@@ -196,6 +204,8 @@ jobs:
           set +e
           diagnostics="$RUNNER_TEMP/zed-nix-bundle-write-diagnostics"
           mkdir -p "$diagnostics"
+          cp "$RUNNER_TEMP/zed-nix-bundle-write-build.log" \
+            "$diagnostics/build.log" 2>/dev/null || true
           cp "$RUNNER_TEMP/zed-nix-bundle-write-canary.log" \
             "$diagnostics/synthetic.log" 2>/dev/null || true
           cp "$RUNNER_TEMP/zed-nix-bundle-write-fixture-canary.log" \
