@@ -234,7 +234,6 @@ def validate_bundle(
         "org": "zed-pkg-test",
         "name": "node-lib",
         "version": "1.0.0",
-        "target": None,
     }:
         raise AssertionError(plan["package"])
     if plan["package_class"] != "data":
