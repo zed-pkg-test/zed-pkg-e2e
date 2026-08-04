@@ -1,0 +1,149 @@
+name: version interoperability conformance
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      zed_interfaces_ref:
+        description: Immutable zed-interfaces commit to certify
+        required: false
+        default: 8bcbcbe9377760c9a8843b75daff54e92c1bf6d2
+
+permissions:
+  contents: read
+
+concurrency:
+  group: version-interop-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: "1"
+  ZED_INTERFACES_REF: ${{ github.event.inputs.zed_interfaces_ref || '8bcbcbe9377760c9a8843b75daff54e92c1bf6d2' }}
+
+jobs:
+  conformance:
+    name: SemVer, publication topology, and immutable bytes
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    steps:
+      - name: Require immutable product pin
+        run: |
+          set -euo pipefail
+          [[ "$ZED_INTERFACES_REF" =~ ^[0-9a-f]{40}$ ]]
+
+      - name: Check out exact harness candidate
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: harness
+          fetch-depth: 1
+          persist-credentials: false
+          show-progress: false
+
+      - name: Check out exact interface product
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: zed-pkg/zed-interfaces
+          ref: ${{ env.ZED_INTERFACES_REF }}
+          path: zed-interfaces
+          fetch-depth: 1
+          persist-credentials: false
+          show-progress: false
+
+      - name: Install stable Rust with formatter and Clippy
+        run: |
+          set -euo pipefail
+          rustup toolchain install stable --profile minimal --component rustfmt,clippy
+          rustup default stable
+          rustc --version --verbose
+          cargo --version --verbose
+
+      - name: Validate corpus shape and pin agreement
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          root = Path("harness/fixtures/version-interop-corpus")
+          corpus = json.loads((root / "cases.json").read_text(encoding="utf-8"))
+          expected = os.environ["ZED_INTERFACES_REF"]
+          assert corpus["schema"] == "zed.version-interop-corpus/v1"
+          assert corpus["interface_commit"] == expected
+          assert len(corpus["precedence"]) == 3
+          assert len(corpus["collisions"]) == 4
+          assert len(corpus["valid_records"]) == 2
+          assert len(corpus["invalid_records"]) == 19
+          for field in ("precedence", "collisions", "valid_records", "invalid_records"):
+              ids = [case["id"] for case in corpus[field]]
+              assert len(ids) == len(set(ids)), f"duplicate {field} ids"
+
+          rust = (root / "src/main.rs").read_text(encoding="utf-8")
+          assert f'const INTERFACE_COMMIT: &str = "{expected}";' in rust
+          PY
+
+      - name: Run complete interface gates
+        run: |
+          set -euo pipefail
+          cargo fmt --all --manifest-path zed-interfaces/Cargo.toml -- --check
+          cargo test --locked --manifest-path zed-interfaces/Cargo.toml --all-targets
+          cargo clippy --locked --manifest-path zed-interfaces/Cargo.toml \
+            --all-targets --all-features -- -D warnings
+          git -C zed-interfaces diff --check
+
+      - name: Generate locked external consumer
+        run: |
+          set -euo pipefail
+          fixture=harness/fixtures/version-interop-corpus
+          cargo generate-lockfile --offline --manifest-path "$fixture/Cargo.toml"
+          cargo fmt --all --manifest-path "$fixture/Cargo.toml" -- --check
+
+      - name: Run external corpus offline
+        run: |
+          set -euo pipefail
+          fixture=harness/fixtures/version-interop-corpus
+          cargo clippy --locked --offline --manifest-path "$fixture/Cargo.toml" -- -D warnings
+          cargo run --locked --offline --manifest-path "$fixture/Cargo.toml" 2>&1 \
+            | tee "$RUNNER_TEMP/version-interop.log"
+
+      - name: Capture conformance evidence
+        if: always()
+        run: |
+          set +e
+          fixture=harness/fixtures/version-interop-corpus
+          evidence="$RUNNER_TEMP/version-interop-evidence"
+          mkdir -p "$evidence"
+          cp "$fixture/cases.json" "$evidence/" 2>/dev/null
+          cp "$fixture/Cargo.lock" "$evidence/consumer-Cargo.lock" 2>/dev/null
+          cp "$RUNNER_TEMP/version-interop.log" "$evidence/" 2>/dev/null
+          sha256sum "$fixture/cases.json" > "$evidence/cases.sha256" 2>/dev/null
+          printf '%s\n' "$ZED_INTERFACES_REF" > "$evidence/zed-interfaces-commit.txt"
+          git -C zed-interfaces status --porcelain=v1 --untracked-files=all \
+            > "$evidence/interfaces-status.txt" 2>&1
+          rm -f "$fixture/Cargo.lock"
+          git -C harness status --porcelain=v1 --untracked-files=all \
+            > "$evidence/harness-status.txt" 2>&1
+
+      - name: Require clean source checkouts
+        if: always()
+        run: |
+          set -euo pipefail
+          test -z "$(git -C zed-interfaces status --porcelain=v1 --untracked-files=all)"
+          test -z "$(git -C harness status --porcelain=v1 --untracked-files=all)"
+
+      - name: Upload conformance evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: version-interop-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/version-interop-evidence
+          if-no-files-found: warn
+          retention-days: 14
+          include-hidden-files: false
