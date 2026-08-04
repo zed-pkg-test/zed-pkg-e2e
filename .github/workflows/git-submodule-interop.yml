@@ -17,7 +17,7 @@ on:
       zed_cli_ref:
         description: Immutable zed-cli commit to certify
         required: false
-        default: 01bf4184f228262d75661f393366a5adbeddee6e
+        default: b2ec50cd1d7c182bd9219795cd2918387c9c4cd8
       run_arc_smoke:
         description: Repeat the canary on the registered sonus-ci ARC scale set
         type: boolean
@@ -38,7 +38,7 @@ defaults:
 env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: "1"
-  ZED_CLI_REF: ${{ github.event.inputs.zed_cli_ref || '01bf4184f228262d75661f393366a5adbeddee6e' }}
+  ZED_CLI_REF: ${{ github.event.inputs.zed_cli_ref || 'b2ec50cd1d7c182bd9219795cd2918387c9c4cd8' }}
 
 jobs:
   hosted:
@@ -88,6 +88,9 @@ jobs:
           git -C zed-cli diff --check
           cargo fmt --all --check --manifest-path zed-cli/Cargo.toml
           cargo test --locked --manifest-path zed-cli/Cargo.toml --test git_submodule_interop
+          cargo test --locked --manifest-path zed-cli/Cargo.toml --test git_submodule_fresh_clone
+          cargo test --locked --manifest-path zed-cli/Cargo.toml --test git_submodule_interop_cli
+          cargo test --locked --manifest-path zed-cli/Cargo.toml --test git_submodule_branch_provenance
           cargo clippy --locked --manifest-path zed-cli/Cargo.toml --all-targets -- -D warnings
 
       - name: Build the exact product executable
