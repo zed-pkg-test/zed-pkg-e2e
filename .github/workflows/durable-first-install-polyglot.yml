@@ -17,7 +17,7 @@ on:
       zed_cli_ref:
         description: Immutable zed-cli commit containing the durable first-install implementation
         required: false
-        default: 73f9f9b054e0fa22cbb01312a21c38512de10b58
+        default: 4472879b5766dde7ee862a960360216df75a3c59
 
 permissions:
   contents: read
@@ -33,7 +33,7 @@ defaults:
 env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: "1"
-  ZED_CLI_REF: ${{ github.event.inputs.zed_cli_ref || '73f9f9b054e0fa22cbb01312a21c38512de10b58' }}
+  ZED_CLI_REF: ${{ github.event.inputs.zed_cli_ref || '4472879b5766dde7ee862a960360216df75a3c59' }}
   ZED_INTERFACES_REF: c2e049006453c26ca8ca291783f681fce75cb01f
 
 jobs:
