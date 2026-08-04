@@ -1,11 +1,13 @@
 # zed-pkg-e2e
 
 End-to-end verification for the **zed-pkg-test** fixture organization. This
-repository owns two complementary suites:
+repository owns three complementary suites:
 
-1. browser automation against a running zed registry stack; and
+1. browser automation against a running zed registry stack;
 2. a stateless GitHub Actions matrix that exercises package author and consumer
-   lifecycles across every repository in `zed-pkg-test`.
+   lifecycles across every repository in `zed-pkg-test`; and
+3. pinned cross-repository acceptance canaries for CLI behavior that must be
+   proven with real package-author and consumer repositories before release.
 
 ## How this differs from `zed-pkg/zed-e2e`
 
@@ -74,6 +76,54 @@ python3 scripts/lifecycle.py \
 
 The work root is disposable. Reusing the same path is safe because the harness
 requires a fresh root and GitHub-hosted jobs receive a new runner filesystem.
+
+## Durable first-install acceptance
+
+`.github/workflows/durable-first-install.yml` is the cross-organization
+acceptance gate for DEN-1413. It builds one immutable `zed-cli` commit on Linux
+and macOS, publishes the exact pinned `zed-pkg-test/node-lib` fixture to a fresh
+`file://` registry, removes Zed state from the pinned `node-app` fixture, and
+installs the real package from a nested consumer directory.
+
+`scripts/durable-first-install.sh` verifies that:
+
+- a dependency-bearing first install creates `.zpkg.toml` at the inferred
+  native-project root, not in the nested invocation directory;
+- two independently created consumers with the same basename and inputs receive
+  byte-identical manifests and lockfiles;
+- the generated manifest records direct dependency, target, adapter, marker,
+  and deterministic local identity metadata;
+- copy-mode package and Node adapter outputs contain no symlinks and the real
+  Node application executes successfully;
+- an inferred local consumer cannot be published, even with dry-run and VCS
+  checks skipped;
+- `--do-not-write-new-manifest` is an informational no-op for generated and
+  authored existing manifests;
+- the canonical flag and `ZED_PKG_DO_NOT_WRITE_NEW_MANIFEST` preserve explicit
+  ephemeral installs, while `--skip-manifest` remains a deprecated compatibility
+  spelling;
+- failed resolution removes the exact generated manifest and leaves no lock,
+  package tree, adapter output, or transaction debris; and
+- lock-only frozen restoration fails by default and succeeds byte-for-byte only
+  when no-new-manifest intent is explicit.
+
+All component refs and actions are immutable. During implementation review, the
+workflow pins the exact head of the corresponding `zed-cli` pull request. The
+pin must move to that PR's final reviewed head after every implementation
+change, then to the merge commit when the CLI work lands. The workflow has
+read-only repository permissions and uploads only bounded local-registry
+diagnostics on failure.
+
+Run the acceptance harness locally with sibling fixture checkouts:
+
+```bash
+cargo build --release --manifest-path ../zed-cli/Cargo.toml --bin zed
+bash scripts/durable-first-install.sh \
+  ../zed-cli/target/release/zed \
+  ../node-lib \
+  ../node-app \
+  /tmp/zed-durable-first-install
+```
 
 ## Browser suites
 
