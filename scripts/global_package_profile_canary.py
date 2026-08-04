@@ -24,6 +24,7 @@ from typing import Any
 
 COMMAND = "zed-global-canary"
 VERSION = "1.0.0"
+VCS_COMMIT = "0123456789abcdef0123456789abcdef01234567"
 
 
 def sha256(data: bytes) -> str:
@@ -108,7 +109,7 @@ def publish_fixture(registry: Path, name: str) -> dict[str, Any]:
         "size": len(payload),
         "format": "tar.gz",
         "vcs_tag": f"v{VERSION}",
-        "vcs_commit": "0" * 40,
+        "vcs_commit": VCS_COMMIT,
         "download_url": artifact_path.resolve().as_uri(),
         "published_at": "2026-08-04T00:00:00Z",
         "yanked": False,
