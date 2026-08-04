@@ -278,9 +278,7 @@ fn error_name(error: &NativeRegistryError) -> &'static str {
         NativeRegistryError::EmptyArtifact { .. } => "EmptyArtifact",
         NativeRegistryError::PlatformRequired { .. } => "PlatformRequired",
         NativeRegistryError::UnexpectedPlatform { .. } => "UnexpectedPlatform",
-        NativeRegistryError::PlatformPackagesNotAllowed { .. } => {
-            "PlatformPackagesNotAllowed"
-        }
+        NativeRegistryError::PlatformPackagesNotAllowed { .. } => "PlatformPackagesNotAllowed",
         NativeRegistryError::DuplicateMetaPlatform { .. } => "DuplicateMetaPlatform",
         NativeRegistryError::DuplicatePackageVersion { .. } => "DuplicatePackageVersion",
         NativeRegistryError::MultipleMetaPackages => "MultipleMetaPackages",
@@ -288,9 +286,7 @@ fn error_name(error: &NativeRegistryError) -> &'static str {
             "DuplicatePlatformPublication"
         }
         NativeRegistryError::PlatformPackageMismatch { .. } => "PlatformPackageMismatch",
-        NativeRegistryError::MissingPlatformPublication { .. } => {
-            "MissingPlatformPublication"
-        }
+        NativeRegistryError::MissingPlatformPublication { .. } => "MissingPlatformPublication",
         NativeRegistryError::Serialization(_) => "Serialization",
     }
 }
@@ -307,11 +303,25 @@ fn validate_corpus_shape(corpus: &Corpus) {
     assert_eq!(corpus.interface_commit, INTERFACE_COMMIT);
     assert_eq!(corpus.precedence.len(), 3, "precedence corpus shrank");
     assert_eq!(corpus.collisions.len(), 4, "collision corpus shrank");
-    assert_eq!(corpus.valid_records.len(), 2, "positive record corpus shrank");
-    assert_eq!(corpus.invalid_records.len(), 19, "negative record corpus shrank");
+    assert_eq!(
+        corpus.valid_records.len(),
+        2,
+        "positive record corpus shrank"
+    );
+    assert_eq!(
+        corpus.invalid_records.len(),
+        19,
+        "negative record corpus shrank"
+    );
 
-    assert_unique_ids("precedence", corpus.precedence.iter().map(|case| case.id.as_str()));
-    assert_unique_ids("collision", corpus.collisions.iter().map(|case| case.id.as_str()));
+    assert_unique_ids(
+        "precedence",
+        corpus.precedence.iter().map(|case| case.id.as_str()),
+    );
+    assert_unique_ids(
+        "collision",
+        corpus.collisions.iter().map(|case| case.id.as_str()),
+    );
     assert_unique_ids(
         "valid record",
         corpus.valid_records.iter().map(|case| case.id.as_str()),
@@ -372,28 +382,16 @@ fn run_invalid_records(corpus: &Corpus) {
     for case in &corpus.invalid_records {
         let mut record = record_for_kind(&case.base);
         apply_mutation(&mut record, &case.mutation);
-        let error = record
-            .validate()
-            .unwrap_err_or_else(|| panic!("invalid record {} unexpectedly validated", case.id));
+        let error = match record.validate() {
+            Ok(()) => panic!("invalid record {} unexpectedly validated", case.id),
+            Err(error) => error,
+        };
         assert_eq!(
             error_name(&error),
             case.expected_error,
             "invalid record {} returned {error}",
             case.id
         );
-    }
-}
-
-trait ResultExt<T, E> {
-    fn unwrap_err_or_else(self, on_ok: impl FnOnce() -> E) -> E;
-}
-
-impl<T, E> ResultExt<T, E> for Result<T, E> {
-    fn unwrap_err_or_else(self, on_ok: impl FnOnce() -> E) -> E {
-        match self {
-            Ok(_) => on_ok(),
-            Err(error) => error,
-        }
     }
 }
 
