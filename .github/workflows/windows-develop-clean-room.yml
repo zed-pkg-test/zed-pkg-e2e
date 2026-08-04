@@ -1,0 +1,219 @@
+name: Windows develop clean-room cross-org canary
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/windows-develop-clean-room.yml'
+      - 'README.md'
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/windows-develop-clean-room.yml'
+      - 'README.md'
+  schedule:
+    - cron: '17 9 * * 3'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-develop-clean-room-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  ZED_E2E_REF: 2a7524efca3300495dd4f8c438fd666c1b24f0a1
+  ZED_CLI_REF: fd3b3e487b2bdd129dd67403ad51f7299cfe6828
+  ZED_INTERFACES_REF: c2e049006453c26ca8ca291783f681fce75cb01f
+  FLAGS2ENV_REF: 2f62e40932a0fcb8b9bf1b4c84473e34fa3c51c7
+  CARGO_TERM_COLOR: always
+  PYTHONDONTWRITEBYTECODE: '1'
+
+jobs:
+  acceptance:
+    runs-on: windows-2022
+    timeout-minutes: 40
+    steps:
+      - name: Require immutable source pins
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          foreach ($pin in @(
+            $env:ZED_E2E_REF,
+            $env:ZED_CLI_REF,
+            $env:ZED_INTERFACES_REF,
+            $env:FLAGS2ENV_REF
+          )) {
+            if ($pin -notmatch '^[0-9a-f]{40}$') {
+              throw "non-immutable source pin: $pin"
+            }
+          }
+
+      - name: Check out this cross-org canary
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: canary
+          fetch-depth: 1
+          persist-credentials: false
+          show-progress: false
+
+      - name: Check out the exact independent E2E contract
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: zed-pkg/zed-e2e
+          ref: ${{ env.ZED_E2E_REF }}
+          path: zed-e2e
+          fetch-depth: 1
+          persist-credentials: false
+          show-progress: false
+
+      - name: Check out the merged CLI implementation
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: zed-pkg/zed-cli
+          ref: ${{ env.ZED_CLI_REF }}
+          path: zed-cli
+          fetch-depth: 1
+          persist-credentials: false
+          show-progress: false
+
+      - name: Check out the exact interface contract
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: zed-pkg/zed-interfaces
+          ref: ${{ env.ZED_INTERFACES_REF }}
+          path: zed-interfaces
+          fetch-depth: 1
+          persist-credentials: false
+          show-progress: false
+
+      - name: Install stable Rust
+        uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30
+        with:
+          toolchain: stable
+
+      - name: Install Python 3.13
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: '3.13'
+
+      - name: Verify immutable checkouts and transitive contracts
+        shell: pwsh
+        env:
+          ARTIFACT_DIR: ${{ runner.temp }}\zed-develop-windows-cross-org
+        run: |
+          $ErrorActionPreference = 'Stop'
+          New-Item -ItemType Directory -Force -Path $env:ARTIFACT_DIR | Out-Null
+
+          $e2e = (git -C zed-e2e rev-parse HEAD).Trim()
+          $cli = (git -C zed-cli rev-parse HEAD).Trim()
+          $interfaces = (git -C zed-interfaces rev-parse HEAD).Trim()
+          if ($e2e -ne $env:ZED_E2E_REF) { throw "E2E ref drift: $e2e" }
+          if ($cli -ne $env:ZED_CLI_REF) { throw "CLI ref drift: $cli" }
+          if ($interfaces -ne $env:ZED_INTERFACES_REF) { throw "interfaces ref drift: $interfaces" }
+
+          $cargo = Get-Content -Raw zed-cli/Cargo.toml
+          if (-not $cargo.Contains('rev = "' + $env:ZED_INTERFACES_REF + '"')) {
+            throw 'zed-interfaces pin drifted in Cargo.toml'
+          }
+          if (-not $cargo.Contains('rev = "' + $env:FLAGS2ENV_REF + '"')) {
+            throw 'flags2env pin drifted in Cargo.toml'
+          }
+
+          @(
+            "canary_commit=$((git -C canary rev-parse HEAD).Trim())",
+            "zed_e2e_commit=$e2e",
+            "zed_cli_commit=$cli",
+            "zed_interfaces_commit=$interfaces",
+            "flags2env_commit=$env:FLAGS2ENV_REF",
+            "runner_os=${{ runner.os }}",
+            "runner_arch=${{ runner.arch }}",
+            "rustc=$(rustc --version)",
+            "cargo=$(cargo --version)",
+            "python=$(python --version)",
+            "pwsh=$((Get-Command pwsh.exe).Source)",
+            "cmd=$env:COMSPEC"
+          ) | Set-Content -Encoding utf8 "$env:ARTIFACT_DIR/environment.txt"
+
+      - name: Audit the imported E2E policy without mutating checkouts
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          foreach ($path in @(
+            'zed-e2e/tests/cli/zed_develop_windows_clean_room.py',
+            'zed-e2e/tests/cli/run_zed_develop_windows_clean_room.py',
+            'zed-e2e/tests/cli/test_zed_develop_windows_policy.py'
+          )) {
+            python -c "compile(open(r'$path', encoding='utf-8').read(), r'$path', 'exec')"
+          }
+          python -m unittest -v zed-e2e/tests/cli/test_zed_develop_windows_policy.py
+
+      - name: Build the exact merged CLI
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          cargo build --locked --manifest-path zed-cli/Cargo.toml --bin zed
+          if (-not (Test-Path 'zed-cli\target\debug\zed.exe')) {
+            throw 'zed.exe was not built'
+          }
+
+      - name: Run the imported native Windows contract
+        shell: pwsh
+        env:
+          ARTIFACT_DIR: ${{ runner.temp }}\zed-develop-windows-cross-org
+        run: |
+          $ErrorActionPreference = 'Stop'
+          python zed-e2e/tests/cli/run_zed_develop_windows_clean_room.py `
+            --zed "$env:GITHUB_WORKSPACE\zed-cli\target\debug\zed.exe" `
+            --artifact-dir "$env:ARTIFACT_DIR" `
+            --candidate-sha "$env:ZED_CLI_REF" `
+            --interfaces-sha "$env:ZED_INTERFACES_REF" `
+            --flags2env-sha "$env:FLAGS2ENV_REF"
+
+      - name: Scan retained evidence for all credential canaries
+        shell: pwsh
+        env:
+          ARTIFACT_DIR: ${{ runner.temp }}\zed-develop-windows-cross-org
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $canaries = @(
+            'windows-clean-room-inherited-secret-canary',
+            'windows-clean-room-registry-token-canary',
+            'windows-clean-room-dotenv-canary',
+            'windows-clean-room-direnv-canary',
+            'windows-clean-room-production-env-canary',
+            'windows-clean-room-powershell-profile-canary',
+            'windows-clean-room-codex-credential-canary',
+            'windows-clean-room-aws-credential-canary',
+            'windows-clean-room-gcloud-credential-canary',
+            'windows-clean-room-gh-credential-canary',
+            'windows-clean-room-npm-credential-canary'
+          )
+          foreach ($file in Get-ChildItem -File -Recurse $env:ARTIFACT_DIR) {
+            $content = Get-Content -Raw $file.FullName
+            foreach ($canary in $canaries) {
+              if ($content.Contains($canary)) {
+                throw "credential canary leaked into evidence: $($file.FullName)"
+              }
+            }
+          }
+
+      - name: Prove every source checkout remained clean
+        if: always()
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          foreach ($repository in @('canary', 'zed-e2e', 'zed-cli', 'zed-interfaces')) {
+            git -C $repository status --short
+            $dirty = git -C $repository status --porcelain=v1 --untracked-files=all
+            if ($dirty) { throw "$repository checkout was mutated" }
+          }
+
+      - name: Upload bounded cross-org evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: windows-develop-cross-org-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}\zed-develop-windows-cross-org\
+          if-no-files-found: error
+          retention-days: 7
