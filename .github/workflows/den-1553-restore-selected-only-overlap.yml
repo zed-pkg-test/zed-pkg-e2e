@@ -1,0 +1,214 @@
+name: DEN-1553 restore selected-only overlap canary
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/den-1553-restore-selected-only-overlap.yml'
+      - '.github/workflows/complete-constraint-solver.yml'
+      - 'docs/complete-constraint-solver-canary.md'
+      - 'scripts/complete_constraint_solver.py'
+      - 'scripts/complete-constraint-solver.sh'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: den-1553-restore-selected-only-overlap
+  cancel-in-progress: false
+
+jobs:
+  prove-and-publish:
+    if: >-
+      github.repository == 'zed-pkg-test/zed-pkg-e2e' &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.head_ref == 'agent/den-1553-complete-solver-canary'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      ZED_CLI_REF: ddf0487f560c19000e2844b62797f1cd6299c26e
+      ZED_INTERFACES_REF: c2e049006453c26ca8ca291783f681fce75cb01f
+    steps:
+      - name: Check out exact certification head
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+          fetch-depth: 1
+          show-progress: false
+
+      - name: Restore the selected-only overlap contract
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path('scripts/complete_constraint_solver.py')
+          text = path.read_text(encoding='utf-8')
+          old_comment = '''    # 1. Overlapping ranges resolve to the common older version, regardless of
+              # root declaration order, and emit byte-identical lockfiles. The complete
+              # solver deterministically acquires the rejected 1.9.0 candidate while
+              # searching, so each cold home contains four immutable artifacts even
+              # though only three are selected and materialized.
+          '''
+          new_comment = '''    # 1. Overlapping ranges resolve to the common older version, regardless of
+              # root declaration order, and emit byte-identical lockfiles. Unresolved
+              # root packages must contribute their constraints before the deeper shared
+              # coordinate is acquired, so each cold home downloads only the three
+              # selected artifacts and never speculates into rejected shared@1.9.0.
+          '''
+          if text.count(old_comment) != 1:
+              raise SystemExit(
+                  f'expected one weakened overlap comment, found {text.count(old_comment)}'
+              )
+          if text.count('(3, 5, 4)') != 2:
+              raise SystemExit(
+                  f'expected two weakened overlap summaries, found {text.count("(3, 5, 4)")}'
+              )
+          text = text.replace(old_comment, new_comment, 1)
+          text = text.replace('(3, 5, 4)', '(3, 5, 3)')
+          path.write_text(text, encoding='utf-8')
+          PY
+          python3 -m py_compile scripts/complete_constraint_solver.py
+          bash -n scripts/complete-constraint-solver.sh
+          grep -F 'parse_prefetch(overlap_first.output) != (3, 5, 3)' \
+            scripts/complete_constraint_solver.py
+          grep -F 'parse_prefetch(overlap_second.output) != (3, 5, 3)' \
+            scripts/complete_constraint_solver.py
+          ! grep -Fq '(3, 5, 4)' scripts/complete_constraint_solver.py
+          grep -F 'default: ddf0487f560c19000e2844b62797f1cd6299c26e' \
+            .github/workflows/complete-constraint-solver.yml
+          grep -F 'ddf0487f560c19000e2844b62797f1cd6299c26e' \
+            docs/complete-constraint-solver-canary.md
+          git diff --check
+
+      - name: Check out exact product and interface candidates
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: zed-pkg/zed-cli
+          ref: ${{ env.ZED_CLI_REF }}
+          path: zed-cli
+          fetch-depth: 1
+          persist-credentials: false
+          show-progress: false
+
+      - name: Check out exact interface sibling
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: zed-pkg/zed-interfaces
+          ref: ${{ env.ZED_INTERFACES_REF }}
+          path: zed-interfaces
+          fetch-depth: 1
+          persist-credentials: false
+          show-progress: false
+
+      - name: Build and run both black-box canaries
+        run: |
+          set -euo pipefail
+          rustup toolchain install stable --profile minimal --component rustfmt
+          rustup default stable
+          cargo fmt --all --check --manifest-path zed-cli/Cargo.toml
+          cargo build --locked --release --manifest-path zed-cli/Cargo.toml --bin zed
+          test -x zed-cli/target/release/zed
+          python3 scripts/complete_constraint_solver.py \
+            --zed "$GITHUB_WORKSPACE/zed-cli/target/release/zed" \
+            --work-root "$RUNNER_TEMP/zed-complete-constraint-solver"
+          bash scripts/complete-constraint-solver.sh \
+            "$GITHUB_WORKSPACE/zed-cli/target/release/zed" \
+            "$RUNNER_TEMP/zed-complete-constraint-solver/yanked-candidate"
+
+      - name: Publish permanent script and remove this helper
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha }}
+          REPOSITORY: ${{ github.repository }}
+          BRANCH: agent/den-1553-complete-solver-canary
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import base64
+          import json
+          import os
+          import urllib.error
+          import urllib.request
+          from pathlib import Path
+
+          repo = os.environ['REPOSITORY']
+          branch = os.environ['BRANCH']
+          expected = os.environ['EXPECTED_HEAD']
+          token = os.environ['GITHUB_TOKEN']
+          api = f'https://api.github.com/repos/{repo}'
+          script = Path('scripts/complete_constraint_solver.py')
+          helper = '.github/workflows/den-1553-restore-selected-only-overlap.yml'
+
+          def request(method, endpoint, payload=None):
+              req = urllib.request.Request(
+                  api + endpoint,
+                  data=None if payload is None else json.dumps(payload).encode(),
+                  method=method,
+                  headers={
+                      'Accept': 'application/vnd.github+json',
+                      'Authorization': f'Bearer {token}',
+                      'X-GitHub-Api-Version': '2022-11-28',
+                      'User-Agent': 'zed-den-1553-selected-only-canary',
+                  },
+              )
+              try:
+                  with urllib.request.urlopen(req, timeout=30) as response:
+                      body = response.read(2_000_000)
+              except urllib.error.HTTPError as error:
+                  detail = error.read(16_384).decode(errors='replace')
+                  raise SystemExit(
+                      f'GitHub API {method} {endpoint} failed with HTTP {error.code}: {detail}'
+                  )
+              return json.loads(body) if body else None
+
+          live = request('GET', f'/git/ref/heads/{branch}')['object']['sha']
+          if live != expected:
+              raise SystemExit(f'branch advanced: expected {expected}, found {live}')
+          parent = request('GET', f'/git/commits/{live}')
+          blob = request('POST', '/git/blobs', {
+              'content': base64.b64encode(script.read_bytes()).decode(),
+              'encoding': 'base64',
+          })
+          tree = request('POST', '/git/trees', {
+              'base_tree': parent['tree']['sha'],
+              'tree': [
+                  {
+                      'path': 'scripts/complete_constraint_solver.py',
+                      'mode': '100644',
+                      'type': 'blob',
+                      'sha': blob['sha'],
+                  },
+                  {'path': helper, 'mode': '100644', 'type': 'blob', 'sha': None},
+              ],
+          })
+          commit = request('POST', '/git/commits', {
+              'message': (
+                  'test(DEN-1553): require selected-only overlap acquisition\n\n'
+                  'Restore the canonical overlap expectation to three resolved, five-worker '
+                  'capacity, and exactly three downloaded selected artifacts. Prove the final '
+                  'shallowest-frontier product candidate through both public-CLI black-box '
+                  'canaries before publishing, then remove this temporary helper.'
+              ),
+              'tree': tree['sha'],
+              'parents': [live],
+          })
+          request('PATCH', f'/git/refs/heads/{branch}', {
+              'sha': commit['sha'],
+              'force': False,
+          })
+          print(commit['sha'])
+          PY
+
+      - name: Upload bounded failure diagnostics
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: den-1553-selected-only-failure-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            scripts/complete_constraint_solver.py
+            ${{ runner.temp }}/zed-complete-constraint-solver/**/*.log
+            ${{ runner.temp }}/zed-complete-constraint-solver/**/.zpkg.lock
+          if-no-files-found: warn
+          retention-days: 7
+          include-hidden-files: true
