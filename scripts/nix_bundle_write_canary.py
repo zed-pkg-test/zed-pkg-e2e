@@ -277,7 +277,6 @@ def main() -> int:
         "org": "acme",
         "name": "dataset",
         "version": "1.2.3",
-        "target": None,
     }:
         raise AssertionError(first_receipt)
     assert_bundle(bundle, project, zed_home)
@@ -312,8 +311,6 @@ def main() -> int:
     if snapshot(bundle) != bundle_before:
         raise AssertionError("idempotent invocation rewrote bundle bytes")
 
-    # Prove the command-produced directory is a real standalone flake. Network
-    # acquisition is explicit and precedes the offline replay.
     run(
         ["nix", "flake", "archive", "--no-update-lock-file"],
         cwd=bundle,
