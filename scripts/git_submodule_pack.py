@@ -358,6 +358,30 @@ class Contract:
         self.assert_no_vcs_metadata(entries)
         return entries
 
+    def certify_noncanonical_exclusion_rejected(
+        self,
+        source: Path,
+        *,
+        home_name: str,
+        check: str,
+    ) -> None:
+        project = self.runs / home_name
+        self.clone_no_submodules(source, project)
+        assert not (project / "vendor/client/.git").exists()
+
+        out = self.runs / f"{home_name}-pack"
+        output = self.zed_cmd(
+            project,
+            home_name,
+            "pack",
+            "--out",
+            out,
+            should_fail=True,
+        )
+        assert "not initialized" in output.lower(), output
+        self.assert_no_archives(out)
+        self.checks.append(check)
+
     def finish(self) -> None:
         version = self.run([self.zed, "--version"]).strip()
         record = {
@@ -371,7 +395,7 @@ class Contract:
         (self.evidence / "evidence.json").write_text(
             json.dumps(record, indent=2, sort_keys=True) + "\n", encoding="utf-8"
         )
-        assert len(self.checks) == 10, self.checks
+        assert len(self.checks) == 12, self.checks
         self.log(f"\ncertified {len(self.checks)} Git-submodule packaging checks")
 
 
@@ -397,6 +421,16 @@ def main() -> int:
         child=child,
         zedignore=["vendor/client/**"],
     )
+    dot_excluded = contract.build_root(
+        name="dot-excluded-root",
+        child=child,
+        exclude=["./vendor/client/**"],
+    )
+    absolute_excluded = contract.build_root(
+        name="absolute-excluded-root",
+        child=child,
+        exclude=["/vendor/client/**"],
+    )
 
     contract.certify_uninitialized_rejection(included)
     initialized = contract.certify_initialized_archive(included)
@@ -407,6 +441,16 @@ def main() -> int:
     )
     contract.certify_excluded_uninitialized(ignored, home_name="zedignore-excluded")
     contract.checks.append(".zedignore permits an omitted, uninitialized submodule subtree")
+    contract.certify_noncanonical_exclusion_rejected(
+        dot_excluded,
+        home_name="dot-exclusion-rejected",
+        check="dot-prefixed recursive exclusion cannot bypass initialization",
+    )
+    contract.certify_noncanonical_exclusion_rejected(
+        absolute_excluded,
+        home_name="absolute-exclusion-rejected",
+        check="leading-slash recursive exclusion cannot bypass initialization",
+    )
     contract.finish()
     return 0
 
