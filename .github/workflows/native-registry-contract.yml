@@ -1,0 +1,289 @@
+name: zed native registry contract canary
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      zed_interfaces_ref:
+        description: Immutable zed-interfaces commit to certify
+        required: false
+        default: 56772c0af6b90d69df47f0eca8263ce735d37f30
+
+permissions:
+  contents: read
+
+concurrency:
+  group: zed-native-registry-contract-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: "1"
+  ZED_INTERFACES_REF: ${{ github.event.inputs.zed_interfaces_ref || '56772c0af6b90d69df47f0eca8263ce735d37f30' }}
+
+jobs:
+  native-registry-contract:
+    name: Native registry schema and consumer
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    steps:
+      - name: Require immutable interface pin
+        run: |
+          set -euo pipefail
+          [[ "$ZED_INTERFACES_REF" =~ ^[0-9a-f]{40}$ ]]
+
+      - name: Check out canary harness
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: harness
+          fetch-depth: 1
+          persist-credentials: false
+          show-progress: false
+
+      - name: Check out exact zed-interfaces candidate
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: zed-pkg/zed-interfaces
+          ref: ${{ env.ZED_INTERFACES_REF }}
+          path: zed-interfaces
+          fetch-depth: 1
+          persist-credentials: false
+          show-progress: false
+
+      - name: Verify the exact product candidate
+        run: |
+          set -euo pipefail
+          test "$(git -C zed-interfaces rev-parse HEAD)" = "$ZED_INTERFACES_REF"
+
+      - name: Install stable Rust with formatter and Clippy
+        run: |
+          set -euo pipefail
+          rustup toolchain install stable --profile minimal --component rustfmt,clippy
+          rustup default stable
+          rustc --version --verbose
+          cargo --version --verbose
+
+      - name: Generate schema deterministically
+        run: |
+          set -euo pipefail
+          cd zed-interfaces
+          cargo run --locked --example generate_schemas
+          test -s schemas/native-registry-adapter-record.json
+          git diff --exit-code -- schemas/native-registry-adapter-record.json
+          sha256sum schemas/native-registry-adapter-record.json \
+            | tee "$RUNNER_TEMP/native-registry-schema.sha256"
+          cp schemas/native-registry-adapter-record.json \
+            "$RUNNER_TEMP/native-registry-adapter-record.first.json"
+          cargo run --locked --example generate_schemas
+          cmp "$RUNNER_TEMP/native-registry-adapter-record.first.json" \
+            schemas/native-registry-adapter-record.json
+          sha256sum --check "$RUNNER_TEMP/native-registry-schema.sha256"
+
+      - name: Verify generated schema surface
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+
+          path = Path("zed-interfaces/schemas/native-registry-adapter-record.json")
+          schema = json.loads(path.read_text(encoding="utf-8"))
+          text = json.dumps(schema, sort_keys=True)
+          required = (
+              "NativeRegistryAdapterRecord",
+              "platform_packages",
+              "sha256",
+              "portable",
+              "meta",
+              "platform",
+              "npm",
+              "cargo",
+          )
+          missing = [token for token in required if token not in text]
+          if missing:
+              raise SystemExit(f"schema is missing public contract tokens: {missing}")
+          PY
+
+      - name: Run complete zed-interfaces gates
+        run: |
+          set -euo pipefail
+          cd zed-interfaces
+          cargo fmt --all -- --check
+          cargo test --locked --all-targets
+          cargo clippy --locked --all-targets --all-features -- -D warnings
+          git diff --check
+
+      - name: Compile public contract from an external crate
+        run: |
+          set -euo pipefail
+          fixture=harness/fixtures/native-registry-consumer
+          cp zed-interfaces/Cargo.lock "$fixture/Cargo.lock"
+          cargo run --offline --manifest-path "$fixture/Cargo.toml"
+          cargo run --locked --offline --manifest-path "$fixture/Cargo.toml"
+
+      - name: Certify publication-family topology from a second external crate
+        run: |
+          set -euo pipefail
+          fixture="$RUNNER_TEMP/native-topology-consumer"
+          mkdir -p "$fixture/src"
+          cat > "$fixture/Cargo.toml" <<TOML
+          [package]
+          name = "zed-native-topology-consumer"
+          version = "0.0.0"
+          edition = "2024"
+          publish = false
+
+          [dependencies]
+          zed-interfaces = { path = "$GITHUB_WORKSPACE/zed-interfaces" }
+          TOML
+          cat > "$fixture/src/main.rs" <<'RUST'
+          use zed_interfaces::{
+              ArtifactFormat, NATIVE_REGISTRY_ADAPTER_SCHEMA_V1, NativeArtifact,
+              NativePackageIdentity, NativePlatform, NativePlatformPackage, NativePublication,
+              NativePublicationKind, NativeRegistry, NativeRegistryAdapterRecord,
+              NativeRegistryError, ZedNativePackageIdentity,
+          };
+
+          const VERSION: &str = "1.0.0";
+
+          fn artifact(digit: char) -> NativeArtifact {
+              NativeArtifact {
+                  sha256: std::iter::repeat_n(digit, 64).collect(),
+                  size: 64,
+                  format: ArtifactFormat::TarGz,
+              }
+          }
+
+          fn package(name: &str, kind: NativePublicationKind, digit: char) -> NativePublication {
+              NativePublication {
+                  package: NativePackageIdentity {
+                      name: name.to_string(),
+                      version: VERSION.to_string(),
+                  },
+                  kind,
+                  platform: None,
+                  platform_packages: Vec::new(),
+                  artifact: artifact(digit),
+              }
+          }
+
+          fn source(target: &str) -> ZedNativePackageIdentity {
+              ZedNativePackageIdentity {
+                  org: "acme".to_string(),
+                  name: "core".to_string(),
+                  version: VERSION.to_string(),
+                  target: Some(target.to_string()),
+              }
+          }
+
+          fn platform(os: &str) -> NativePlatform {
+              NativePlatform {
+                  os: os.to_string(),
+                  arch: "arm64".to_string(),
+                  libc: None,
+              }
+          }
+
+          fn main() {
+              let mut linux = package(
+                  "@acme/core-linux-arm64",
+                  NativePublicationKind::Platform,
+                  'a',
+              );
+              linux.platform = Some(platform("linux"));
+              let mut darwin = package(
+                  "@acme/core-darwin-arm64",
+                  NativePublicationKind::Platform,
+                  'b',
+              );
+              darwin.platform = Some(platform("darwin"));
+
+              let platform_only = NativeRegistryAdapterRecord {
+                  schema: NATIVE_REGISTRY_ADAPTER_SCHEMA_V1.to_string(),
+                  registry: NativeRegistry::Npm,
+                  source: source("node"),
+                  publications: vec![linux.clone(), darwin.clone()],
+              };
+              platform_only
+                  .validate()
+                  .expect("platform-only families remain valid");
+
+              let multiple_portable = NativeRegistryAdapterRecord {
+                  schema: NATIVE_REGISTRY_ADAPTER_SCHEMA_V1.to_string(),
+                  registry: NativeRegistry::Cargo,
+                  source: source("rust"),
+                  publications: vec![
+                      package("acme_core", NativePublicationKind::Portable, 'c'),
+                      package("acme_core_extra", NativePublicationKind::Portable, 'd'),
+                  ],
+              };
+              assert!(matches!(
+                  multiple_portable.validate(),
+                  Err(NativeRegistryError::MultiplePortablePackages)
+              ));
+
+              let empty_meta = NativeRegistryAdapterRecord {
+                  schema: NATIVE_REGISTRY_ADAPTER_SCHEMA_V1.to_string(),
+                  registry: NativeRegistry::Npm,
+                  source: source("node"),
+                  publications: vec![
+                      package("@acme/core", NativePublicationKind::Meta, 'c'),
+                      linux.clone(),
+                  ],
+              };
+              assert!(matches!(
+                  empty_meta.validate(),
+                  Err(NativeRegistryError::MetaPackageRequiresPlatformSelections { .. })
+              ));
+
+              let mut meta = package("@acme/core", NativePublicationKind::Meta, 'c');
+              meta.platform_packages.push(NativePlatformPackage {
+                  platform: platform("linux"),
+                  package: "@acme/core-linux-arm64".to_string(),
+              });
+              let incomplete_meta = NativeRegistryAdapterRecord {
+                  schema: NATIVE_REGISTRY_ADAPTER_SCHEMA_V1.to_string(),
+                  registry: NativeRegistry::Npm,
+                  source: source("node"),
+                  publications: vec![meta, linux, darwin],
+              };
+              assert!(matches!(
+                  incomplete_meta.validate(),
+                  Err(NativeRegistryError::UnselectedPlatformPublication { .. })
+              ));
+          }
+          RUST
+          cargo generate-lockfile --offline --manifest-path "$fixture/Cargo.toml"
+          cargo run --locked --offline --manifest-path "$fixture/Cargo.toml"
+
+      - name: Record evidence
+        if: always()
+        run: |
+          set +e
+          mkdir -p "$RUNNER_TEMP/native-registry-contract-evidence"
+          printf '%s\n' "$ZED_INTERFACES_REF" \
+            > "$RUNNER_TEMP/native-registry-contract-evidence/product-commit.txt"
+          cp zed-interfaces/schemas/native-registry-adapter-record.json \
+            "$RUNNER_TEMP/native-registry-contract-evidence/" 2>/dev/null
+          cp "$RUNNER_TEMP/native-registry-schema.sha256" \
+            "$RUNNER_TEMP/native-registry-contract-evidence/" 2>/dev/null
+          cp harness/fixtures/native-registry-consumer/Cargo.lock \
+            "$RUNNER_TEMP/native-registry-contract-evidence/consumer-Cargo.lock" 2>/dev/null
+          git -C zed-interfaces status --porcelain=v1 --untracked-files=all \
+            > "$RUNNER_TEMP/native-registry-contract-evidence/interfaces-status.txt" 2>&1
+
+      - name: Upload contract evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: native-registry-contract-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/native-registry-contract-evidence
+          if-no-files-found: warn
+          retention-days: 14
+          include-hidden-files: false
