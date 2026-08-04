@@ -1,11 +1,11 @@
 # Git-submodule interoperability canary
 
-This canary independently certifies the mixed Git/Zed submodule behavior in
-`zed-pkg/zed-cli#105`. It runs outside the product repository against one exact
-immutable CLI commit:
+This canary independently certifies the consolidated Git/Zed submodule behavior
+in `zed-pkg/zed-cli#108`. It runs outside the product repository against one
+exact immutable CLI commit:
 
 ```text
-zed-pkg/zed-cli@01bf4184f228262d75661f393366a5adbeddee6e
+zed-pkg/zed-cli@b2ec50cd1d7c182bd9219795cd2918387c9c4cd8
 ```
 
 The product feature builds on the merged cooperative-install and takeover work
@@ -25,6 +25,20 @@ A superproject may use Git submodules for different purposes at the same time:
 
 Missing package intent is the only skip condition. A present but invalid,
 directory-valued, dangling, or symlinked package manifest remains an error.
+
+## Product certification included at the pin
+
+The consolidated product candidate also includes focused real-process suites for:
+
+- opt-in defaults and CLI/environment boolean precedence;
+- top-level and nested recursive initialization;
+- takeover idempotence and preservation of `.gitmodules` and gitlinks;
+- rollback for failed takeover, including a manifestless root;
+- fresh-clone frozen restoration with clean recursive Git status; and
+- configured branch provenance that never replaces the immutable gitlink pin.
+
+The workflow runs all four dedicated integration binaries before the independent
+Python canary.
 
 ## Black-box scenarios
 
@@ -77,10 +91,11 @@ prove that directory and symlink manifest entries fail the regular-file gate.
 - uses read-only repository permissions;
 - pins checkout and artifact Actions to immutable commits;
 - disables persisted checkout credentials;
+- keeps Python bytecode outside checked-out sources;
 - compiles the Python canary;
 - checks both repositories with `git diff --check`;
-- runs product `rustfmt`, the focused real-binary integration test, and
-  all-target Clippy with warnings denied;
+- runs product `rustfmt`, all four dedicated Git-submodule integration suites,
+  and all-target Clippy with warnings denied;
 - builds the exact release executable;
 - runs the independent black-box harness from a fresh work root;
 - requires clean harness and product source trees afterward; and
