@@ -3,7 +3,7 @@
 Linear: [DEN-1553](https://linear.app/denman/issue/DEN-1553/zed-cli-solve-overlapping-compatible-transitive-constraints-before)
 
 Product candidate: `zed-pkg/zed-cli#89` at immutable commit
-`3ab7656d6dedc28066e1ffe5d40db583b355d04b`.
+`ddf0487f560c19000e2844b62797f1cd6299c26e`.
 
 ## Purpose
 
@@ -27,8 +27,12 @@ published overlap-shared: 1.5.0, 1.9.0
 
 The only common solution is `overlap-shared@1.5.0`. The canary installs the
 same consumer with opposite TOML dependency order and requires byte-identical
-lockfiles. It then publishes `overlap-shared@1.10.0` and proves a fresh frozen
-replay still consumes the exact locked `1.5.0` graph without re-solving.
+lockfiles. Each cold solve must report exactly
+`(resolved=3, workers=5, downloaded=3)`: both root packages plus the selected
+shared package, with no speculative acquisition of rejected
+`overlap-shared@1.9.0`. It then publishes `overlap-shared@1.10.0` and proves a
+fresh frozen replay still consumes the exact locked `1.5.0` graph without
+re-solving.
 
 ### Multi-coordinate backtracking
 
@@ -51,10 +55,13 @@ version. The canary requires the solver to backtrack to the older chooser,
 materialize `stale-replacement`, and omit `stale-obsolete` from both the lock
 and project tree.
 
-Non-yanked candidate artifacts inspected during a rejected search branch may
-remain in the immutable global store. They must never appear in `.zpkg.lock` or
-the consumer project. Yanked candidates have a stricter boundary described
-below: immutable metadata must reject them before archive acquisition.
+A candidate required by an active branch may enter the immutable global store
+before later backtracking rejects that branch. It must never appear in
+`.zpkg.lock` or the consumer project. The overlap graph has a stricter ordering
+contract: unresolved shallower parents must contribute their constraints before
+the deeper shared coordinate is acquired, so the rejected `1.9.0` archive does
+not enter either cold home. Yanked candidates have the strictest boundary:
+immutable metadata must reject them before archive acquisition.
 
 ### Deterministic unsatisfiable provenance
 
@@ -76,8 +83,10 @@ The canary retains the existing recursive-installer contracts while exercising
 the new solver:
 
 - the reported worker bound remains five;
-- a cold wide frontier actually reaches the bounded acquisition pool instead of
+- equal-depth cold frontiers can reach the bounded acquisition pool instead of
   serializing candidate downloads;
+- unresolved shallower parents are selected before deeper candidate acquisition;
+- the canonical overlap graph downloads exactly its three selected artifacts;
 - selected artifacts use the existing per-SHA acquisition and global store;
 - project output remains symlink-first;
 - warm frozen replay downloads zero artifacts;
