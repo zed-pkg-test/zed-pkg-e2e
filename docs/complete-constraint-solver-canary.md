@@ -5,6 +5,13 @@ Linear: [DEN-1553](https://linear.app/denman/issue/DEN-1553/zed-cli-solve-overla
 Product candidate: `zed-pkg/zed-cli#89` at immutable commit
 `ddf0487f560c19000e2844b62797f1cd6299c26e`.
 
+The selected-only overlap assertions were restored and proven on certification
+head `05d8eeb4d42957ca6e01e3829798ff2eb285dd95`. That exact head built the final
+product and passed both public-CLI canaries before publishing the permanent
+script and deleting its temporary helper. This document-only evidence commit
+then triggers the final read-only repository matrix under the connected GitHub
+app.
+
 ## Purpose
 
 This canary verifies the complete one-version dependency solver through the
