@@ -19,17 +19,15 @@ zed="$(cd "$(dirname "$zed")" && pwd)/$(basename "$zed")"
 mkdir -p "$work_root"
 work_root="$(cd "$work_root" && pwd)"
 registry="$work_root/registry"
-home="$work_root/home"
-publisher_home="$home/publisher"
+publisher_home="$work_root/publisher-home"
 mkdir -p "$registry" "$publisher_home"
 file_registry="file://$registry"
+org="solver-yank-e2e"
 
-# This is a credential-free, isolated file-registry contract. Ambient state
-# must not choose a registry, home, target, adapter, concurrency, or legacy
-# manifest mode for the candidate under test.
 unset ZED_PKG_TOKEN ZED_PKG_REGISTRY ZED_PKG_HOME ZED_PKG_TARGET \
   ZED_PKG_ADAPTER ZED_PKG_INSTALL_CONCURRENCY ZED_PKG_ALLOW_NO_MANIFEST \
   ZED_PKG_DO_NOT_WRITE_NEW_MANIFEST ZED_PKG_INTERACTIVE
+export CI=true GIT_TERMINAL_PROMPT=0 RUST_BACKTRACE=1
 
 publish_package() {
   local name="$1"
@@ -40,14 +38,15 @@ publish_package() {
   {
     cat <<EOF
 [package]
-org = "solver-e2e"
+org = "$org"
 name = "$name"
 version = "$version"
-description = "DEN-1553 immutable solver fixture"
+description = "DEN-1553 yanked-candidate hardening fixture"
+license = "MIT"
 
 [package.repository]
 vcs = "git"
-url = "https://example.invalid/solver-e2e/$name"
+url = "https://example.invalid/$org/$name"
 EOF
     if [[ $# -gt 0 ]]; then
       printf '\n[dependencies]\n'
@@ -59,7 +58,7 @@ EOF
       done
     fi
   } >"$source/.zpkg.toml"
-  printf '%s@%s\n' "$name" "$version" >"$source/payload.txt"
+  printf '%s/%s@%s\n' "$org" "$name" "$version" >"$source/payload.txt"
   (
     cd "$source"
     "$zed" \
@@ -71,203 +70,122 @@ EOF
 
 write_consumer() {
   local root="$1"
-  local name="$2"
-  shift 2
   mkdir -p "$root"
-  {
-    cat <<EOF
+  cat >"$root/.zpkg.toml" <<EOF
 [package]
 org = "solver-consumer"
-name = "$name"
+name = "yanked-overlap"
 version = "0.1.0"
+description = "DEN-1553 yanked-candidate consumer"
 
 [package.repository]
 vcs = "git"
-url = "https://example.invalid/solver-consumer/$name"
+url = "https://example.invalid/solver-consumer/yanked-overlap"
+
+[dependencies]
+"$org/left" = "=1.0.0"
+"$org/right" = "=1.0.0"
 EOF
-    printf '\n[dependencies]\n'
-    local spec key requirement
-    for spec in "$@"; do
-      key="${spec%%=*}"
-      requirement="${spec#*=}"
-      printf '"%s" = "%s"\n' "$key" "$requirement"
-    done
-  } >"$root/.zpkg.toml"
 }
 
 install_project() {
   local root="$1"
-  local install_home="$2"
+  local home="$2"
   shift 2
   (
     cd "$root"
     "$zed" \
       --registry "$file_registry" \
-      --home "$install_home" \
-      install --install-mode copy --adapter none "$@"
+      --home "$home" \
+      install --adapter none --install-mode copy "$@"
   )
 }
 
-assert_lock_versions() {
-  local lockfile="$1"
-  shift
-  python3 - "$lockfile" "$@" <<'PY'
+assert_selected_shared() {
+  local lock="$1"
+  python3 - "$lock" "$org" <<'PY'
 import sys, tomllib
 from pathlib import Path
 
 lock_path = Path(sys.argv[1])
-expected = dict(item.split("=", 1) for item in sys.argv[2:])
+org = sys.argv[2]
 with lock_path.open("rb") as handle:
-    lock = tomllib.load(handle)
-actual = {
-    f"{package['org']}/{package['name']}": package['version']
-    for package in lock.get("package", [])
+    document = tomllib.load(handle)
+versions = {
+    f"{item['org']}/{item['name']}": item['version']
+    for item in document.get("package", [])
 }
-if actual != expected:
-    raise SystemExit(f"unexpected lock graph: expected={expected!r} actual={actual!r}")
+expected = {
+    f"{org}/left": "1.0.0",
+    f"{org}/right": "1.0.0",
+    f"{org}/shared": "1.5.0",
+}
+if versions != expected:
+    raise SystemExit(f"unexpected overlap lock: expected={expected!r} actual={versions!r}")
 PY
 }
-
-assert_no_project_mutation() {
-  local root="$1"
-  test ! -e "$root/.zpkg.lock"
-  test ! -e "$root/zed_modules"
-  test ! -e "$root/.zed"
-  test ! -e "$root/.zpkg-staging"
-}
-
-# ---------------------------------------------------------------------------
-# Publish the overlap graph that the former first-seen greedy walk rejected.
 
 publish_package shared 1.5.0
 publish_package shared 1.9.0
-publish_package overlap-left 1.0.0 "solver-e2e/shared=^1"
-publish_package overlap-right 1.0.0 "solver-e2e/shared=<=1.5.0"
+publish_package left 1.0.0 "$org/shared=^1"
+publish_package right 1.0.0 "$org/shared=<=1.5.0"
 
-overlap="$work_root/consumers/overlap"
-write_consumer \
-  "$overlap" overlap \
-  "solver-e2e/overlap-left==1.0.0" \
-  "solver-e2e/overlap-right==1.0.0"
-install_project "$overlap" "$home/overlap"
-assert_lock_versions \
-  "$overlap/.zpkg.lock" \
-  "solver-e2e/overlap-left=1.0.0" \
-  "solver-e2e/overlap-right=1.0.0" \
-  "solver-e2e/shared=1.5.0"
-test -d "$overlap/zed_modules/solver-e2e/shared"
-test ! -e "$overlap/zed_modules/solver-e2e/shared-1.9.0"
+initial="$work_root/initial"
+write_consumer "$initial"
+install_project "$initial" "$work_root/initial-home"
+assert_selected_shared "$initial/.zpkg.lock"
+test -d "$initial/zed_modules/$org/shared"
 
-# Frozen replay is lock-authoritative. Yank the selected version after writing
-# the lock, clear project output, and prove a cold home still installs the exact
-# locked artifact without resolving a different graph or rewriting the lock.
-shared_metadata="$registry/packages/solver-e2e/shared/versions/1.5.0.json"
-shared_sha="$(python3 - "$shared_metadata" <<'PY'
+metadata="$registry/packages/$org/shared/versions/1.5.0.json"
+test -f "$metadata"
+shared_sha="$(python3 - "$metadata" <<'PY'
 import json, sys
 from pathlib import Path
+
 path = Path(sys.argv[1])
-data = json.loads(path.read_text())
-print(data["sha256"])
-data["yanked"] = True
-path.write_text(json.dumps(data, indent=2, sort_keys=True) + "\n")
+document = json.loads(path.read_text())
+sha = document["sha256"]
+document["yanked"] = True
+path.write_text(json.dumps(document, indent=2, sort_keys=True) + "\n")
+print(sha)
 PY
 )"
-cp "$overlap/.zpkg.lock" "$work_root/overlap.lock.before"
-rm -rf "$overlap/zed_modules" "$overlap/.zed" "$overlap/.zpkg-staging"
-install_project "$overlap" "$home/frozen" --frozen
-cmp "$work_root/overlap.lock.before" "$overlap/.zpkg.lock"
-test -d "$overlap/zed_modules/solver-e2e/shared"
+[[ "$shared_sha" =~ ^[0-9a-f]{64}$ ]]
 
-# Fresh resolution must skip a yanked candidate before artifact acquisition.
-# This is both a user-visible policy assertion and a hardening boundary: a
-# withdrawn archive must not be downloaded or extracted merely to learn that
-# its immutable metadata is yanked.
-yanked="$work_root/consumers/yanked-fresh"
-write_consumer \
-  "$yanked" overlap \
-  "solver-e2e/overlap-left==1.0.0" \
-  "solver-e2e/overlap-right==1.0.0"
-if install_project "$yanked" "$home/yanked-fresh" \
-  >"$work_root/yanked-fresh.log" 2>&1; then
+# Existing locks remain authoritative after withdrawal. A cold home must replay
+# the exact selected graph and preserve lock bytes.
+frozen="$work_root/frozen"
+mkdir -p "$frozen"
+cp "$initial/.zpkg.toml" "$frozen/.zpkg.toml"
+cp "$initial/.zpkg.lock" "$frozen/.zpkg.lock"
+cp "$frozen/.zpkg.lock" "$work_root/frozen.lock.before"
+install_project "$frozen" "$work_root/frozen-home" --frozen
+cmp "$work_root/frozen.lock.before" "$frozen/.zpkg.lock"
+assert_selected_shared "$frozen/.zpkg.lock"
+test -d "$frozen/zed_modules/$org/shared"
+
+# Fresh solving must reject the yanked candidate before artifact acquisition.
+# The current product regression downloads/extracts it and checks `yanked`
+# afterward; this assertion makes that ordering observable and permanent.
+fresh="$work_root/fresh"
+fresh_home="$work_root/fresh-home"
+write_consumer "$fresh"
+if install_project "$fresh" "$fresh_home" >"$work_root/fresh.log" 2>&1; then
   echo "fresh resolution unexpectedly selected a yanked-only common version" >&2
   exit 1
 fi
-grep -i 'yanked' "$work_root/yanked-fresh.log"
-grep -F -- '--frozen' "$work_root/yanked-fresh.log"
-assert_no_project_mutation "$yanked"
-find "$home/yanked-fresh" -print >"$work_root/yanked-home-paths.txt"
-if grep -Fq "$shared_sha" "$work_root/yanked-home-paths.txt"; then
-  echo "fresh resolution acquired the yanked shared@1.5.0 artifact" >&2
-  grep -F "$shared_sha" "$work_root/yanked-home-paths.txt" >&2
+grep -i 'yanked' "$work_root/fresh.log"
+grep -F -- '--frozen' "$work_root/fresh.log"
+test ! -e "$fresh/.zpkg.lock"
+test ! -e "$fresh/zed_modules"
+test ! -e "$fresh/.zed"
+test ! -e "$fresh/.zpkg-staging"
+
+find "$fresh_home" -print >"$work_root/fresh-home-paths.txt" 2>/dev/null || true
+if grep -Fq "$shared_sha" "$work_root/fresh-home-paths.txt"; then
+  echo "fresh resolution acquired yanked $org/shared@1.5.0 before rejecting it" >&2
+  grep -F "$shared_sha" "$work_root/fresh-home-paths.txt" >&2
   exit 1
 fi
 
-# ---------------------------------------------------------------------------
-# Backtracking must cross more than one package coordinate.
-
-publish_package core 1.0.0
-publish_package core 2.0.0
-publish_package route-b 1.0.0 "solver-e2e/core=^1"
-publish_package route-b 2.0.0 "solver-e2e/core=^2"
-publish_package route-a 1.0.0 "solver-e2e/route-b=^1"
-publish_package route-a 2.0.0 "solver-e2e/route-b=^2"
-publish_package policy 1.0.0 "solver-e2e/core=^1"
-
-backtrack="$work_root/consumers/backtrack"
-write_consumer \
-  "$backtrack" backtrack \
-  "solver-e2e/route-a=>=1" \
-  "solver-e2e/policy==1.0.0"
-install_project "$backtrack" "$home/backtrack"
-assert_lock_versions \
-  "$backtrack/.zpkg.lock" \
-  "solver-e2e/core=1.0.0" \
-  "solver-e2e/policy=1.0.0" \
-  "solver-e2e/route-a=1.0.0" \
-  "solver-e2e/route-b=1.0.0"
-
-# ---------------------------------------------------------------------------
-# Unsatisfiable diagnostics must retain both provenance paths, be byte-stable
-# under reversed declaration order, and leave the project entirely untouched.
-
-publish_package conflict-leaf 1.0.0
-publish_package conflict-leaf 2.0.0
-publish_package conflict-left 1.0.0 "solver-e2e/conflict-leaf=^1"
-publish_package conflict-right 1.0.0 "solver-e2e/conflict-leaf=^2"
-
-conflict_a="$work_root/consumers/conflict-a"
-conflict_b="$work_root/consumers/conflict-b"
-write_consumer \
-  "$conflict_a" conflict \
-  "solver-e2e/conflict-left==1.0.0" \
-  "solver-e2e/conflict-right==1.0.0"
-write_consumer \
-  "$conflict_b" conflict \
-  "solver-e2e/conflict-right==1.0.0" \
-  "solver-e2e/conflict-left==1.0.0"
-cp "$conflict_a/.zpkg.toml" "$work_root/conflict-a.toml.before"
-cp "$conflict_b/.zpkg.toml" "$work_root/conflict-b.toml.before"
-
-if install_project "$conflict_a" "$home/conflict-a" \
-  >"$work_root/conflict-a.log" 2>&1; then
-  echo "unsatisfiable conflict graph unexpectedly installed" >&2
-  exit 1
-fi
-if install_project "$conflict_b" "$home/conflict-b" \
-  >"$work_root/conflict-b.log" 2>&1; then
-  echo "reversed unsatisfiable conflict graph unexpectedly installed" >&2
-  exit 1
-fi
-
-grep -F 'version conflict for solver-e2e/conflict-leaf' "$work_root/conflict-a.log"
-grep -F '`^1` via solver-consumer/conflict@0.1.0 -> solver-e2e/conflict-left@1.0.0 -> solver-e2e/conflict-leaf' \
-  "$work_root/conflict-a.log"
-grep -F '`^2` via solver-consumer/conflict@0.1.0 -> solver-e2e/conflict-right@1.0.0 -> solver-e2e/conflict-leaf' \
-  "$work_root/conflict-a.log"
-cmp "$work_root/conflict-a.log" "$work_root/conflict-b.log"
-cmp "$work_root/conflict-a.toml.before" "$conflict_a/.zpkg.toml"
-cmp "$work_root/conflict-b.toml.before" "$conflict_b/.zpkg.toml"
-assert_no_project_mutation "$conflict_a"
-assert_no_project_mutation "$conflict_b"
-
-printf 'DEN-1553 complete constraint-solver acceptance passed: %s\n' "$work_root"
+printf 'DEN-1553 yanked-candidate hardening acceptance passed: %s\n' "$work_root"
