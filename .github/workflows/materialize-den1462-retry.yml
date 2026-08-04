@@ -19,12 +19,12 @@ defaults:
 env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: "1"
-  DEN1462_REF: 98123e1351f7743011ec07d948e4a81a42f7b3c7
+  DEN1462_REF: a914849da3c8e2556abccd437e6e539f320dcb3e
 
 jobs:
   materialize:
     name: Validate and package DEN-1462
-    runs-on: macos-15
+    runs-on: ubuntu-24.04
     timeout-minutes: 50
     steps:
       - name: Check out exact export candidate
