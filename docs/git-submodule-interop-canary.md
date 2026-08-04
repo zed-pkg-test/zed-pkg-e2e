@@ -11,7 +11,10 @@ zed-pkg/zed-interfaces@c2e049006453c26ca8ca291783f681fce75cb01f
 
 The same merged CLI commit is recorded in `.zed-cli-ref`, so this PR also
 exercises the shipped implementation through the repository's full lifecycle
-suite across all maintained fixture repositories.
+suite across all maintained fixture repositories. Before promotion, the
+certification branch is merged with current E2E `main` and revalidated at the
+resulting head; independent acceptance additions are preserved rather than
+resolved by selecting one side of a divergent history.
 
 ## Contract
 
