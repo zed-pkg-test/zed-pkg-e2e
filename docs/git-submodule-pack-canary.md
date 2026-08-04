@@ -5,7 +5,7 @@ This contract independently certifies the archive and publication boundary in
 inspects the resulting `tar.gz` bytes with Python's standard library.
 
 The workflow pins exact CLI candidate
-`08827a11147355cdeedb68cedcc05c1104265c1f` and exact interface contract
+`75d4cb4b86768c8ec7cd18e8f1a479cb39dac2cd` and exact interface contract
 `c2e049006453c26ca8ca291783f681fce75cb01f`. Ubuntu 24.04 and macOS 15 build
 that source, run the focused product tests, and execute disposable local Git
 fixtures. Linux additionally runs all-target Clippy with warnings denied.
