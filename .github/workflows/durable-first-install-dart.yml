@@ -15,7 +15,7 @@ on:
       zed_cli_ref:
         description: Immutable zed-cli commit containing Dart native-name wiring
         required: false
-        default: 7b4ecf43d0bfc3c5036224fab927cff58a44a889
+        default: 06774e561c81f82bc6df177714f7e87bbda8c427
 
 permissions:
   contents: read
@@ -31,7 +31,7 @@ defaults:
 env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: "1"
-  ZED_CLI_REF: ${{ github.event.inputs.zed_cli_ref || '7b4ecf43d0bfc3c5036224fab927cff58a44a889' }}
+  ZED_CLI_REF: ${{ github.event.inputs.zed_cli_ref || '06774e561c81f82bc6df177714f7e87bbda8c427' }}
   ZED_INTERFACES_REF: c2e049006453c26ca8ca291783f681fce75cb01f
   DART_LIB_REF: 1658a96945230e53a9ad0c2e944ed4e28dba4de2
   DART_APP_REF: 5b248e5a27119246a509fda258fb8a69c4accb5f
