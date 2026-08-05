@@ -132,6 +132,10 @@ esac
         '--cacheinfo',
         `${gitlink.mode},${gitlink.sha},${gitlink.path}`,
       ]);
+      // Git does not materialize a gitlink worktree directory when a branch is
+      // checked out without submodules. Keep an empty placeholder so an
+      // idempotent rerun does not report the valid gitlink as a deletion.
+      fs.mkdirSync(path.join(worktree, gitlink.path), { recursive: true });
     }
 
     if (!runGit(['status', '--porcelain=v1', '--untracked-files=no']).stdout.trim()) {

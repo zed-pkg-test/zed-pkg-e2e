@@ -56,14 +56,15 @@ test('paced executor rejects excluded organizations and paces write-producing re
   assert.match(excluded.stderr, /refusing excluded organization/);
 
   assert.equal(marker, 'APPLY_TEST_FLEET_PACED_V2');
-  assert.match(workflow, /group: apply-test-org-fleet-all/);
-  assert.match(workflow, /cancel-in-progress: true/);
+  assert.match(workflow, /group: finish-test-org-fleet-paced-v3/);
+  assert.match(workflow, /cancel-in-progress: false/);
   assert.match(workflow, /--repo "\$repository"/);
   assert.match(workflow, /for attempt in 1 2 3/);
   assert.match(workflow, /sleep 15/);
   assert.match(workflow, /TEST_ORG_FLEET_SKIP_TOPICS: "true"/);
   assert.match(workflow, /test "\$total" -eq 287/);
   assert.match(workflow, /tests\/bootstrap-retry-policy\.test\.mjs/);
+  assert.match(workflow, /tests\/git-transport-worktree\.test\.mjs/);
   assert.doesNotMatch(workflow, /^\s+r2g(?:-test)?\s*$/m);
   assert.equal(credentialLiteral.test(workflow), false);
 });
