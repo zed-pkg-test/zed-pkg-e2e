@@ -91,8 +91,17 @@ async function branchHead(repo, branch) {
 
 async function createInitialCommit(spec) {
   const repoPath = `/repos/${OWNER}/${encodeURIComponent(spec.name)}`;
+  const fileEntries = Object.entries(spec.files);
+  const [firstPath, firstContent] = fileEntries.find(([path]) => path === 'README.md') ?? fileEntries[0] ?? [];
+  if (!firstPath) throw new Error(`${spec.name} has no bootstrap files`);
+
+  const initial = await api('PUT', `${repoPath}/contents/${encodedPath(firstPath)}`, {
+    message: 'chore: initialize Leddy repository',
+    content: Buffer.from(firstContent, 'utf8').toString('base64'),
+  });
+
   const entries = [];
-  for (const [path, content] of Object.entries(spec.files)) {
+  for (const [path, content] of fileEntries) {
     const blob = await api('POST', `${repoPath}/git/blobs`, { content, encoding: 'utf-8' });
     entries.push({ path, mode: '100644', type: 'blob', sha: blob.data.sha });
   }
@@ -100,9 +109,9 @@ async function createInitialCommit(spec) {
   const commit = await api('POST', `${repoPath}/git/commits`, {
     message: 'chore: bootstrap Leddy repository',
     tree: tree.data.sha,
-    parents: [],
+    parents: [initial.data.commit.sha],
   });
-  await api('POST', `${repoPath}/git/refs`, { ref: 'refs/heads/main', sha: commit.data.sha });
+  await api('PATCH', `${repoPath}/git/refs/heads/main`, { sha: commit.data.sha, force: false });
   return commit.data.sha;
 }
 
