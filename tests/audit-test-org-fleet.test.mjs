@@ -44,6 +44,9 @@ test('live audit requires exact generated branches and draft PRs without embeddi
   assert.match(script, /visibility is/);
   assert.match(launcher, /branch\.split\('\/'\)\.map\(route\)\.join\('\/'\)/);
   assert.match(launcher, /fleet audit branch-path seam changed/);
+  assert.match(launcher, /pathToFileURL\(temporaryAuditorPath\)/);
+  assert.match(launcher, /\.audit-test-org-fleet-live-/);
+  assert.doesNotMatch(launcher, /data:text\/javascript/);
   assert.match(workflow, /secrets\.FLEET_GH_TOKEN/);
   assert.match(workflow, /AUDIT_TEST_FLEET_V1/);
   assert.match(workflow, /audit-test-org-fleet-live\.mjs/);
