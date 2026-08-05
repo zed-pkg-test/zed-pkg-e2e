@@ -6,7 +6,7 @@
   "integrations": {
     "sublimetext": {"repository": "zed-pkg/zed-sublimetext", "state": "live", "platforms": ["linux", "macos", "windows"], "native_language": "python", "artifact": ".sublime-package"},
     "jetbrains": {"repository": "zed-pkg/zed-intellij", "state": "live", "platforms": ["linux", "macos", "windows"], "native_language": "kotlin", "artifact": "plugin-zip"},
-    "vscode": {"repository": "zed-pkg/zed-vscode", "state": "publish-ready-candidate", "source": "bootstrap/zed-vscode-20260805.bundle.b64.part-*", "platforms": ["linux", "macos", "windows"], "native_language": "typescript", "artifact": "vsix"},
+    "vscode": {"repository": "zed-pkg/zed-vscode", "state": "buildable-candidate", "source": "blueprints/zed-vscode", "platforms": ["linux", "macos", "windows"], "native_language": "javascript", "artifact": "vsix"},
     "qtcreator": {"repository": "zed-pkg/zed-qtcreator", "state": "buildable-candidate", "source": "blueprints/zed-qtcreator", "platforms": ["linux", "macos", "windows"], "native_language": "cpp", "artifact": "qtcreator-plugin"},
     "xcode": {"repository": "zed-pkg/zed-xcode", "state": "buildable-candidate", "source": "blueprints/zed-xcode", "platforms": ["macos"], "native_language": "swift", "artifact": "appex"},
     "eclipse": {"repository": "zed-pkg/zed-eclipse", "state": "buildable-candidate", "source": "blueprints/zed-eclipse", "platforms": ["linux", "macos", "windows"], "native_language": "java", "artifact": "p2-site"},
