@@ -10,6 +10,7 @@ on:
       - "scripts/read-fleet-manifest.mjs"
       - "scripts/validate-test-org-fleet.mjs"
       - "tests/test-org-fleet.test.mjs"
+      - "tests/generated-plan-validator-gitlinks.test.mjs"
       - "docs/test-org-fleet.md"
       - ".github/fleet-handoff/START"
       - ".github/fleet-resume/START"
@@ -26,6 +27,7 @@ on:
       - "scripts/read-fleet-manifest.mjs"
       - "scripts/validate-test-org-fleet.mjs"
       - "tests/test-org-fleet.test.mjs"
+      - "tests/generated-plan-validator-gitlinks.test.mjs"
       - "docs/test-org-fleet.md"
       - ".github/fleet-handoff/START"
       - ".github/fleet-resume/START"
@@ -62,7 +64,10 @@ jobs:
         run: node scripts/validate-test-org-fleet.mjs
 
       - name: Run fleet contract tests
-        run: node --test tests/test-org-fleet.test.mjs
+        run: |
+          node --test \
+            tests/test-org-fleet.test.mjs \
+            tests/generated-plan-validator-gitlinks.test.mjs
 
       - name: Prove dry run is write-free
         run: |
