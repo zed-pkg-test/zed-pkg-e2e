@@ -62,7 +62,8 @@ async function gitPushWriteTree(owner, repository, branchName, files, gitlinks, 
 
   const defaultBranch = repository.default_branch || manifest.policy.defaultBranch;
   const worktree = fs.mkdtempSync(path.join(os.tmpdir(), 'test-org-fleet-'));
-  const askpass = path.join(worktree, 'git-askpass.sh');
+  const askpassDirectory = fs.mkdtempSync(path.join(os.tmpdir(), 'test-org-fleet-askpass-'));
+  const askpass = path.join(askpassDirectory, 'git-askpass.sh');
   const remote = `https://github.com/${owner}/${repository.name}.git`;
   const gitEnvironment = {
     ...process.env,
@@ -148,6 +149,7 @@ esac
     return { changed: true, defaultBranch };
   } finally {
     fs.rmSync(worktree, { recursive: true, force: true });
+    fs.rmSync(askpassDirectory, { recursive: true, force: true });
   }
 }
 
