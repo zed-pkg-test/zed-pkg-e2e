@@ -14,8 +14,8 @@ permissions:
   contents: read
 
 concurrency:
-  group: apply-test-org-fleet-all
-  cancel-in-progress: true
+  group: finish-test-org-fleet-paced-v3
+  cancel-in-progress: false
 
 jobs:
   finish:
@@ -40,6 +40,7 @@ jobs:
           node --test \
             tests/test-org-fleet.test.mjs \
             tests/bootstrap-retry-policy.test.mjs \
+            tests/git-transport-worktree.test.mjs \
             tests/paced-fleet-executor.test.mjs
 
           organizations=(
