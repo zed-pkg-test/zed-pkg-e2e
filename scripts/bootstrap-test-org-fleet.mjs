@@ -61,8 +61,9 @@ async function gitPushWriteTree(owner, repository, branchName, files, gitlinks, 
   if (!options.apply || repository._planned) return false;
 
   const defaultBranch = repository.default_branch || manifest.policy.defaultBranch;
-  const worktree = fs.mkdtempSync(path.join(os.tmpdir(), 'test-org-fleet-'));
-  const askpass = path.join(worktree, 'git-askpass.sh');
+  const worktree = fs.mkdtempSync(path.join(os.tmpdir(), 'test-org-fleet-worktree-'));
+  const credentialDirectory = fs.mkdtempSync(path.join(os.tmpdir(), 'test-org-fleet-credentials-'));
+  const askpass = path.join(credentialDirectory, 'git-askpass.sh');
   const remote = `https://github.com/${owner}/${repository.name}.git`;
   const gitEnvironment = {
     ...process.env,
@@ -130,7 +131,7 @@ esac
       ]);
     }
 
-    if (!runGit(['status', '--porcelain=v1']).stdout.trim()) {
+    if (!runGit(['status', '--porcelain=v1', '--untracked-files=no']).stdout.trim()) {
       stats.noChange += 1;
       log('no generated changes', { repository: `${owner}/${repository.name}` });
       return { changed: false, defaultBranch };
@@ -148,6 +149,7 @@ esac
     return { changed: true, defaultBranch };
   } finally {
     fs.rmSync(worktree, { recursive: true, force: true });
+    fs.rmSync(credentialDirectory, { recursive: true, force: true });
   }
 }
 
