@@ -13,6 +13,7 @@ on:
       - "tests/test-org-fleet.test.mjs"
       - "tests/generated-plan-validator-gitlinks.test.mjs"
       - "tests/export-test-org-fleet-index.test.mjs"
+      - "tests/idempotent-fleet-pr-repair.test.mjs"
       - "docs/test-org-fleet.md"
       - "docs/test-org-fleet-index.md"
       - ".github/fleet-handoff/START"
@@ -33,6 +34,7 @@ on:
       - "tests/test-org-fleet.test.mjs"
       - "tests/generated-plan-validator-gitlinks.test.mjs"
       - "tests/export-test-org-fleet-index.test.mjs"
+      - "tests/idempotent-fleet-pr-repair.test.mjs"
       - "docs/test-org-fleet.md"
       - "docs/test-org-fleet-index.md"
       - ".github/fleet-handoff/START"
@@ -75,7 +77,8 @@ jobs:
           node --test \
             tests/test-org-fleet.test.mjs \
             tests/generated-plan-validator-gitlinks.test.mjs \
-            tests/export-test-org-fleet-index.test.mjs
+            tests/export-test-org-fleet-index.test.mjs \
+            tests/idempotent-fleet-pr-repair.test.mjs
 
       - name: Export canonical repository index
         run: |

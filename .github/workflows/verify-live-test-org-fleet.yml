@@ -1,0 +1,79 @@
+name: verify live test organization fleet
+
+on:
+  workflow_run:
+    workflows:
+      - run authoritative test organization fleet on ARM64
+    types:
+      - completed
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: verify-live-test-org-fleet
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    if: github.repository == 'zed-pkg-test/zed-pkg-e2e'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - name: Check out the authoritative verifier from main
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+          persist-credentials: false
+          show-progress: false
+
+      - name: Validate verifier and manifest contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --check scripts/verify-live-test-org-fleet.mjs
+          node --test tests/live-fleet-verifier.test.mjs
+          node scripts/validate-test-org-fleet.mjs
+
+      - name: Export the persisted fleet PAT without logging it
+        shell: bash
+        env:
+          STORED_FLEET_PAT: ${{ secrets.FLEET_GH_TOKEN }}
+        run: |
+          set -euo pipefail
+          test -n "$STORED_FLEET_PAT"
+          printf 'GH_TOKEN=%s\n' "$STORED_FLEET_PAT" >> "$GITHUB_ENV"
+
+      - name: Verify all repositories, default branches, and open PRs
+        shell: bash
+        env:
+          FLEET_VERIFY_CONCURRENCY: "4"
+        run: |
+          set -euo pipefail
+          report="$RUNNER_TEMP/live-test-org-fleet-report.json"
+          set +e
+          node scripts/verify-live-test-org-fleet.mjs > "$report"
+          status=$?
+          set -e
+
+          {
+            echo
+            echo '## Machine-readable failure summary'
+            echo
+            echo '```json'
+            jq '{expected, verified, failureCounts: {
+              missingRepositories: (.failures.missingRepositories | length),
+              missingDefaultBranches: (.failures.missingDefaultBranches | length),
+              missingOpenPullRequests: (.failures.missingOpenPullRequests | length)
+            }}' "$report"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          if [[ "$status" -ne 0 ]]; then
+            echo '::error::The live fleet does not yet satisfy the exact 319-repository/PR contract.'
+            jq '.failures | with_entries(.value |= .[0:25])' "$report"
+            exit "$status"
+          fi
+
+          echo 'All 301 specialized repositories, all 18 governance repositories, their default branches, and open pull requests were verified.' >> "$GITHUB_STEP_SUMMARY"

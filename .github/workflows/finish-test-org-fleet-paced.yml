@@ -14,8 +14,8 @@ permissions:
   contents: read
 
 concurrency:
-  group: apply-test-org-fleet-all
-  cancel-in-progress: true
+  group: finish-test-org-fleet-paced-v3
+  cancel-in-progress: false
 
 jobs:
   finish:
@@ -40,6 +40,7 @@ jobs:
           node --test \
             tests/test-org-fleet.test.mjs \
             tests/bootstrap-retry-policy.test.mjs \
+            tests/git-transport-worktree.test.mjs \
             tests/paced-fleet-executor.test.mjs
 
           organizations=(
@@ -114,6 +115,57 @@ jobs:
             echo '|---|---:|---:|---:|'
           } >> "$GITHUB_STEP_SUMMARY"
 
+          gh_api_with_rate_limit_retry() {
+            local attempt=1
+            local max_attempts=6
+            local status=1
+            local error_file
+            local quota_json
+            local remaining
+            local reset_epoch
+            local now_epoch
+            local delay_seconds
+
+            while (( attempt <= max_attempts )); do
+              error_file="$RUNNER_TEMP/gh-api-${attempt}-${RANDOM}.err"
+              set +e
+              gh api "$@" 2>"$error_file"
+              status=$?
+              set -e
+              if (( status == 0 )); then
+                rm -f "$error_file"
+                return 0
+              fi
+
+              if grep -Eqi 'API rate limit exceeded|secondary rate limit|abuse detection|temporarily blocked' "$error_file"; then
+                delay_seconds=$((attempt * 60))
+                if grep -qi 'API rate limit exceeded' "$error_file" && quota_json="$(gh api rate_limit 2>/dev/null)"; then
+                  remaining="$(jq -r '.resources.core.remaining // -1' <<<"$quota_json")"
+                  reset_epoch="$(jq -r '.resources.core.reset // 0' <<<"$quota_json")"
+                  now_epoch="$(date +%s)"
+                  if [[ "$remaining" == "0" && "$reset_epoch" =~ ^[0-9]+$ && "$reset_epoch" -gt "$now_epoch" ]]; then
+                    delay_seconds=$((reset_epoch - now_epoch + 5))
+                  fi
+                fi
+                if (( delay_seconds > 0 && delay_seconds <= 3900 && attempt < max_attempts )); then
+                  printf '::notice::GitHub API quota unavailable; retrying after %ss (attempt %s/%s)\n' \
+                    "$delay_seconds" "$attempt" "$max_attempts" >&2
+                  rm -f "$error_file"
+                  sleep "$delay_seconds"
+                  attempt=$((attempt + 1))
+                  continue
+                fi
+              fi
+
+              cat "$error_file" >&2
+              rm -f "$error_file"
+              return "$status"
+            done
+
+            printf '::error::GitHub API request exhausted %s bounded attempts\n' "$max_attempts" >&2
+            return "$status"
+          }
+
           apply_filtered_repository() {
             local organization="$1"
             local repository="$2"
@@ -168,7 +220,7 @@ jobs:
 
           for organization in "${organizations[@]}"; do
             echo "::group::Paced provisioning for $organization"
-            gh api "orgs/$organization" --silent
+            gh_api_with_rate_limit_retry "orgs/$organization" --silent
             mapfile -t repositories < <(node scripts/list-test-org-fleet-repositories.mjs --org "$organization")
             organization_failed=false
 
@@ -186,7 +238,7 @@ jobs:
               echo "::error::Final governance/idempotency pass failed for $organization"
             fi
 
-            visible="$(gh api --paginate "orgs/$organization/repos?type=all&per_page=100" --jq '.[].name' | wc -l | tr -d '[:space:]')"
+            visible="$(gh_api_with_rate_limit_retry --paginate "orgs/$organization/repos?type=all&per_page=100" --jq '.[].name' | wc -l | tr -d '[:space:]')"
             if [[ "$organization_failed" == true ]]; then
               failures+=("$organization")
               printf '| `%s` | %s | %s | **failure** |\n' "$organization" "${#repositories[@]}" "$visible" >> "$GITHUB_STEP_SUMMARY"
