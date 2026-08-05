@@ -9,6 +9,7 @@ import { readFleetManifest } from '../scripts/read-fleet-manifest.mjs';
 const root = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
 const manifestPath = path.join(root, 'bootstrap', 'test-org-fleet.json.gz');
 const manifest = readFleetManifest(manifestPath);
+const credentialLiteral = /(?:ghp_|github_pat_)[A-Za-z0-9_]{20,}/;
 
 test('fleet contains the intended organization pairs and never r2g', () => {
   assert.equal(manifest.pairs.length, 18);
@@ -83,8 +84,30 @@ test('secret-backed apply workflow covers every test organization and never embe
   assert.match(workflow, /GH_TOKEN=%s/);
   assert.match(documentation, /Actions secret `FLEET_GH_TOKEN`/);
 
-  const credentialLiteral = /(?:ghp_|github_pat_)[A-Za-z0-9_]{20,}/;
   assert.equal(credentialLiteral.test(workflow), false);
   assert.equal(credentialLiteral.test(documentation), false);
   assert.doesNotMatch(workflow, /^\s+(?:token|pat):\s*$/m);
+});
+
+test('one-time handoff persists only ciphertext and dispatches the secret-backed fleet workflow', () => {
+  const workflowPath = path.join(root, '.github', 'workflows', 'secure-fleet-token-handoff.yml');
+  const workflow = fs.readFileSync(workflowPath, 'utf8');
+
+  for (const pair of manifest.pairs) {
+    assert.equal(workflow.includes(`            ${pair.testOrg}`), true, `handoff missing ${pair.testOrg}`);
+  }
+
+  assert.equal(workflow.toLowerCase().includes('r2g-test'), false);
+  assert.equal(credentialLiteral.test(workflow), false);
+  assert.match(workflow, /permissions:\n  contents: write/);
+  assert.match(workflow, /RSA-OAEP-SHA256/);
+  assert.match(workflow, /openssl pkeyutl -decrypt/);
+  assert.match(workflow, /ciphertext\.b64/);
+  assert.match(workflow, /EXPECTED_LOGIN: ORESoftware/);
+  assert.match(workflow, /gh secret set FLEET_GH_TOKEN/);
+  assert.match(workflow, /gh workflow run apply-test-org-fleet\.yml/);
+  assert.match(workflow, /-f authentication=pat/);
+  assert.match(workflow, /-f confirm=APPLY_TEST_FLEET/);
+  assert.match(workflow, /github\.repository == 'zed-pkg-test\/zed-pkg-e2e'/);
+  assert.doesNotMatch(workflow, /workflow_dispatch:/);
 });
