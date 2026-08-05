@@ -10,13 +10,18 @@ on:
       - "scripts/read-fleet-manifest.mjs"
       - "scripts/validate-test-org-fleet.mjs"
       - "tests/test-org-fleet.test.mjs"
+      - "tests/git-transport-worktree.test.mjs"
       - "docs/test-org-fleet.md"
+      - ".github/fleet-cancel/START"
       - ".github/fleet-handoff/START"
       - ".github/fleet-resume/START"
       - ".github/workflows/apply-test-org-fleet.yml"
+      - ".github/workflows/cancel-stale-fleet-recovery.yml"
+      - ".github/workflows/dispatch-test-org-fleet-once.yml"
       - ".github/workflows/resume-test-org-fleet.yml"
       - ".github/workflows/secure-fleet-token-handoff.yml"
       - ".github/workflows/test-org-fleet.yml"
+      - "bootstrap/execute-test-org-fleet-v2.once"
   push:
     branches: [main]
     paths:
@@ -26,13 +31,18 @@ on:
       - "scripts/read-fleet-manifest.mjs"
       - "scripts/validate-test-org-fleet.mjs"
       - "tests/test-org-fleet.test.mjs"
+      - "tests/git-transport-worktree.test.mjs"
       - "docs/test-org-fleet.md"
+      - ".github/fleet-cancel/START"
       - ".github/fleet-handoff/START"
       - ".github/fleet-resume/START"
       - ".github/workflows/apply-test-org-fleet.yml"
+      - ".github/workflows/cancel-stale-fleet-recovery.yml"
+      - ".github/workflows/dispatch-test-org-fleet-once.yml"
       - ".github/workflows/resume-test-org-fleet.yml"
       - ".github/workflows/secure-fleet-token-handoff.yml"
       - ".github/workflows/test-org-fleet.yml"
+      - "bootstrap/execute-test-org-fleet-v2.once"
   workflow_dispatch:
 
 permissions:
@@ -62,7 +72,7 @@ jobs:
         run: node scripts/validate-test-org-fleet.mjs
 
       - name: Run fleet contract tests
-        run: node --test tests/test-org-fleet.test.mjs
+        run: node --test tests/test-org-fleet.test.mjs tests/git-transport-worktree.test.mjs
 
       - name: Prove dry run is write-free
         run: |
