@@ -11,6 +11,7 @@ on:
       - "scripts/validate-test-org-fleet.mjs"
       - "tests/test-org-fleet.test.mjs"
       - "docs/test-org-fleet.md"
+      - ".github/workflows/apply-test-org-fleet.yml"
       - ".github/workflows/test-org-fleet.yml"
   push:
     branches: [main]
@@ -22,6 +23,7 @@ on:
       - "scripts/validate-test-org-fleet.mjs"
       - "tests/test-org-fleet.test.mjs"
       - "docs/test-org-fleet.md"
+      - ".github/workflows/apply-test-org-fleet.yml"
       - ".github/workflows/test-org-fleet.yml"
   workflow_dispatch:
 
