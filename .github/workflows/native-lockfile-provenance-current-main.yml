@@ -34,7 +34,10 @@ env:
 jobs:
   native-lockfile-provenance:
     name: Schema, external consumer, and current Rust applications
-    runs-on: ubuntu-24.04
+    # The preceding source-aware range canary was admitted and certified on
+    # this image. Keep the contract identical while avoiding the unavailable
+    # 24.04 runner pool that left the original run queued before checkout.
+    runs-on: ubuntu-22.04
     timeout-minutes: 60
     steps:
       - name: Require immutable pins
