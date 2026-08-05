@@ -1,0 +1,122 @@
+name: IDE integration sandbox
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths: ["ide-integrations/**", ".github/workflows/ide-integration-sandbox.yml"]
+  push:
+    branches: [main]
+    paths: ["ide-integrations/**", ".github/workflows/ide-integration-sandbox.yml"]
+  schedule:
+    - cron: "23 6 * * 1"
+
+permissions:
+  contents: read
+
+jobs:
+  policy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.14"}
+      - run: python ide-integrations/verify_matrix.py ide-integrations/parity-matrix.json
+
+  sublime:
+    strategy:
+      fail-fast: false
+      matrix: {python-version: ["3.8", "3.14"]}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: zed-pkg/zed-sublimetext
+          ref: ad46fc55bc1cd94b9a34f93737d412c0991271e7
+          path: integration
+      - uses: actions/checkout@v4
+        with: {path: e2e}
+      - uses: actions/setup-python@v5
+        with: {python-version: "${{ matrix.python-version }}"}
+      - working-directory: integration
+        run: python -m compileall -q zed_pkg_insights zed_sublimetext.py
+      - working-directory: integration
+        run: python -m unittest discover -s tests -v
+      - run: python e2e/ide-integrations/sandbox_sublime.py integration
+      - working-directory: integration
+        run: python scripts/build-package.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sandbox-sublime-${{ matrix.python-version }}
+          path: integration/dist/ZedPackageInsights.sublime-package
+          if-no-files-found: error
+
+  jetbrains:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: zed-pkg/zed-intellij
+          ref: 9738e56abc418546e6b6d089be926884549edd45
+      - uses: actions/setup-java@v4
+        with: {distribution: temurin, java-version: "21"}
+      - uses: gradle/actions/setup-gradle@v4
+        with: {gradle-version: "9.1.0"}
+      - run: gradle --stacktrace check buildPlugin verifyPlugin
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sandbox-jetbrains
+          path: build/distributions/*.zip
+          if-no-files-found: error
+
+  vscode:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: zed-pkg/.github
+          ref: 2813e840f17aeb4a2154187ea3c9f52da7b52114
+          path: candidates
+      - uses: actions/setup-node@v4
+        with: {node-version: "22"}
+      - name: Test source-visible VS Code candidate
+        working-directory: candidates/blueprints/zed-vscode
+        run: npm test
+      - name: Package VSIX
+        working-directory: candidates/blueprints/zed-vscode
+        run: npx --yes @vscode/vsce package --out /tmp/zed-package-insights.vsix
+      - uses: actions/upload-artifact@v4
+        with: {name: sandbox-vscode, path: /tmp/zed-package-insights.vsix, if-no-files-found: error}
+
+  eclipse:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: {repository: zed-pkg/.github, ref: 2813e840f17aeb4a2154187ea3c9f52da7b52114, path: candidates}
+      - uses: actions/setup-java@v4
+        with: {distribution: temurin, java-version: "21", cache: maven}
+      - run: mvn --batch-mode --file candidates/blueprints/zed-eclipse/pom.xml test
+
+  xcode:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: {repository: zed-pkg/.github, ref: 2813e840f17aeb4a2154187ea3c9f52da7b52114, path: candidates}
+      - run: swift test --package-path candidates/blueprints/zed-xcode
+
+  visual-studio:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: {repository: zed-pkg/.github, ref: 2813e840f17aeb4a2154187ea3c9f52da7b52114, path: candidates}
+      - uses: actions/setup-dotnet@v4
+        with: {dotnet-version: "8.0.x"}
+      - run: dotnet test candidates/blueprints/zed-visual-studio/Zed.VisualStudio.sln --configuration Release
+
+  qtcreator:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: {repository: zed-pkg/.github, ref: 2813e840f17aeb4a2154187ea3c9f52da7b52114, path: candidates}
+      - run: cmake -S candidates/blueprints/zed-qtcreator -B /tmp/zed-qtcreator -DBUILD_TESTING=ON
+      - run: cmake --build /tmp/zed-qtcreator --parallel 2
+      - run: ctest --test-dir /tmp/zed-qtcreator --output-on-failure
