@@ -1,0 +1,66 @@
+name: Live paired test-fleet audit
+
+on:
+  pull_request:
+    paths:
+      - 'bootstrap/test-org-fleet.json.gz.b64.parts/**'
+      - 'scripts/audit-live-test-org-fleet.mjs'
+      - 'scripts/read-fleet-manifest.mjs'
+      - 'tests/live-test-org-fleet-audit.test.mjs'
+      - '.github/workflows/live-test-org-fleet-audit.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'bootstrap/test-org-fleet.json.gz.b64.parts/**'
+      - 'scripts/audit-live-test-org-fleet.mjs'
+      - 'scripts/read-fleet-manifest.mjs'
+      - 'tests/live-test-org-fleet-audit.test.mjs'
+      - '.github/workflows/live-test-org-fleet-audit.yml'
+  schedule:
+    - cron: '43 7 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: live-paired-test-fleet-audit-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  unit:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Check out without persisted credentials
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          show-progress: false
+      - name: Validate auditor syntax and unit contracts
+        run: |
+          node --check scripts/audit-live-test-org-fleet.mjs
+          node --test tests/live-test-org-fleet-audit.test.mjs
+
+  live:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Check out without persisted credentials
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          show-progress: false
+      - name: Compare all paired organizations with the canonical manifest
+        run: node scripts/audit-live-test-org-fleet.mjs --json > live-test-fleet-audit.json
+      - name: Verify a complete machine-readable report was produced
+        run: |
+          node - <<'NODE'
+          const fs = require('node:fs');
+          const report = JSON.parse(fs.readFileSync('live-test-fleet-audit.json', 'utf8'));
+          if (report.pairCount !== 18) throw new Error(`expected 18 pairs, saw ${report.pairCount}`);
+          if (report.expectedRepositories !== 341) throw new Error(`expected 341 managed repositories, saw ${report.expectedRepositories}`);
+          if (report.missingRepositories !== 0) throw new Error(`missing ${report.missingRepositories} canonical repositories`);
+          NODE
