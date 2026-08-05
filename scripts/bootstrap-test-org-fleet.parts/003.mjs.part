@@ -1,0 +1,64 @@
+ uses: actions/checkout@${CHECKOUT_SHA} # v7.0.1\n        with:\n          persist-credentials: false\n          show-progress: false\n          submodules: recursive\n          token: \${{ secrets.TEST_FLEET_READ_TOKEN || github.token }}\n      - name: Validate contract\n        run: node scripts/validate-plan.mjs\n      - name: Explain profile gate\n        run: |\n          echo "Profile: ${spec.profile}"\n          echo "Required checks are defined in test-plan.json."\n          echo "Add product-specific executable fixtures here without weakening the generated contract."\n`;
+}
+
+function renderGitmodules(spec, resolvedByName) {
+  const lines = [generatedHeader('#')];
+  const gitlinks = [];
+  for (const dependency of spec.imports.filter((item) => item.mode === 'git-submodule')) {
+    const source = resolvedByName.get(dependency.source);
+    if (!source?.exists || !source.sha) continue;
+    lines.push(`[submodule ${JSON.stringify(dependency.path)}]`, `\tpath = ${dependency.path}`, `\turl = https://github.com/${dependency.source}.git`, '');
+    gitlinks.push({ path: dependency.path, mode: '160000', type: 'commit', sha: source.sha });
+  }
+  return { content: gitlinks.length ? `${lines.join('\n')}\n` : null, gitlinks };
+}
+
+function renderPackageConsumers(spec, resolvedByName) {
+  const consumers = spec.imports.filter((dependency) => dependency.mode === 'native-package').map((dependency) => ({
+    manager: dependency.manager,
+    package: dependency.package ?? null,
+    subdir: dependency.subdir ?? null,
+    source: dependency.source,
+    sourceSha: resolvedByName.get(dependency.source)?.sha ?? null,
+    status: dependency.package ? 'coordinate-declared' : 'discover-from-source-artifact',
+  }));
+  return consumers.length ? `${JSON.stringify({ generatedBy: manifest.policy.generatedFileMarker, consumers }, null, 2)}\n` : null;
+}
+
+function renderSourcePins(resolved) {
+  return `${JSON.stringify({ generatedBy: manifest.policy.generatedFileMarker, sources: Object.fromEntries(resolved.map((source) => [source.fullName, { branch: source.branch ?? null, sha: source.sha ?? null, exists: source.exists }])) }, null, 2)}\n`;
+}
+
+async function generateRepositoryFiles(pair, spec) {
+  const sourceNames = [...new Set([...(spec.sources ?? []), ...(spec.imports ?? []).map((dependency) => dependency.source)])];
+  const resolved = await Promise.all(sourceNames.map(resolveSource));
+  const missing = resolved.filter((source) => !source.exists || !source.sha).map((source) => source.fullName);
+  stats.gated += missing.length ? 1 : 0;
+  const resolvedByName = new Map(resolved.map((source) => [source.fullName, source]));
+  const gitmodules = renderGitmodules(spec, resolvedByName);
+  const files = new Map([
+    ['README.md', renderReadme(pair, spec, resolved, missing)],
+    ['test-plan.json', renderPlan(pair, spec, resolved, missing)],
+    ['source-pins.json', renderSourcePins(resolved)],
+    ['scripts/validate-plan.mjs', renderPlanValidator()],
+    ['.github/workflows/test-harness-contract.yml', renderContractWorkflow(spec)],
+    ['.github/workflows/integration.yml', renderIntegrationWorkflow(spec)],
+    ['.gitignore', `${generatedHeader('#')}\n.env\n.env.*\n!.env.example\nnode_modules/\n.dart_tool/\ntarget/\nbuild/\n.zed/\n.vendor/\n`],
+  ]);
+  const zpkg = renderZpkg(pair, spec, resolved);
+  if (zpkg) files.set('.zpkg.toml', zpkg);
+  const packages = renderPackageConsumers(spec, resolvedByName);
+  if (packages) files.set('package-consumers.json', packages);
+  if (gitmodules.content) files.set('.gitmodules', gitmodules.content);
+  if (missing.length) files.set('SOURCE-GATE.md', `${generatedHeader('<!--')} -->\n# Source gates\n\n${missing.map((source) => `- [ ] Create or expose \`${source}\`, then rerun the fleet bootstrap to pin its default-branch commit.`).join('\n')}\n`);
+  return { files, gitlinks: gitmodules.gitlinks, resolved, missing };
+}
+
+function renderGovernanceFiles(pair) {
+  const repoCount = pair.repositories.length;
+  const profileCounts = {};
+  for (const repository of pair.repositories) profileCounts[repository.profile] = (profileCounts[repository.profile] ?? 0) + 1;
+  const profileList = Object.entries(profileCounts).sort(([a], [b]) => a.localeCompare(b)).map(([profile, count]) => `- \`${profile}\`: ${count}`).join('\n');
+  return new Map([
+    ['profile/README.md', `${generatedHeader('<!--')} -->\n# ${pair.testOrg}\n\nTest organization for \`${pair.sourceOrg}\`. The fleet contains ${repoCount} specialized repositories plus this governance repository.\n\n${pair.description}\n\n## Profiles\n\n${profileList}\n\nAll generated pull-request workflows use least privilege, immutable action pins, and no persisted checkout credential. Integration workflows are gated by organization variables and credentials.\n`],
+    ['README.md', 

@@ -1,0 +1,86 @@
+name: merge source-resolved legacy harnesses
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/pr-merge/MERGE-RESOLVED-LEGACY-HARNESSES"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: merge-resolved-legacy-harnesses
+  cancel-in-progress: false
+
+jobs:
+  discover:
+    if: "${{ github.event.head_commit.message == 'chore: merge source-resolved legacy harnesses' }}"
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      FLEET_GH_TOKEN: ${{ secrets.FLEET_GH_TOKEN }}
+    steps:
+      - name: Check out trusted GraphQL discovery
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: Discover exact source-resolved draft heads and archive via public git
+        shell: bash
+        run: node .github/scripts/discover-resolved-legacy-harnesses.mjs
+      - name: Upload exact immutable archives
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: resolved-legacy-harness-bundle
+          path: legacy-harness-bundle
+          if-no-files-found: error
+          retention-days: 1
+
+  validate:
+    needs: discover
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - name: Check out trusted credential-free validator
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: Download exact archives without a fleet credential
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: resolved-legacy-harness-bundle
+          path: legacy-harness-bundle
+      - name: Validate test plans and workflow safety with all GitHub credentials removed
+        shell: bash
+        env:
+          GH_TOKEN: ""
+          GITHUB_TOKEN: ""
+          FLEET_GH_TOKEN: ""
+        run: python3 .github/scripts/validate-resolved-legacy-harnesses.py
+      - name: Upload validation result
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: resolved-legacy-harness-validation
+          path: legacy-harness-validated
+          if-no-files-found: error
+          retention-days: 1
+
+  merge:
+    needs: validate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      FLEET_GH_TOKEN: ${{ secrets.FLEET_GH_TOKEN }}
+    steps:
+      - name: Check out trusted exact-head GraphQL merger
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: Download credential-free validation result
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: resolved-legacy-harness-validation
+          path: portfolio-validated
+      - name: Revalidate, promote, merge, and exact-head verify through GraphQL
+        shell: bash
+        run: node .github/scripts/merge-graphql-validated-portfolios.mjs
