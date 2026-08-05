@@ -53,17 +53,103 @@ jobs:
         with:
           persist-credentials: false
           show-progress: false
+
       - name: Compare all paired organizations with the canonical manifest
         id: audit
-        continue-on-error: true
-        run: node scripts/audit-live-test-org-fleet.mjs --json > live-test-fleet-audit.json
-      - name: Print and enforce the complete machine-readable report
+        shell: bash
+        run: |
+          set +e
+          node scripts/audit-live-test-org-fleet.mjs --json \
+            > live-test-fleet-audit.json \
+            2> live-test-fleet-audit.stderr
+          status=$?
+          set -e
+          printf 'exit_code=%s\n' "$status" >> "$GITHUB_OUTPUT"
+          test -e live-test-fleet-audit.stderr || : > live-test-fleet-audit.stderr
+
+      - name: Summarize and enforce the complete machine-readable report
         if: always()
+        shell: bash
+        env:
+          AUDIT_EXIT_CODE: ${{ steps.audit.outputs.exit_code }}
         run: |
           node - <<'NODE'
           const fs = require('node:fs');
-          const report = JSON.parse(fs.readFileSync('live-test-fleet-audit.json', 'utf8'));
-          const summary = {
+
+          const reportPath = 'live-test-fleet-audit.json';
+          const stderrPath = 'live-test-fleet-audit.stderr';
+          const summaryPath = process.env.GITHUB_STEP_SUMMARY;
+          const auditExitCode = Number(process.env.AUDIT_EXIT_CODE ?? '1');
+          const token = process.env.GH_TOKEN ?? '';
+          const redact = (value) => token ? value.split(token).join('[REDACTED]') : value;
+          const stderr = fs.existsSync(stderrPath)
+            ? redact(fs.readFileSync(stderrPath, 'utf8')).slice(0, 4000)
+            : '';
+
+          const appendSummary = (text) => {
+            if (summaryPath) fs.appendFileSync(summaryPath, `${text}\n`);
+          };
+
+          let report;
+          try {
+            const raw = fs.readFileSync(reportPath, 'utf8');
+            if (!raw.trim()) throw new Error('audit JSON is empty');
+            report = JSON.parse(raw);
+          } catch (error) {
+            appendSummary('# Live paired test-fleet audit');
+            appendSummary('');
+            appendSummary(`**Result:** auditor failed before producing valid JSON (exit ${auditExitCode}).`);
+            if (stderr) {
+              appendSummary('');
+              appendSummary('```text');
+              appendSummary(stderr);
+              appendSummary('```');
+            }
+            throw new Error(`live auditor did not produce valid JSON: ${error.message}`);
+          }
+
+          const missingByOrganization = report.reports
+            .filter((item) => item.missing.length > 0)
+            .map((item) => `- **${item.testOrganization}:** ${item.missing.map((name) => `\`${name}\``).join(', ')}`);
+          const hygieneByOrganization = report.reports
+            .filter((item) => item.expectedHygiene.length > 0)
+            .flatMap((item) => item.expectedHygiene.map((finding) =>
+              `- **${item.testOrganization}/${finding.repository}:** ${finding.finding}`));
+
+          appendSummary('# Live paired test-fleet audit');
+          appendSummary('');
+          appendSummary(`Canonical repositories present: **${report.presentRepositories}/${report.expectedRepositories}**`);
+          appendSummary('');
+          appendSummary(`Missing: **${report.missingRepositories}** · Extras preserved: **${report.extraRepositories}** · Canonical hygiene findings: **${report.expectedHygieneFindings}**`);
+          appendSummary('');
+          appendSummary('| Production org | Test org | Canonical | Present | Missing | Extras | Hygiene |');
+          appendSummary('|---|---|---:|---:|---:|---:|---:|');
+          for (const item of report.reports) {
+            appendSummary(`| \`${item.sourceOrganization}\` | \`${item.testOrganization}\` | ${item.expectedRepositories} | ${item.present.length} | ${item.missing.length} | ${item.extras.length} | ${item.expectedHygiene.length} |`);
+          }
+          if (missingByOrganization.length) {
+            appendSummary('');
+            appendSummary('## Missing canonical repositories');
+            appendSummary('');
+            appendSummary(missingByOrganization.join('\n'));
+          }
+          if (hygieneByOrganization.length) {
+            appendSummary('');
+            appendSummary('## Canonical repository hygiene findings');
+            appendSummary('');
+            appendSummary(hygieneByOrganization.join('\n'));
+          }
+          if (stderr) {
+            appendSummary('');
+            appendSummary('## Auditor diagnostics');
+            appendSummary('');
+            appendSummary('```text');
+            appendSummary(stderr);
+            appendSummary('```');
+          }
+
+          const compact = {
+            auditExitCode,
             pairCount: report.pairCount,
             expectedRepositories: report.expectedRepositories,
             presentRepositories: report.presentRepositories,
@@ -76,9 +162,24 @@ jobs:
                 .map((item) => [item.testOrganization, item.missing]),
             ),
           };
-          console.log(JSON.stringify(summary, null, 2));
-          if (report.pairCount !== 18) throw new Error(`expected 18 pairs, saw ${report.pairCount}`);
-          if (report.expectedRepositories !== 341) throw new Error(`expected 341 managed repositories, saw ${report.expectedRepositories}`);
-          if (report.missingRepositories !== 0) throw new Error(`missing ${report.missingRepositories} canonical repositories`);
-          if (report.expectedHygieneFindings !== 0) throw new Error(`found ${report.expectedHygieneFindings} canonical repository hygiene failures`);
+          console.log(JSON.stringify(compact, null, 2));
+
+          const failures = [];
+          if (auditExitCode !== 0) failures.push(`auditor exited ${auditExitCode}`);
+          if (report.pairCount !== 18) failures.push(`expected 18 pairs, saw ${report.pairCount}`);
+          if (report.expectedRepositories !== 341) failures.push(`expected 341 managed repositories, saw ${report.expectedRepositories}`);
+          if (report.missingRepositories !== 0) failures.push(`missing ${report.missingRepositories} canonical repositories`);
+          if (report.expectedHygieneFindings !== 0) failures.push(`found ${report.expectedHygieneFindings} canonical repository hygiene failures`);
+          if (failures.length) throw new Error(failures.join('; '));
           NODE
+
+      - name: Upload complete live-audit evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: live-paired-test-fleet-audit-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            live-test-fleet-audit.json
+            live-test-fleet-audit.stderr
+          if-no-files-found: warn
+          retention-days: 30
