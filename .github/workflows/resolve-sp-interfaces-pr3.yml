@@ -1,0 +1,162 @@
+name: resolve sp-interfaces PR 3 semantically
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/pr-merge/RESOLVE-SP-INTERFACES-3"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: resolve-sp-interfaces
+  cancel-in-progress: false
+
+jobs:
+  resolve:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      GH_TOKEN: ${{ secrets.FLEET_GH_TOKEN }}
+      REPOSITORY: StreemPilot/sp-interfaces
+      HEAD_BRANCH: agent/chat-concurrency-invariants
+      EXPECTED_HEAD: f3b4a7fbaf051e10c6b7af4f2f1238c54ee859ea
+      EXPECTED_MAIN: 26fe896bd30f6e35c0de6dbbf28e442d05a1a038
+    steps:
+      - name: Validate stored credential
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test -n "$GH_TOKEN"
+          test "$(gh api user --jq '.login')" = "ORESoftware"
+          gh auth setup-git
+
+      - name: Build a two-parent semantic restoration commit
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          workdir="$(mktemp -d)"
+          git clone --no-tags "https://github.com/${REPOSITORY}.git" "$workdir/repo"
+          cd "$workdir/repo"
+          git fetch origin \
+            "+refs/heads/main:refs/remotes/origin/main" \
+            "+refs/heads/${HEAD_BRANCH}:refs/remotes/origin/${HEAD_BRANCH}"
+
+          actual_main="$(git rev-parse origin/main)"
+          actual_head="$(git rev-parse "origin/${HEAD_BRANCH}")"
+          test "$actual_main" = "$EXPECTED_MAIN" || {
+            echo "::error::main moved: expected $EXPECTED_MAIN, found $actual_main"
+            exit 1
+          }
+          test "$actual_head" = "$EXPECTED_HEAD" || {
+            echo "::error::PR head moved: expected $EXPECTED_HEAD, found $actual_head"
+            exit 1
+          }
+
+          git checkout -B "$HEAD_BRANCH" "$EXPECTED_HEAD"
+          git config user.name "Alexander Mills"
+          git config user.email "alex@oresoftware.com"
+
+          # PR 3 retains the complete interfaces repository and adds the
+          # concurrency invariant. Current main's independently valuable intent
+          # is the short canonical name plus the Zed package manifest; its mass
+          # deletion of schemas, generators, bindings, CI, SQL, and tests is not
+          # a valid consolidation result and is deliberately not propagated.
+          git show "$EXPECTED_MAIN:.zpkg.toml" > .zpkg.toml
+
+          node <<'NODE'
+          const fs = require('node:fs');
+          const path = 'README.md';
+          let readme = fs.readFileSync(path, 'utf8');
+          readme = readme.replace(/^# streempilot-interfaces\s*$/m, '# sp-interfaces');
+          if (!readme.includes('## Zed package')) {
+            readme += `
+
+          ## Zed package
+
+          This repository is the canonical `sp-interfaces` Zed package. The package
+          manifest is `.zpkg.toml`; consumers should install it as a pinned Zed
+          dependency rather than copying schemas or generated bindings.
+          `;
+          }
+          fs.writeFileSync(path, readme.replace(/\n{3,}/g, '\n\n').trimEnd() + '\n');
+          NODE
+
+          git add .zpkg.toml README.md
+          git diff --cached --check
+
+          # The desired tree is the complete PR head plus current main's useful
+          # package metadata. Create an explicit two-parent merge commit so both
+          # histories remain visible without accepting the destructive deletion
+          # side effects of a textual ours/theirs merge.
+          tree="$(git write-tree)"
+          message_file="$(mktemp)"
+          cat > "$message_file" <<'MSG'
+          merge: restore canonical interfaces and retain Zed packaging
+
+          Preserve the full StreemPilot contract source, generators, generated Rust/TypeScript/Dart bindings, SQL, tests, CI, and PR 3's one-featured-comment invariant. Retain current main's short sp-interfaces identity and .zpkg.toml package manifest. The mass deletions on main are intentionally not propagated because they erase the repository's canonical responsibility.
+          MSG
+          new_head="$(git commit-tree "$tree" -p "$EXPECTED_HEAD" -p "$EXPECTED_MAIN" < "$message_file")"
+          git reset --hard "$new_head"
+
+          git merge-base --is-ancestor "$EXPECTED_HEAD" HEAD
+          git merge-base --is-ancestor "$EXPECTED_MAIN" HEAD
+          test "$(git rev-list --parents -n 1 HEAD | wc -w)" -eq 3
+
+          required=(
+            .zpkg.toml
+            .github/workflows/ci.yml
+            package.json
+            package-lock.json
+            scripts/generate.mjs
+            schema/domain.schema.json
+            schema/messaging.schema.json
+            schema/signaling.schema.json
+            sql/schema.sql
+            sql/migrations/20260803_chat_comment_invariants.sql
+            tests/contracts.test.mjs
+            tests/chat-sql-invariants.test.mjs
+            generated/rust/Cargo.toml
+            generated/typescript/index.ts
+            generated/dart/streempilot_interfaces.dart
+          )
+          for path in "${required[@]}"; do
+            test -s "$path" || { echo "::error file=$path::required restored file missing"; exit 1; }
+          done
+
+          npm ci
+          npm run check:generated
+          node --test tests/*.test.mjs
+          npx tsc --strict --noEmit --target es2022 generated/typescript/index.ts
+          cargo check --locked --manifest-path generated/rust/Cargo.toml
+          cargo test --locked --manifest-path generated/rust/Cargo.toml
+          git diff --check "$EXPECTED_MAIN"...HEAD
+
+          # Against PR 3, the merge adds only the package manifest and README
+          # reconciliation. Against main, it restores the canonical repository.
+          mapfile -t versus_pr < <(git diff --name-only "$EXPECTED_HEAD"...HEAD | sort)
+          expected_vs_pr=(.zpkg.toml README.md)
+          [[ "${versus_pr[*]}" == "${expected_vs_pr[*]}" ]] || {
+            printf '::error::unexpected semantic additions over PR 3: %s\n' "${versus_pr[*]}"
+            exit 1
+          }
+
+          git push origin "$new_head:refs/heads/${HEAD_BRANCH}"
+          remote_head="$(git ls-remote origin "refs/heads/${HEAD_BRANCH}" | cut -f1)"
+          test "$remote_head" = "$new_head"
+          echo "SEMANTIC_HEAD=$new_head" | tee -a "$GITHUB_ENV"
+
+      - name: Record result
+        shell: bash
+        run: |
+          {
+            echo "## sp-interfaces PR 3 semantic resolution"
+            echo
+            echo "- Previous PR head: \`$EXPECTED_HEAD\`"
+            echo "- Current main integrated: \`$EXPECTED_MAIN\`"
+            echo "- Resolved merge head: \`$SEMANTIC_HEAD\`"
+            echo "- Preserved full interfaces project and PR 3 invariant"
+            echo "- Preserved short canonical name and Zed package manifest"
+            echo "- Validation: generator drift, Node contracts, TypeScript, Rust"
+          } >> "$GITHUB_STEP_SUMMARY"

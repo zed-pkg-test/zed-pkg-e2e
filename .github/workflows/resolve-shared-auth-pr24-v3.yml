@@ -1,0 +1,159 @@
+name: resolve shared-auth PR 24 semantically v3
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/pr-merge/RESOLVE-SHARED-AUTH-24-V3"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: resolve-shared-auth-pr-24
+  cancel-in-progress: false
+
+jobs:
+  resolve:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      GH_TOKEN: ${{ secrets.FLEET_GH_TOKEN }}
+      REPOSITORY: shared-auth/shared-auth-server.rs
+      HEAD_BRANCH: agent/harden-response-headers
+      EXPECTED_HEAD: a8097ef23fbab7fd8f3487a22319600e466b8d8b
+      EXPECTED_MAIN: 3547e16770e821fbc0e1e08f20820ac89fe1f8ce
+    steps:
+      - name: Validate credential and reconstruct exact histories
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test -n "$GH_TOKEN"
+          test "$(gh api user --jq '.login')" = "ORESoftware"
+          gh auth setup-git
+
+          workdir="$(mktemp -d)"
+          echo "WORKDIR=$workdir" >> "$GITHUB_ENV"
+          git clone --no-tags "https://github.com/${REPOSITORY}.git" "$workdir/repo"
+          cd "$workdir/repo"
+          git fetch origin \
+            "+refs/heads/main:refs/remotes/origin/main" \
+            "+refs/heads/${HEAD_BRANCH}:refs/remotes/origin/${HEAD_BRANCH}"
+
+          test "$(git rev-parse origin/main)" = "$EXPECTED_MAIN"
+          test "$(git rev-parse "origin/${HEAD_BRANCH}")" = "$EXPECTED_HEAD"
+          git checkout -B "$HEAD_BRANCH" "origin/$HEAD_BRANCH"
+          git config user.name "Alexander Mills"
+          git config user.email "alex@oresoftware.com"
+
+      - name: Perform semantic two-branch reconciliation
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          cd "$WORKDIR/repo"
+
+          set +e
+          git merge --no-commit --no-ff origin/main
+          merge_status=$?
+          set -e
+          if ((merge_status != 0)); then
+            mapfile -t conflicts < <(git diff --name-only --diff-filter=U | sort)
+            [[ "${conflicts[*]}" == "src/http/mod.rs" ]] || {
+              printf '::error::unexpected conflicts: %s\n' "${conflicts[*]}"
+              exit 1
+            }
+          fi
+
+          # The integration suite merged cleanly. Require the important behavior
+          # from both histories before resolving the sole router conflict.
+          grep -q 'app_with_introspect_secret' tests/integration.rs
+          grep -q 'async fn ui_exchange_empty_token_returns_error_fragment' tests/integration.rs
+          grep -q 'async fn security_headers_present_on_responses' tests/integration.rs
+          grep -q 'async fn jwks_keeps_public_cache_not_no_store' tests/integration.rs
+          grep -q 'async fn webhook_fails_closed_without_secret' tests/integration.rs
+
+          git show origin/main:src/http/mod.rs > src/http/mod.rs
+          node <<'NODE'
+          const fs = require('node:fs');
+          const path = 'src/http/mod.rs';
+          let source = fs.readFileSync(path, 'utf8');
+
+          const oldImport = '    http::{header, HeaderValue, Method},';
+          const newImport = '    http::{header, HeaderName, HeaderValue, Method},';
+          if (!source.includes(oldImport)) throw new Error('expected axum header import not found');
+          source = source.replace(oldImport, newImport);
+
+          const marker = '        .layer(cors)\n        .with_state(state)';
+          if (source.split(marker).length !== 2) throw new Error('expected one CORS/state boundary');
+          const layers = [
+            '        // Token-bearing responses must not enter shared or browser caches.',
+            '        // if_not_present preserves the explicit public JWKS cache policy.',
+            '        .layer(SetResponseHeaderLayer::if_not_present(',
+            '            header::CACHE_CONTROL,',
+            '            HeaderValue::from_static("no-store"),',
+            '        ))',
+            '        // The script-free UI needs no powerful browser capabilities.',
+            '        .layer(SetResponseHeaderLayer::if_not_present(',
+            '            HeaderName::from_static("permissions-policy"),',
+            '            HeaderValue::from_static(',
+            '                "accelerometer=(), camera=(), display-capture=(), geolocation=(), gyroscope=(), magnetometer=(), microphone=(), payment=(), usb=()",',
+            '            ),',
+            '        ))',
+            '        // Isolate authentication UI from cross-origin opener relationships.',
+            '        .layer(SetResponseHeaderLayer::if_not_present(',
+            '            HeaderName::from_static("cross-origin-opener-policy"),',
+            '            HeaderValue::from_static("same-origin"),',
+            '        ))',
+          ].join('\n');
+          source = source.replace(marker, layers + '\n' + marker);
+          fs.writeFileSync(path, source);
+          NODE
+
+          git add src/http/mod.rs tests/integration.rs
+          test -z "$(git diff --name-only --diff-filter=U)"
+          git diff --cached --check
+          git commit -m "merge: reconcile response hardening with current auth surface" \
+            -m "Preserve passkey, factor, DELETE-CORS, visibility, and fail-closed introspection changes from current main while integrating PR 24 response headers and router regressions."
+
+          git merge-base --is-ancestor "$EXPECTED_HEAD" HEAD
+          git merge-base --is-ancestor "$EXPECTED_MAIN" HEAD
+          test "$(git rev-list --parents -n 1 HEAD | wc -w)" -eq 3
+
+      - name: Validate exact resolved head
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          cd "$WORKDIR/repo"
+          cargo fmt --all -- --check
+          cargo test --locked --test integration
+          cargo test --locked
+          git diff --check origin/main...HEAD
+          mapfile -t final_changed < <(git diff --name-only origin/main...HEAD | sort)
+          expected=(src/http/mod.rs tests/integration.rs)
+          [[ "${final_changed[*]}" == "${expected[*]}" ]] || {
+            printf '::error::unexpected final diff paths: %s\n' "${final_changed[*]}"
+            exit 1
+          }
+
+      - name: Push exact semantic head
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          cd "$WORKDIR/repo"
+          new_head="$(git rev-parse HEAD)"
+          test "$(git ls-remote origin "refs/heads/${HEAD_BRANCH}" | cut -f1)" = "$EXPECTED_HEAD"
+          git push origin "HEAD:refs/heads/${HEAD_BRANCH}"
+          test "$(git ls-remote origin "refs/heads/${HEAD_BRANCH}" | cut -f1)" = "$new_head"
+          echo "SEMANTIC_HEAD=$new_head" >> "$GITHUB_ENV"
+
+      - name: Record result
+        shell: bash
+        run: |
+          {
+            echo "## shared-auth PR 24 semantic resolution"
+            echo
+            echo "- Old head: \`$EXPECTED_HEAD\`"
+            echo "- Integrated main: \`$EXPECTED_MAIN\`"
+            echo "- Resolved head: \`$SEMANTIC_HEAD\`"
+            echo "- Validation: cargo fmt, integration suite, full locked suite"
+          } >> "$GITHUB_STEP_SUMMARY"

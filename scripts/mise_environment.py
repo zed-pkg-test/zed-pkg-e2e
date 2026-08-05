@@ -155,19 +155,28 @@ backend = "core:node"
 [tools.node.platforms.linux-x64]
 checksum = "{sha256_hex('a')}"
 size = 100
-url = "{node_url}"
+url = "{node_url}/linux-x64"
+
+[tools.node.platforms.macos-arm64]
+url = "{node_url}/macos-arm64"
+size = 101
+checksum = "{sha256_hex('c')}"
 """
     python = f"""[[tools.python]]
 version = "3.12.4"
 backend = "core:python"
 
+[tools.python.platforms.linux-x64]
+checksum = "{sha256_hex('d')}"
+size = 199
+url = "https://example.invalid/python-linux"
+
 [tools.python.platforms.macos-arm64]
-url = "https://example.invalid/python"
+url = "https://example.invalid/python-macos"
 size = 200
 checksum = "{sha256_hex('b')}"
 """
     return (python + "\n" + node) if reordered else (node + "\n" + python)
-
 
 def write_locked_project(project: Path, *, reordered: bool = False, node_url: str | None = None) -> None:
     project.mkdir(parents=True, exist_ok=True)

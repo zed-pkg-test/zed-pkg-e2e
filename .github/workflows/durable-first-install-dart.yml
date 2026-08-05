@@ -1,0 +1,172 @@
+name: durable first-install Dart acceptance
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/durable-first-install-dart.yml"
+      - "scripts/durable-first-install-dart.sh"
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/durable-first-install-dart.yml"
+      - "scripts/durable-first-install-dart.sh"
+  workflow_dispatch:
+    inputs:
+      zed_cli_ref:
+        description: Immutable zed-cli commit containing Dart native-name wiring
+        required: false
+        default: b5d238112f08efc76f4f1bf14dc652a9ab10e963
+
+permissions:
+  contents: read
+
+concurrency:
+  group: durable-first-install-dart-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: "1"
+  ZED_CLI_REF: ${{ github.event.inputs.zed_cli_ref || 'b5d238112f08efc76f4f1bf14dc652a9ab10e963' }}
+  ZED_INTERFACES_REF: c2e049006453c26ca8ca291783f681fce75cb01f
+  DART_LIB_REF: 1658a96945230e53a9ad0c2e944ed4e28dba4de2
+  DART_APP_REF: 5b248e5a27119246a509fda258fb8a69c4accb5f
+
+jobs:
+  acceptance:
+    name: declared pub identity and durable state / ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-15]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    steps:
+      - name: Require immutable component pins
+        run: |
+          set -euo pipefail
+          for pin in \
+            "$ZED_CLI_REF" \
+            "$ZED_INTERFACES_REF" \
+            "$DART_LIB_REF" \
+            "$DART_APP_REF"
+          do
+            [[ "$pin" =~ ^[0-9a-f]{40}$ ]]
+          done
+
+      - name: Check out this acceptance harness
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: harness
+          fetch-depth: 1
+          persist-credentials: false
+          show-progress: false
+
+      - name: Check out the exact zed-cli implementation
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: zed-pkg/zed-cli
+          ref: ${{ env.ZED_CLI_REF }}
+          path: zed-cli
+          fetch-depth: 1
+          persist-credentials: false
+          show-progress: false
+
+      - name: Check out the exact interface contract
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: zed-pkg/zed-interfaces
+          ref: ${{ env.ZED_INTERFACES_REF }}
+          path: zed-interfaces
+          fetch-depth: 1
+          persist-credentials: false
+          show-progress: false
+
+      - name: Check out the immutable Dart library fixture
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: zed-pkg-test/dart-lib
+          ref: ${{ env.DART_LIB_REF }}
+          path: dart-lib
+          fetch-depth: 1
+          persist-credentials: false
+          show-progress: false
+
+      - name: Check out the immutable Dart application fixture
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: zed-pkg-test/dart-app
+          ref: ${{ env.DART_APP_REF }}
+          path: dart-app
+          fetch-depth: 1
+          persist-credentials: false
+          show-progress: false
+
+      - name: Install the pinned Rust toolchain action
+        uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30
+        with:
+          toolchain: stable
+          components: rustfmt
+
+      - name: Install the pinned Dart SDK action
+        uses: dart-lang/setup-dart@7654d458321ee25acccccfdb86cd48bd95768ff1 # v1.8.0
+        with:
+          sdk: stable
+
+      - name: Restore Rust build cache
+        uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32
+        with:
+          workspaces: zed-cli
+          shared-key: den-1579-dart-${{ matrix.os }}
+
+      - name: Verify toolchains and focused contracts
+        run: |
+          set -euo pipefail
+          rustc --version --verbose
+          cargo --version --verbose
+          dart --version
+          bash -n harness/scripts/durable-first-install-dart.sh
+          cargo fmt --all --check --manifest-path zed-cli/Cargo.toml
+          cargo test --locked --manifest-path zed-cli/Cargo.toml \
+            --lib dart_wiring::tests
+          cargo test --locked --manifest-path zed-cli/Cargo.toml \
+            --lib managed_install::tests
+
+      - name: Build the exact release binary under test
+        run: |
+          set -euo pipefail
+          cargo build --locked --release \
+            --manifest-path zed-cli/Cargo.toml \
+            --bin zed
+          test -x zed-cli/target/release/zed
+          zed-cli/target/release/zed --version
+
+      - name: Run the real Dart durable first-install canary
+        run: |
+          set -o pipefail
+          bash harness/scripts/durable-first-install-dart.sh \
+            "$GITHUB_WORKSPACE/zed-cli/target/release/zed" \
+            "$GITHUB_WORKSPACE/dart-lib" \
+            "$GITHUB_WORKSPACE/dart-app" \
+            "$RUNNER_TEMP/den-1579-dart" \
+            2>&1 | tee "$RUNNER_TEMP/den-1579-dart.log"
+
+      - name: Upload bounded failure diagnostics
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: durable-first-install-dart-${{ matrix.os }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/den-1579-dart.log
+            ${{ runner.temp }}/den-1579-dart/*.log
+            ${{ runner.temp }}/den-1579-dart/**/.zpkg.toml
+            ${{ runner.temp }}/den-1579-dart/**/.zpkg.lock
+            ${{ runner.temp }}/den-1579-dart/**/.zed/pub-deps.yaml
+            ${{ runner.temp }}/den-1579-dart/**/pubspec.lock
+          if-no-files-found: warn
+          retention-days: 7
+          include-hidden-files: true

@@ -1,0 +1,196 @@
+name: zed immutable publication canary
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      zed_cli_ref:
+        description: Immutable zed-cli commit to certify
+        required: false
+        default: 8929a58c6591c7a964d7f91412665d7c8a4afdf3
+
+permissions:
+  contents: read
+
+concurrency:
+  group: zed-publication-immutability-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: "1"
+  ZED_CLI_REF: ${{ github.event.inputs.zed_cli_ref || '8929a58c6591c7a964d7f91412665d7c8a4afdf3' }}
+  ZED_INTERFACES_REF: dc0e0a0620b9462817950b552d3d334a184b1cb1
+
+jobs:
+  build-zed:
+    name: Build immutable zed CLI
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - name: Require immutable component pins
+        run: |
+          set -euo pipefail
+          [[ "$ZED_CLI_REF" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$ZED_INTERFACES_REF" =~ ^[0-9a-f]{40}$ ]]
+
+      - name: Check out zed-cli
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: zed-pkg/zed-cli
+          ref: ${{ env.ZED_CLI_REF }}
+          path: zed-cli
+          fetch-depth: 1
+          persist-credentials: false
+          show-progress: false
+
+      - name: Check out zed-interfaces sibling
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: zed-pkg/zed-interfaces
+          ref: ${{ env.ZED_INTERFACES_REF }}
+          path: zed-interfaces
+          fetch-depth: 1
+          persist-credentials: false
+          show-progress: false
+
+      - name: Install the declared Rust toolchain
+        run: |
+          set -euo pipefail
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+          rustc --version --verbose
+          cargo --version --verbose
+
+      - name: Build release binary once
+        run: |
+          set -euo pipefail
+          cargo build --locked --release --manifest-path zed-cli/Cargo.toml --bin zed
+          install -Dm755 zed-cli/target/release/zed "$RUNNER_TEMP/zed-bin/zed"
+          (cd "$RUNNER_TEMP/zed-bin" && sha256sum zed | tee SHA256SUMS)
+          "$RUNNER_TEMP/zed-bin/zed" --version
+
+      - name: Upload immutable zed binary
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: zed-immutability-cli-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/zed-bin
+          if-no-files-found: error
+          retention-days: 7
+          include-hidden-files: false
+
+  publication-immutability:
+    name: Immutable publish / ${{ matrix.repo }}
+    needs: build-zed
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - repo: node-lib
+            fixture_ref: 222cdf57f48530fce8e6c1f58632d9676203512e
+          - repo: rust-lib
+            fixture_ref: e2382ee42b253ec8741b1aa5d0ebb165bb888257
+    steps:
+      - name: Check out canary harness
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: harness
+          fetch-depth: 1
+          persist-credentials: false
+          show-progress: false
+
+      - name: Require immutable fixture pin
+        env:
+          FIXTURE_REF: ${{ matrix.fixture_ref }}
+        run: |
+          set -euo pipefail
+          [[ "$FIXTURE_REF" =~ ^[0-9a-f]{40}$ ]]
+
+      - name: Check out fixture
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: zed-pkg-test/${{ matrix.repo }}
+          ref: ${{ matrix.fixture_ref }}
+          path: fixture
+          fetch-depth: 1
+          submodules: recursive
+          persist-credentials: false
+          show-progress: false
+
+      - name: Download immutable zed binary
+        uses: actions/download-artifact@974686ed5098c7f9c9289ec946b9058e496a2561 # v8.0.0
+        with:
+          name: zed-immutability-cli-${{ github.run_id }}-${{ github.run_attempt }}
+          path: tooling
+
+      - name: Verify harness and binary
+        env:
+          WORK_ROOT: ${{ runner.temp }}/zed-publication-immutability/${{ matrix.repo }}
+        run: |
+          set -euo pipefail
+          python3 -m py_compile harness/scripts/publication_immutability.py
+          chmod +x tooling/zed
+          (cd tooling && sha256sum --check SHA256SUMS)
+          test ! -e "$WORK_ROOT"
+          tooling/zed --version
+
+      - name: Certify immutable publication behavior
+        env:
+          WORK_ROOT: ${{ runner.temp }}/zed-publication-immutability/${{ matrix.repo }}
+        run: |
+          set -euo pipefail
+          python3 harness/scripts/publication_immutability.py \
+            --fixture-dir fixture \
+            --zed tooling/zed \
+            --work-root "$WORK_ROOT"
+
+      - name: Collect failure diagnostics
+        if: failure()
+        env:
+          WORK_ROOT: ${{ runner.temp }}/zed-publication-immutability/${{ matrix.repo }}
+        run: |
+          set +e
+          mkdir -p "$WORK_ROOT/logs"
+          git -C fixture status --porcelain=v1 --untracked-files=all \
+            > "$WORK_ROOT/logs/fixture-status.txt" 2>&1
+          find "$WORK_ROOT" -maxdepth 9 -printf '%y %P -> %l\n' \
+            | LC_ALL=C sort > "$WORK_ROOT/logs/work-tree.txt" 2>&1
+          find "$WORK_ROOT/registry" -maxdepth 9 -type f -print0 2>/dev/null \
+            | sort -z | xargs -0 -r sha256sum \
+            > "$WORK_ROOT/logs/registry-sha256.txt" 2>&1
+
+      - name: Upload failure diagnostics
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: publication-immutability-${{ matrix.repo }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/zed-publication-immutability/${{ matrix.repo }}
+          if-no-files-found: warn
+          retention-days: 14
+          include-hidden-files: true
+
+  publication-immutability-gate:
+    name: Immutable publication canaries passed
+    if: always()
+    needs: [build-zed, publication-immutability]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Enforce aggregate result
+        env:
+          BUILD_RESULT: ${{ needs.build-zed.result }}
+          CANARY_RESULT: ${{ needs.publication-immutability.result }}
+        run: |
+          set -euo pipefail
+          printf 'build-zed=%s\npublication-immutability=%s\n' \
+            "$BUILD_RESULT" "$CANARY_RESULT"
+          test "$BUILD_RESULT" = success
+          test "$CANARY_RESULT" = success
