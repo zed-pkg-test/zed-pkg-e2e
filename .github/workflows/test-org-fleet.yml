@@ -12,7 +12,9 @@ on:
       - "tests/test-org-fleet.test.mjs"
       - "docs/test-org-fleet.md"
       - ".github/fleet-handoff/START"
+      - ".github/fleet-resume/START"
       - ".github/workflows/apply-test-org-fleet.yml"
+      - ".github/workflows/resume-test-org-fleet.yml"
       - ".github/workflows/secure-fleet-token-handoff.yml"
       - ".github/workflows/test-org-fleet.yml"
   push:
@@ -26,7 +28,9 @@ on:
       - "tests/test-org-fleet.test.mjs"
       - "docs/test-org-fleet.md"
       - ".github/fleet-handoff/START"
+      - ".github/fleet-resume/START"
       - ".github/workflows/apply-test-org-fleet.yml"
+      - ".github/workflows/resume-test-org-fleet.yml"
       - ".github/workflows/secure-fleet-token-handoff.yml"
       - ".github/workflows/test-org-fleet.yml"
   workflow_dispatch:
