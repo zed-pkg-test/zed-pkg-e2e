@@ -1,5 +1,5 @@
 # One-time idempotent recovery for the cross-organization test fleet.
-name: recover test organization fleet v2
+name: recover test organization fleet v3
 
 on:
   push:
@@ -13,7 +13,7 @@ permissions:
 
 concurrency:
   group: apply-test-org-fleet-all
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   authorize:
@@ -33,7 +33,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test "$(tr -d '\r\n' < bootstrap/execute-test-org-fleet-v2.once)" = "APPLY_TEST_FLEET_V2"
+          test "$(tr -d '\r\n' < bootstrap/execute-test-org-fleet-v2.once)" = "APPLY_TEST_FLEET_V3"
           organizations='["zed-pkg-test","3fa-app-test","declarative-migrations-test","cliptown-test","claritas-viz-test","embedded-alerts-test","evento-globolo-test","fiducia-cloud-test","memebank-test","opto-sync-test","quaestor-ledger-test","sonus-auris-test","messaging-intel-test","scintilla-run-test","file-tunnel-test","shared-auth-test","hypesiege-test","streempilot-test"]'
           printf 'organizations=%s\n' "$organizations" >> "$GITHUB_OUTPUT"
 
