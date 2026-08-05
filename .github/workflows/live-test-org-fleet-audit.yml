@@ -54,13 +54,31 @@ jobs:
           persist-credentials: false
           show-progress: false
       - name: Compare all paired organizations with the canonical manifest
+        id: audit
+        continue-on-error: true
         run: node scripts/audit-live-test-org-fleet.mjs --json > live-test-fleet-audit.json
-      - name: Verify a complete machine-readable report was produced
+      - name: Print and enforce the complete machine-readable report
+        if: always()
         run: |
           node - <<'NODE'
           const fs = require('node:fs');
           const report = JSON.parse(fs.readFileSync('live-test-fleet-audit.json', 'utf8'));
+          const summary = {
+            pairCount: report.pairCount,
+            expectedRepositories: report.expectedRepositories,
+            presentRepositories: report.presentRepositories,
+            missingRepositories: report.missingRepositories,
+            extraRepositories: report.extraRepositories,
+            expectedHygieneFindings: report.expectedHygieneFindings,
+            missingByOrganization: Object.fromEntries(
+              report.reports
+                .filter((item) => item.missing.length > 0)
+                .map((item) => [item.testOrganization, item.missing]),
+            ),
+          };
+          console.log(JSON.stringify(summary, null, 2));
           if (report.pairCount !== 18) throw new Error(`expected 18 pairs, saw ${report.pairCount}`);
           if (report.expectedRepositories !== 341) throw new Error(`expected 341 managed repositories, saw ${report.expectedRepositories}`);
           if (report.missingRepositories !== 0) throw new Error(`missing ${report.missingRepositories} canonical repositories`);
+          if (report.expectedHygieneFindings !== 0) throw new Error(`found ${report.expectedHygieneFindings} canonical repository hygiene failures`);
           NODE
