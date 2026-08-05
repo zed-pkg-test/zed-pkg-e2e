@@ -11,6 +11,7 @@ on:
       - "scripts/validate-test-org-fleet.mjs"
       - "tests/test-org-fleet.test.mjs"
       - "tests/git-transport-worktree.test.mjs"
+      - "tests/fleet-recovery-control.test.mjs"
       - "docs/test-org-fleet.md"
       - ".github/fleet-cancel/START"
       - ".github/fleet-handoff/START"
@@ -32,6 +33,7 @@ on:
       - "scripts/validate-test-org-fleet.mjs"
       - "tests/test-org-fleet.test.mjs"
       - "tests/git-transport-worktree.test.mjs"
+      - "tests/fleet-recovery-control.test.mjs"
       - "docs/test-org-fleet.md"
       - ".github/fleet-cancel/START"
       - ".github/fleet-handoff/START"
@@ -72,7 +74,7 @@ jobs:
         run: node scripts/validate-test-org-fleet.mjs
 
       - name: Run fleet contract tests
-        run: node --test tests/test-org-fleet.test.mjs tests/git-transport-worktree.test.mjs
+        run: node --test tests/test-org-fleet.test.mjs tests/git-transport-worktree.test.mjs tests/fleet-recovery-control.test.mjs
 
       - name: Prove dry run is write-free
         run: |
