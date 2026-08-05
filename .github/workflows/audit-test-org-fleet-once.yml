@@ -8,6 +8,7 @@ on:
       - ".github/workflows/audit-test-org-fleet-once.yml"
       - "bootstrap/audit-test-org-fleet.once"
       - "scripts/audit-test-org-fleet.mjs"
+      - "scripts/audit-test-org-fleet-live.mjs"
       - "tests/audit-test-org-fleet.test.mjs"
 
 permissions:
@@ -35,7 +36,8 @@ jobs:
           set -euo pipefail
           test "$(tr -d '\r\n' < bootstrap/audit-test-org-fleet.once)" = "AUDIT_TEST_FLEET_V1"
           node --check scripts/audit-test-org-fleet.mjs
-          node scripts/audit-test-org-fleet.mjs --plan-json > /tmp/test-org-fleet-audit-plan.json
+          node --check scripts/audit-test-org-fleet-live.mjs
+          node scripts/audit-test-org-fleet-live.mjs --plan-json > /tmp/test-org-fleet-audit-plan.json
           node --test tests/audit-test-org-fleet.test.mjs
           jq -e '
             .organizations == 18
@@ -57,7 +59,7 @@ jobs:
         shell: bash
         run: |
           set +e
-          node scripts/audit-test-org-fleet.mjs \
+          node scripts/audit-test-org-fleet-live.mjs \
             --output /tmp/test-org-fleet-live-audit.json \
             --markdown /tmp/test-org-fleet-live-audit.md
           status=$?
