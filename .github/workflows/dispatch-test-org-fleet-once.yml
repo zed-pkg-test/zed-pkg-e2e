@@ -1,0 +1,50 @@
+# One-time control-plane trigger. Remove after the fleet apply run has started.
+name: dispatch test organization fleet once
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - bootstrap/execute-test-org-fleet.once
+
+permissions:
+  actions: write
+  contents: read
+
+concurrency:
+  group: dispatch-test-org-fleet-once
+  cancel-in-progress: false
+
+jobs:
+  dispatch:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Check out the execution marker
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          show-progress: false
+
+      - name: Validate the one-time authorization marker
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(tr -d '\r\n' < bootstrap/execute-test-org-fleet.once)" = "APPLY_TEST_FLEET"
+
+      - name: Dispatch the merged fleet executor
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          gh workflow run apply-test-org-fleet.yml \
+            --repo "$GH_REPO" \
+            --ref main \
+            -f organization=all \
+            -f authentication=auto \
+            -f confirm=APPLY_TEST_FLEET
+
+          echo "Dispatched apply-test-org-fleet.yml for all in-scope organizations." >> "$GITHUB_STEP_SUMMARY"
