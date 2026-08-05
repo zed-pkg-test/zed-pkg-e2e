@@ -60,12 +60,16 @@ test('bootstrap dry run is deterministic and write-free', () => {
   assert.equal(summary.pullRequests, 0);
 });
 
-test('no-PAT apply workflow covers every test organization with least privilege', () => {
+test('secret-backed apply workflow covers every test organization and never embeds a credential', () => {
   const workflowPath = path.join(root, '.github', 'workflows', 'apply-test-org-fleet.yml');
+  const documentationPath = path.join(root, 'docs', 'test-org-fleet-app-auth.md');
   const workflow = fs.readFileSync(workflowPath, 'utf8');
+  const documentation = fs.readFileSync(documentationPath, 'utf8');
+
   for (const pair of manifest.pairs) {
     assert.equal(workflow.includes(`- ${pair.testOrg}`), true, `missing ${pair.testOrg}`);
   }
+
   assert.equal(workflow.toLowerCase().includes('r2g-test'), false);
   assert.match(workflow, /actions\/create-github-app-token@[0-9a-f]{40}/);
   assert.match(workflow, /permission-administration: write/);
@@ -73,5 +77,14 @@ test('no-PAT apply workflow covers every test organization with least privilege'
   assert.match(workflow, /permission-metadata: read/);
   assert.match(workflow, /permission-pull-requests: write/);
   assert.match(workflow, /permission-workflows: write/);
+  assert.match(workflow, /secrets\.FLEET_GH_TOKEN/);
+  assert.match(workflow, /authentication:\n[\s\S]*?- auto\n[\s\S]*?- pat\n[\s\S]*?- github-app/);
   assert.match(workflow, /APPLY_TEST_FLEET/);
+  assert.match(workflow, /GH_TOKEN=%s/);
+  assert.match(documentation, /Actions secret `FLEET_GH_TOKEN`/);
+
+  const credentialLiteral = /(?:ghp_|github_pat_)[A-Za-z0-9_]{20,}/;
+  assert.equal(credentialLiteral.test(workflow), false);
+  assert.equal(credentialLiteral.test(documentation), false);
+  assert.doesNotMatch(workflow, /^\s+(?:token|pat):\s*$/m);
 });
