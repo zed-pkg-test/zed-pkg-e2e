@@ -1,0 +1,56 @@
+`${generatedHeader('<!--')} -->\n# ${pair.testOrg} governance\n\nCommunity health, reusable workflow policy, and fleet conventions for ${pair.testOrg}.\n`],
+    ['SECURITY.md', `${generatedHeader('<!--')} -->\n# Security policy\n\nDo not commit access tokens, production credentials, raw biometric material, unencrypted private media, or unredacted message content. Reproduce security failures with synthetic fixtures. Pull-request jobs must be credential-free; private cross-organization integration uses the organization-managed \`TEST_FLEET_READ_TOKEN\` only in gated workflows.\n`],
+    ['CONTRIBUTING.md', `${generatedHeader('<!--')} -->\n# Contributing\n\nKeep source dependencies pinned to immutable 40-character commits. Exercise at least one real dependency lane (submodule, Zed, or native package) and preserve the generated contract. Add product assertions rather than replacing contract checks with no-op smoke tests.\n`],
+    ['pull_request_template.md', `${generatedHeader('<!--')} -->\n## Test surface\n- [ ] Source commits are immutable\n- [ ] Product assertions execute\n- [ ] Failure and recovery paths execute\n- [ ] Logs contain no secrets or raw private media\n- [ ] Emulator/browser/database matrices are justified\n`],
+    ['.github/workflows/reusable-plan-contract.yml', `${generatedHeader('#')}\nname: reusable generated plan contract\n\non:\n  workflow_call:\n\npermissions:\n  contents: read\n\njobs:\n  validate:\n    runs-on: ubuntu-24.04\n    timeout-minutes: 10\n    steps:\n      - uses: actions/checkout@${CHECKOUT_SHA} # v7.0.1\n        with:\n          persist-credentials: false\n          show-progress: false\n          submodules: false\n      - run: node scripts/validate-plan.mjs\n`],
+  ]);
+}
+
+async function ensureBranch(owner, repository, branchName) {
+  const defaultBranch = repository.default_branch || manifest.policy.defaultBranch;
+  const baseRef = await api('GET', `/repos/${route(owner)}/${route(repository.name)}/git/ref/heads/${route(defaultBranch)}`);
+  let branchRef = await api('GET', `/repos/${route(owner)}/${route(repository.name)}/git/ref/heads/${route(branchName)}`, undefined, { allow404: true });
+  if (!branchRef) {
+    branchRef = await api('POST', `/repos/${route(owner)}/${route(repository.name)}/git/refs`, { ref: `refs/heads/${branchName}`, sha: baseRef.object.sha });
+    log('created branch', { repository: `${owner}/${repository.name}`, branch: branchName });
+  }
+  return { branchRef, defaultBranch };
+}
+
+async function writeTree(owner, repository, branchName, files, gitlinks, commitMessage) {
+  if (!options.apply || repository._planned) return false;
+  const { branchRef, defaultBranch } = await ensureBranch(owner, repository, branchName);
+  const headSha = branchRef.object.sha;
+  const headCommit = await api('GET', `/repos/${route(owner)}/${route(repository.name)}/git/commits/${headSha}`);
+  const treeEntries = [];
+  for (const [filePath, content] of files.entries()) {
+    const blob = await api('POST', `/repos/${route(owner)}/${route(repository.name)}/git/blobs`, { content, encoding: 'utf-8' });
+    treeEntries.push({ path: filePath, mode: '100644', type: 'blob', sha: blob.sha });
+  }
+  treeEntries.push(...gitlinks);
+  const tree = await api('POST', `/repos/${route(owner)}/${route(repository.name)}/git/trees`, { base_tree: headCommit.tree.sha, tree: treeEntries });
+  if (tree.sha === headCommit.tree.sha) {
+    stats.noChange += 1;
+    log('no generated changes', { repository: `${owner}/${repository.name}` });
+    return { changed: false, defaultBranch };
+  }
+  const commit = await api('POST', `/repos/${route(owner)}/${route(repository.name)}/git/commits`, { message: commitMessage, tree: tree.sha, parents: [headSha] });
+  await api('PATCH', `/repos/${route(owner)}/${route(repository.name)}/git/refs/heads/${route(branchName)}`, { sha: commit.sha, force: false });
+  stats.committed += 1;
+  log('pushed generated commit', { repository: `${owner}/${repository.name}`, branch: branchName, commit: commit.sha });
+  return { changed: true, defaultBranch };
+}
+
+async function ensurePullRequest(owner, repository, branchName, base, title, body) {
+  if (!options.apply || repository._planned) return;
+  const pulls = await api('GET', `/repos/${route(owner)}/${route(repository.name)}/pulls?state=open&head=${encodeURIComponent(`${owner}:${branchName}`)}`);
+  if (pulls.length) {
+    log('draft pull request already open', { repository: `${owner}/${repository.name}`, number: pulls[0].number });
+    return;
+  }
+  const pull = await api('POST', `/repos/${route(owner)}/${route(repository.name)}/pulls`, { title, head: branchName, base, body, draft: true });
+  stats.pullRequests += 1;
+  log('opened draft pull request', { repository: `${owner}/${repository.name}`, number: pull.number });
+}
+
+async function ens
