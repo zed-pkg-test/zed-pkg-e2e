@@ -44,10 +44,26 @@ async function writeTree(owner, repository, branchName, files, gitlinks, commitM
 async function ensurePullRequest(owner, repository, branchName, base, title, body) {
   if (!options.apply || repository._planned) return;
   const pulls = await api('GET', `/repos/${route(owner)}/${route(repository.name)}/pulls?state=open&head=${encodeURIComponent(`${owner}:${branchName}`)}`);
-  if (pulls.length) {
-    log('draft pull request already open', { repository: `${owner}/${repository.name}`, number: pulls[0].number });
+  const matching = pulls
+    .filter((pull) => pull.head?.ref === branchName && pull.base?.ref === base)
+    .sort((left, right) => left.number - right.number);
+  const drafts = matching.filter((pull) => pull.draft === true);
+
+  if (drafts.length) {
+    const keeper = drafts[0];
+    for (const duplicate of matching.filter((pull) => pull.number !== keeper.number)) {
+      await api('PATCH', `/repos/${route(owner)}/${route(repository.name)}/pulls/${duplicate.number}`, { state: 'closed' });
+      log('closed duplicate generated pull request', { repository: `${owner}/${repository.name}`, number: duplicate.number, keeper: keeper.number });
+    }
+    log('draft pull request already open', { repository: `${owner}/${repository.name}`, number: keeper.number });
     return;
   }
+
+  for (const nonDraft of matching) {
+    await api('PATCH', `/repos/${route(owner)}/${route(repository.name)}/pulls/${nonDraft.number}`, { state: 'closed' });
+    log('closed non-draft generated pull request', { repository: `${owner}/${repository.name}`, number: nonDraft.number });
+  }
+
   const pull = await api('POST', `/repos/${route(owner)}/${route(repository.name)}/pulls`, { title, head: branchName, base, body, draft: true });
   stats.pullRequests += 1;
   log('opened draft pull request', { repository: `${owner}/${repository.name}`, number: pull.number });
