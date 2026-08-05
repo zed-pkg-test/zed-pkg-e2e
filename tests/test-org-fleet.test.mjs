@@ -59,3 +59,19 @@ test('bootstrap dry run is deterministic and write-free', () => {
   assert.equal(summary.committed, 0);
   assert.equal(summary.pullRequests, 0);
 });
+
+test('no-PAT apply workflow covers every test organization with least privilege', () => {
+  const workflowPath = path.join(root, '.github', 'workflows', 'apply-test-org-fleet.yml');
+  const workflow = fs.readFileSync(workflowPath, 'utf8');
+  for (const pair of manifest.pairs) {
+    assert.equal(workflow.includes(`- ${pair.testOrg}`), true, `missing ${pair.testOrg}`);
+  }
+  assert.equal(workflow.toLowerCase().includes('r2g-test'), false);
+  assert.match(workflow, /actions\/create-github-app-token@[0-9a-f]{40}/);
+  assert.match(workflow, /permission-administration: write/);
+  assert.match(workflow, /permission-contents: write/);
+  assert.match(workflow, /permission-metadata: read/);
+  assert.match(workflow, /permission-pull-requests: write/);
+  assert.match(workflow, /permission-workflows: write/);
+  assert.match(workflow, /APPLY_TEST_FLEET/);
+});
