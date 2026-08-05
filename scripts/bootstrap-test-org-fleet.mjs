@@ -7,5 +7,44 @@ const root = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..')
 const partsDir = path.join(root, 'scripts', 'bootstrap-test-org-fleet.parts');
 let source = fs.readdirSync(partsDir).sort().map((name) => fs.readFileSync(path.join(partsDir, name), 'utf8')).join('');
 source = source.replace(/^#![^\n]*\n/, '');
+
+// Harden the generated source at its stable API seam. The source is split into
+// retained parts for connector-size limits, so keeping this transformation in
+// the small launcher makes the retry policy auditable and easy to update.
+const originalAttemptLoop = 'for (let attempt = 0; attempt < 5; attempt += 1) {';
+const hardenedAttemptLoop = 'for (let attempt = 0; attempt < 9; attempt += 1) {';
+const originalRetryBlock = `    if ((response.status === 429 || response.status >= 500) && attempt < 4) {
+      const retryAfter = Number(response.headers.get('retry-after') ?? 0);
+      await new Promise((resolve) => setTimeout(resolve, Math.max(retryAfter * 1000, 500 * (2 ** attempt))));
+      continue;
+    }`;
+const hardenedRetryBlock = `    const secondaryRateLimit = response.status === 403
+      && /secondary rate limit|temporarily blocked from content creation|abuse detection/i.test(text);
+    if ((secondaryRateLimit || response.status === 429 || response.status >= 500) && attempt < 8) {
+      const retryAfterSeconds = Number(response.headers.get('retry-after') ?? 0);
+      const resetEpochSeconds = Number(response.headers.get('x-ratelimit-reset') ?? 0);
+      const resetDelayMs = resetEpochSeconds > 0
+        ? Math.max(0, (resetEpochSeconds * 1000) - Date.now())
+        : 0;
+      const exponentialDelayMs = secondaryRateLimit
+        ? Math.min(240000, 15000 * (2 ** attempt))
+        : Math.min(60000, 1000 * (2 ** attempt));
+      const retryDelayMs = Math.max(retryAfterSeconds * 1000, resetDelayMs, exponentialDelayMs);
+      log('retrying GitHub API request after rate limit', {
+        method,
+        endpoint,
+        status: response.status,
+        attempt: attempt + 1,
+        retryDelayMs,
+      });
+      await new Promise((resolve) => setTimeout(resolve, retryDelayMs));
+      continue;
+    }`;
+
+if (!source.includes(originalAttemptLoop)) throw new Error('generated bootstrap attempt-loop seam changed');
+if (!source.includes(originalRetryBlock)) throw new Error('generated bootstrap retry seam changed');
+source = source.replace(originalAttemptLoop, hardenedAttemptLoop);
+source = source.replace(originalRetryBlock, hardenedRetryBlock);
+
 process.env.TEST_ORG_FLEET_REPO_ROOT = root;
 await import(`data:text/javascript;base64,${Buffer.from(source).toString('base64')}`);
