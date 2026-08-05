@@ -14,7 +14,8 @@ test('secondary rate limits do not inherit a non-exhausted primary reset timesta
   assert.doesNotMatch(launcher, /const resetDelayMs = resetEpochSeconds > 0\s*\?/);
 });
 
-test('rate-limit logs expose remaining primary quota without exposing credentials', () => {
+test('rate-limit logs expose quota state while git errors redact the token', () => {
   assert.match(launcher, /primaryRemaining,/);
-  assert.doesNotMatch(launcher, /Authorization: `Bearer \$\{token\}`[^]*log\(/);
+  assert.match(launcher, /raw\.replaceAll\(token, '\*\*\*'\)/);
+  assert.doesNotMatch(launcher, /log\([^\n]*token/);
 });
