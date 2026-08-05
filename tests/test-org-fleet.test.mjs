@@ -114,7 +114,7 @@ test('fleet apply serializes organizations and retries GitHub secondary content 
   assert.match(launcher, /attempt < 14/);
   assert.match(launcher, /secondary rate limit\|temporarily blocked from content creation\|abuse detection/);
   assert.match(launcher, /x-ratelimit-reset/);
-  assert.match(launcher, /Math\.min\(300000, 15000 \* \(2 \*\* attempt\)\)/);
+  assert.match(launcher, /Math\.min\(180000, 15000 \* \(2 \*\* attempt\)\)/);
   assert.match(launcher, /retrying GitHub API request after rate limit/);
 });
 
