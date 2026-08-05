@@ -10,6 +10,20 @@ const root = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..')
 const manifestPath = path.join(root, 'bootstrap', 'test-org-fleet.json.gz');
 const manifest = readFleetManifest(manifestPath);
 const credentialLiteral = /(?:ghp_|github_pat_)[A-Za-z0-9_]{20,}/;
+const interruptedOrganizations = [
+  'evento-globolo-test',
+  'fiducia-cloud-test',
+  'sonus-auris-test',
+  'messaging-intel-test',
+  'quaestor-ledger-test',
+  'opto-sync-test',
+  'memebank-test',
+  'file-tunnel-test',
+  'scintilla-run-test',
+  'streempilot-test',
+  'shared-auth-test',
+  'hypesiege-test',
+];
 
 test('fleet contains the intended organization pairs and never r2g', () => {
   assert.equal(manifest.pairs.length, 18);
@@ -97,11 +111,43 @@ test('fleet apply serializes organizations and retries GitHub secondary content 
 
   assert.match(workflow, /timeout-minutes: 90/);
   assert.match(workflow, /max-parallel: 1/);
-  assert.match(launcher, /attempt < 9/);
+  assert.match(launcher, /attempt < 14/);
   assert.match(launcher, /secondary rate limit\|temporarily blocked from content creation\|abuse detection/);
   assert.match(launcher, /x-ratelimit-reset/);
-  assert.match(launcher, /Math\.min\(240000, 15000 \* \(2 \*\* attempt\)\)/);
+  assert.match(launcher, /Math\.min\(300000, 15000 \* \(2 \*\* attempt\)\)/);
   assert.match(launcher, /retrying GitHub API request after rate limit/);
+});
+
+test('generated harness branches use authenticated git transport instead of REST blob fan-out', () => {
+  const launcherPath = path.join(root, 'scripts', 'bootstrap-test-org-fleet.mjs');
+  const launcher = fs.readFileSync(launcherPath, 'utf8');
+
+  assert.match(launcher, /spawnSync\('git'/);
+  assert.match(launcher, /GIT_ASKPASS_REQUIRE: 'force'/);
+  assert.match(launcher, /\['push', '--quiet', 'origin'/);
+  assert.match(launcher, /update-index/);
+  assert.match(launcher, /--cacheinfo/);
+  assert.match(launcher, /TEST_ORG_FLEET_SKIP_TOPICS/);
+  assert.match(launcher, /pushed generated commit with git transport/);
+  assert.equal(credentialLiteral.test(launcher), false);
+});
+
+test('one-time recovery resumes exactly the interrupted organizations in serial', () => {
+  const workflowPath = path.join(root, '.github', 'workflows', 'resume-test-org-fleet.yml');
+  const workflow = fs.readFileSync(workflowPath, 'utf8');
+  const listedOrganizations = [...workflow.matchAll(/^\s+- ([a-z0-9-]+-test)$/gm)].map((match) => match[1]);
+
+  assert.deepEqual(listedOrganizations, interruptedOrganizations);
+  assert.equal(workflow.toLowerCase().includes('r2g-test'), false);
+  assert.equal(credentialLiteral.test(workflow), false);
+  assert.match(workflow, /push:\n\s+branches: \[main\]/);
+  assert.match(workflow, /timeout-minutes: 120/);
+  assert.match(workflow, /max-parallel: 1/);
+  assert.match(workflow, /secrets\.FLEET_GH_TOKEN/);
+  assert.match(workflow, /TEST_ORG_FLEET_SKIP_TOPICS: "true"/);
+  assert.match(workflow, /--apply/);
+  assert.match(workflow, /--concurrency 1/);
+  assert.doesNotMatch(workflow, /workflow_dispatch:/);
 });
 
 test('one-time handoff persists only ciphertext and dispatches the secret-backed fleet workflow', () => {
