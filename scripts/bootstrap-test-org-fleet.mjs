@@ -122,13 +122,18 @@ esac
     if (filePaths.length) runGit(['add', '--', ...filePaths]);
 
     for (const gitlink of gitlinks) {
-      fs.rmSync(path.join(worktree, gitlink.path), { recursive: true, force: true });
+      const gitlinkPath = path.join(worktree, gitlink.path);
+      fs.rmSync(gitlinkPath, { recursive: true, force: true });
       runGit([
         'update-index',
         '--add',
         '--cacheinfo',
         `${gitlink.mode},${gitlink.sha},${gitlink.path}`,
       ]);
+      // Git represents a checked-out submodule as a gitlink plus a directory.
+      // Recreate the empty directory so an unchanged gitlink is not reported as
+      // an unstaged deletion during an idempotent recovery pass.
+      fs.mkdirSync(gitlinkPath, { recursive: true });
     }
 
     if (!runGit(['status', '--porcelain=v1', '--untracked-files=no']).stdout.trim()) {
