@@ -1,0 +1,171 @@
+name: current-main native lockfile provenance
+
+on:
+  pull_request:
+  push:
+    branches:
+      - agent/den-1565-native-lock-canary-current-main-v2
+  workflow_dispatch:
+    inputs:
+      zed_interfaces_ref:
+        description: Immutable zed-interfaces commit to certify
+        required: false
+        default: a23cdd2ac509a39ca6fd6d21a3774fdd3a0f7660
+
+permissions:
+  contents: read
+
+concurrency:
+  group: current-main-native-lock-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: "1"
+  ZED_INTERFACES_REF: ${{ github.event.inputs.zed_interfaces_ref || 'a23cdd2ac509a39ca6fd6d21a3774fdd3a0f7660' }}
+  ZED_CLI_REF: d0f70105d13ff1d3fddf7671bac50940f14d69a6
+  ZED_API_REF: 4eaacda14d5c5e38b81404415631e364ac7bdb2c
+  ZED_WEB_REF: eb2fabc7a6c22333dcb89e5a629bab7679d76af0
+
+jobs:
+  native-lockfile-provenance:
+    name: Schema, external consumer, and current Rust applications
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - name: Require immutable pins
+        run: |
+          set -euo pipefail
+          for value in "$ZED_INTERFACES_REF" "$ZED_CLI_REF" "$ZED_API_REF" "$ZED_WEB_REF"; do
+            [[ "$value" =~ ^[0-9a-f]{40}$ ]]
+          done
+
+      - name: Check out canary harness
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: harness
+          persist-credentials: false
+          show-progress: false
+
+      - name: Check out exact zed-interfaces candidate
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: zed-pkg/zed-interfaces
+          ref: ${{ env.ZED_INTERFACES_REF }}
+          path: zed-interfaces
+          persist-credentials: false
+          show-progress: false
+
+      - name: Check out exact current applications
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: zed-pkg/zed-cli
+          ref: ${{ env.ZED_CLI_REF }}
+          path: zed-cli
+          persist-credentials: false
+          show-progress: false
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: zed-pkg/zed-api-server.rs
+          ref: ${{ env.ZED_API_REF }}
+          path: zed-api-server.rs
+          persist-credentials: false
+          show-progress: false
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: zed-pkg/zed-web-server.rs
+          ref: ${{ env.ZED_WEB_REF }}
+          path: zed-web-server.rs
+          persist-credentials: false
+          show-progress: false
+
+      - name: Install stable Rust
+        uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30
+        with:
+          toolchain: stable
+          components: rustfmt,clippy
+
+      - name: Verify exact interface contract and schema
+        run: |
+          set -euo pipefail
+          cd zed-interfaces
+          cargo fmt --all -- --check
+          test -s schemas/lockfile.json
+          cp schemas/lockfile.json "$RUNNER_TEMP/lockfile.checked-in.json"
+          cargo run --locked --example generate_schemas
+          git diff --exit-code -- schemas/lockfile.json
+          cmp "$RUNNER_TEMP/lockfile.checked-in.json" schemas/lockfile.json
+          sha256sum schemas/lockfile.json | tee "$RUNNER_TEMP/lockfile-schema.sha256"
+          cargo test --locked --all-targets
+          cargo clippy --locked --all-targets --all-features -- -D warnings
+          git diff --check
+
+      - name: Compile and execute external consumer offline
+        run: |
+          set -euo pipefail
+          fixture=harness/fixtures/native-lockfile-consumer
+          cargo generate-lockfile --offline --manifest-path "$fixture/Cargo.toml"
+          cargo run --locked --offline --manifest-path "$fixture/Cargo.toml"
+
+      - name: Compile current CLI against the exact interface candidate
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          path = Path('zed-cli/Cargo.toml')
+          source = path.read_text(encoding='utf-8')
+          updated, count = re.subn(
+              r'zed-interfaces\s*=\s*\{[^\n]+\}',
+              'zed-interfaces = { path = "../zed-interfaces" }',
+              source,
+              count=1,
+          )
+          if count != 1:
+              raise SystemExit('expected one zed-interfaces dependency declaration')
+          path.write_text(updated, encoding='utf-8')
+          PY
+          cargo check --manifest-path zed-cli/Cargo.toml --all-targets
+          cargo test --manifest-path zed-cli/Cargo.toml --all-targets --no-run
+
+      - name: Compile current API and web servers
+        run: |
+          set -euo pipefail
+          cargo check --manifest-path zed-api-server.rs/Cargo.toml --workspace --all-targets
+          cargo check --manifest-path zed-web-server.rs/Cargo.toml --all-targets
+
+      - name: Capture certification evidence
+        if: always()
+        run: |
+          set +e
+          evidence="$RUNNER_TEMP/native-lockfile-provenance-evidence"
+          mkdir -p "$evidence/interfaces" "$evidence/consumer" "$evidence/cli" "$evidence/api" "$evidence/web"
+          cp zed-interfaces/schemas/lockfile.json "$evidence/interfaces/" 2>/dev/null
+          cp "$RUNNER_TEMP/lockfile-schema.sha256" "$evidence/interfaces/" 2>/dev/null
+          cp harness/fixtures/native-lockfile-consumer/Cargo.lock "$evidence/consumer/" 2>/dev/null
+          git -C zed-interfaces status --porcelain=v1 --untracked-files=all > "$evidence/interfaces/status.txt" 2>&1
+          git -C zed-cli diff -- Cargo.toml Cargo.lock > "$evidence/cli/path-dependency.patch" 2>&1
+          git -C zed-cli status --porcelain=v1 --untracked-files=all > "$evidence/cli/status.txt" 2>&1
+          git -C zed-api-server.rs status --porcelain=v1 --untracked-files=all > "$evidence/api/status.txt" 2>&1
+          git -C zed-web-server.rs status --porcelain=v1 --untracked-files=all > "$evidence/web/status.txt" 2>&1
+          printf '%s\n' "$ZED_INTERFACES_REF" > "$evidence/interfaces/commit.txt"
+          printf '%s\n' "$ZED_CLI_REF" > "$evidence/cli/commit.txt"
+          printf '%s\n' "$ZED_API_REF" > "$evidence/api/commit.txt"
+          printf '%s\n' "$ZED_WEB_REF" > "$evidence/web/commit.txt"
+
+      - name: Upload certification evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: current-main-native-lock-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/native-lockfile-provenance-evidence
+          if-no-files-found: warn
+          retention-days: 14
+          include-hidden-files: false
