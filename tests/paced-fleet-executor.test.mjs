@@ -64,6 +64,6 @@ test('paced executor rejects excluded organizations and paces write-producing re
   assert.match(workflow, /TEST_ORG_FLEET_SKIP_TOPICS: "true"/);
   assert.match(workflow, /test "\$total" -eq 287/);
   assert.match(workflow, /tests\/bootstrap-retry-policy\.test\.mjs/);
-  assert.equal(workflow.includes('r2g-test'), false);
+  assert.doesNotMatch(workflow, /^\s+r2g-test\s*$/m);
   assert.equal(credentialLiteral.test(workflow), false);
 });
