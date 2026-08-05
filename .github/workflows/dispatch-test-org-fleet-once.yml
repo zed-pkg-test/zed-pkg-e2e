@@ -1,4 +1,4 @@
-# One-time control-plane trigger. Remove after the fleet apply run has started.
+# One-time control-plane trigger. Remove after the fixed fleet apply has started.
 name: dispatch test organization fleet once
 
 on:
@@ -6,20 +6,24 @@ on:
     branches:
       - main
     paths:
-      - bootstrap/execute-test-org-fleet.once
+      - bootstrap/execute-test-org-fleet-v2.once
 
 permissions:
   actions: write
   contents: read
 
 concurrency:
-  group: dispatch-test-org-fleet-once
+  group: dispatch-test-org-fleet-once-v2
   cancel-in-progress: false
 
 jobs:
   dispatch:
     runs-on: ubuntu-24.04
-    timeout-minutes: 5
+    timeout-minutes: 10
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      STALE_RUN_IDS: "30972717804 30973196337"
     steps:
       - name: Check out the execution marker
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -31,20 +35,44 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test "$(tr -d '\r\n' < bootstrap/execute-test-org-fleet.once)" = "APPLY_TEST_FLEET"
+          test "$(tr -d '\r\n' < bootstrap/execute-test-org-fleet-v2.once)" = "APPLY_TEST_FLEET_V2"
 
-      - name: Dispatch the merged fleet executor
+      - name: Wait for superseded fleet writers to stop
         shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
-          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          read -r -a run_ids <<< "$STALE_RUN_IDS"
+
+          for run_id in "${run_ids[@]}"; do
+            endpoint="repos/$GH_REPO/actions/runs/$run_id"
+            stopped=false
+            for _ in $(seq 1 150); do
+              status="$(gh api "$endpoint" --jq '.status')"
+              conclusion="$(gh api "$endpoint" --jq '.conclusion // ""')"
+              if [[ "$status" == "completed" ]]; then
+                echo "Superseded run $run_id is complete: ${conclusion:-unknown}"
+                stopped=true
+                break
+              fi
+              sleep 2
+            done
+
+            if [[ "$stopped" != true ]]; then
+              echo "::error::Superseded run $run_id is still active"
+              exit 1
+            fi
+          done
+
+      - name: Dispatch the fixed all-organization fleet executor
+        shell: bash
         run: |
           set -euo pipefail
           gh workflow run apply-test-org-fleet.yml \
             --repo "$GH_REPO" \
             --ref main \
             -f organization=all \
-            -f authentication=auto \
+            -f authentication=pat \
+            -f repository= \
             -f confirm=APPLY_TEST_FLEET
 
-          echo "Dispatched apply-test-org-fleet.yml for all in-scope organizations." >> "$GITHUB_STEP_SUMMARY"
+          echo "Dispatched the fixed apply-test-org-fleet.yml for all in-scope organizations." >> "$GITHUB_STEP_SUMMARY"
