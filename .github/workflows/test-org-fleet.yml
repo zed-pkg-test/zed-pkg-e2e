@@ -7,12 +7,15 @@ on:
       - "bootstrap/test-org-fleet.json.gz.b64.parts/**"
       - "scripts/bootstrap-test-org-fleet.mjs"
       - "scripts/bootstrap-test-org-fleet.parts/**"
+      - "scripts/export-test-org-fleet-index.mjs"
       - "scripts/read-fleet-manifest.mjs"
       - "scripts/validate-test-org-fleet.mjs"
       - "tests/test-org-fleet.test.mjs"
       - "tests/generated-plan-validator-gitlinks.test.mjs"
+      - "tests/export-test-org-fleet-index.test.mjs"
       - "tests/idempotent-fleet-pr-repair.test.mjs"
       - "docs/test-org-fleet.md"
+      - "docs/test-org-fleet-index.md"
       - ".github/fleet-handoff/START"
       - ".github/fleet-resume/START"
       - ".github/workflows/apply-test-org-fleet.yml"
@@ -25,12 +28,15 @@ on:
       - "bootstrap/test-org-fleet.json.gz.b64.parts/**"
       - "scripts/bootstrap-test-org-fleet.mjs"
       - "scripts/bootstrap-test-org-fleet.parts/**"
+      - "scripts/export-test-org-fleet-index.mjs"
       - "scripts/read-fleet-manifest.mjs"
       - "scripts/validate-test-org-fleet.mjs"
       - "tests/test-org-fleet.test.mjs"
       - "tests/generated-plan-validator-gitlinks.test.mjs"
+      - "tests/export-test-org-fleet-index.test.mjs"
       - "tests/idempotent-fleet-pr-repair.test.mjs"
       - "docs/test-org-fleet.md"
+      - "docs/test-org-fleet-index.md"
       - ".github/fleet-handoff/START"
       - ".github/fleet-resume/START"
       - ".github/workflows/apply-test-org-fleet.yml"
@@ -60,6 +66,7 @@ jobs:
       - name: Parse scripts
         run: |
           node --check scripts/bootstrap-test-org-fleet.mjs
+          node --check scripts/export-test-org-fleet-index.mjs
           node --check scripts/validate-test-org-fleet.mjs
 
       - name: Validate manifest
@@ -70,7 +77,20 @@ jobs:
           node --test \
             tests/test-org-fleet.test.mjs \
             tests/generated-plan-validator-gitlinks.test.mjs \
+            tests/export-test-org-fleet-index.test.mjs \
             tests/idempotent-fleet-pr-repair.test.mjs
+
+      - name: Export canonical repository index
+        run: |
+          node scripts/export-test-org-fleet-index.mjs > /tmp/canonical-test-fleet-index.json
+          node -e 'const p=require("/tmp/canonical-test-fleet-index.json"); if(p.expectedRepositoryCount!==341||p.managedRepositoryCount!==319||p.retainedRepositoryCount!==22) process.exit(1)'
+          {
+            echo '### Canonical paired test-fleet index'
+            echo
+            echo '```json'
+            cat /tmp/canonical-test-fleet-index.json
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Prove dry run is write-free
         run: |
