@@ -31,7 +31,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test "$(tr -d '\r\n' < bootstrap/execute-test-org-fleet-single-runner.once)" = "APPLY_TEST_FLEET_SINGLE_RUNNER_V2"
+          test "$(tr -d '\r\n' < bootstrap/execute-test-org-fleet-single-runner.once)" = "APPLY_TEST_FLEET_SINGLE_RUNNER_V3"
           node --check scripts/bootstrap-test-org-fleet.mjs
           node --check scripts/bootstrap-test-org-fleet-worktree-safe.mjs
           node --check scripts/validate-test-org-fleet.mjs
