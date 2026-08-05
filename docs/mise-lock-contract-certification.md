@@ -1,22 +1,24 @@
 # Complete current `mise.lock` certification
 
-This suite independently certifies the exact current-main `zed-pkg/zed-cli` candidate implementing the complete current project-local `mise.lock` identity contract. The workflow pins a full commit SHA and never follows a mutable branch.
+This suite independently certifies the exact current `zed-pkg/zed-cli` product head implementing the complete project-local `mise.lock` identity contract. The workflow pins full commit SHAs and never follows a mutable branch during a run.
 
-## Immutable candidate
+## Immutable product under test
 
-Implementation PR: `zed-pkg/zed-cli#120`
+The reviewed contract merged through `zed-pkg/zed-cli#109`. The later reconstruction PR `zed-pkg/zed-cli#120` closed without merge and is not a product authority.
 
 Pinned CLI head:
 
 ```text
-82ed67aaa98495b5aa85faef1d25671373eb1991
+7977b1d43231a68e1ac34903e0f18cef5135add6
 ```
 
-Pinned interface head:
+Pinned interface dependency declared by that exact CLI head:
 
 ```text
-c2e049006453c26ca8ca291783f681fce75cb01f
+a23cdd2ac509a39ca6fd6d21a3774fdd3a0f7660
 ```
+
+The workflow verifies both immutable pins against `Cargo.toml` and `Cargo.lock` before running the contract. A newer mutable `main` commit does not silently change an in-flight certification; advancing the baseline requires an ordinary reviewed commit here.
 
 ## Current mise wire-format canary
 
@@ -61,13 +63,13 @@ The highest-risk deterministic canaries run again after the ordinary focused tar
 
 ## Prior independent build evidence
 
-Before this permanent current-main gate was opened, `zed-pkg-test/zed-pkg-e2e#47`, workflow run `30908244036`, independently executed the complete reviewed DEN-1461 source transformation. Its DEN-1461 job passed and uploaded ordinary-source artifact `den1461-materialized` with digest:
+Before the permanent gate was opened, `zed-pkg-test/zed-pkg-e2e#47`, workflow run `30908244036`, independently executed the complete reviewed DEN-1461 source transformation. Its DEN-1461 job passed and uploaded ordinary-source artifact `den1461-materialized` with digest:
 
 ```text
 sha256:c07630605d85522850229b03055ea8f6c4439cb7f9c11e66f9d4eada6c651112
 ```
 
-The current implementation PR reconstructs the same six-file surface directly on current main and preserves the reviewed branch as an explicit commit parent.
+That historical artifact is supporting evidence only. Review-ready promotion of this PR requires a green matrix against the current immutable product and dependency pins above.
 
 ## Claim boundary
 
