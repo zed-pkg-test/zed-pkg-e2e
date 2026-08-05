@@ -32,7 +32,7 @@ jobs:
           node --check scripts/bootstrap-test-org-fleet.mjs
           node --check scripts/validate-test-org-fleet.mjs
           node scripts/validate-test-org-fleet.mjs
-          node --test tests/test-org-fleet.test.mjs
+          node --test tests/test-org-fleet.test.mjs tests/git-transport-worktree.test.mjs
 
   resume:
     name: Resume ${{ matrix.organization }}
