@@ -1,6 +1,10 @@
 {
   "schema": "zed-pkg-test/repository-inventory-v1",
   "organization": "zed-pkg-test",
+  "package_organizations": [
+    "zed-pkg-test",
+    "zedtest"
+  ],
   "orchestrator": "zed-pkg-e2e",
   "repositories": [
     {
