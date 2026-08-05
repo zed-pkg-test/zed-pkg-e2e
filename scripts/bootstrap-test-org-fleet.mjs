@@ -22,12 +22,14 @@ const hardenedRetryBlock = `    const secondaryRateLimit = response.status === 4
       && /secondary rate limit|temporarily blocked from content creation|abuse detection/i.test(text);
     if ((secondaryRateLimit || response.status === 429 || response.status >= 500) && attempt < 13) {
       const retryAfterSeconds = Number(response.headers.get('retry-after') ?? 0);
+      const primaryRemaining = Number(response.headers.get('x-ratelimit-remaining') ?? -1);
+      const primaryRateLimit = primaryRemaining === 0;
       const resetEpochSeconds = Number(response.headers.get('x-ratelimit-reset') ?? 0);
-      const resetDelayMs = resetEpochSeconds > 0
+      const resetDelayMs = primaryRateLimit && resetEpochSeconds > 0
         ? Math.max(0, (resetEpochSeconds * 1000) - Date.now())
         : 0;
       const exponentialDelayMs = secondaryRateLimit
-        ? Math.min(300000, 15000 * (2 ** attempt))
+        ? Math.min(180000, 15000 * (2 ** attempt))
         : Math.min(60000, 1000 * (2 ** attempt));
       const retryDelayMs = Math.max(retryAfterSeconds * 1000, resetDelayMs, exponentialDelayMs);
       log('retrying GitHub API request after rate limit', {
@@ -35,6 +37,7 @@ const hardenedRetryBlock = `    const secondaryRateLimit = response.status === 4
         endpoint,
         status: response.status,
         attempt: attempt + 1,
+        primaryRemaining,
         retryDelayMs,
       });
       await new Promise((resolve) => setTimeout(resolve, retryDelayMs));
