@@ -27,16 +27,13 @@ env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: "1"
   ZED_INTERFACES_REF: ${{ github.event.inputs.zed_interfaces_ref || 'a23cdd2ac509a39ca6fd6d21a3774fdd3a0f7660' }}
-  ZED_CLI_REF: d0f70105d13ff1d3fddf7671bac50940f14d69a6
+  ZED_CLI_REF: 0f8f19b16b6415827f83f09b124fab60f7165704
   ZED_API_REF: 4eaacda14d5c5e38b81404415631e364ac7bdb2c
   ZED_WEB_REF: eb2fabc7a6c22333dcb89e5a629bab7679d76af0
 
 jobs:
   native-lockfile-provenance:
     name: Schema, external consumer, and current Rust applications
-    # The preceding source-aware range canary was admitted and certified on
-    # this image. Keep the contract identical while avoiding the unavailable
-    # 24.04 runner pool that left the original run queued before checkout.
     runs-on: ubuntu-22.04
     timeout-minutes: 60
     steps:
