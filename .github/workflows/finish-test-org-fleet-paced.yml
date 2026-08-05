@@ -1,0 +1,264 @@
+# One generated repository at a time with bounded content-write pacing.
+name: finish test organization fleet with paced writes
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "bootstrap/execute-test-org-fleet-paced.once"
+      - ".github/workflows/finish-test-org-fleet-paced.yml"
+      - "scripts/list-test-org-fleet-repositories.mjs"
+      - "tests/paced-fleet-executor.test.mjs"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: finish-test-org-fleet-paced-v3
+  cancel-in-progress: false
+
+jobs:
+  finish:
+    if: github.repository == 'zed-pkg-test/zed-pkg-e2e' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 360
+    steps:
+      - name: Check out without persisted credentials
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          show-progress: false
+
+      - name: Validate authorization and paced fleet plan
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(tr -d '\r\n' < bootstrap/execute-test-org-fleet-paced.once)" = "APPLY_TEST_FLEET_PACED_V2"
+          node --check scripts/list-test-org-fleet-repositories.mjs
+          node --check scripts/bootstrap-test-org-fleet-worktree-safe.mjs
+          node scripts/validate-test-org-fleet.mjs
+          node --test \
+            tests/test-org-fleet.test.mjs \
+            tests/bootstrap-retry-policy.test.mjs \
+            tests/git-transport-worktree.test.mjs \
+            tests/paced-fleet-executor.test.mjs
+
+          organizations=(
+            fiducia-cloud-test
+            evento-globolo-test
+            opto-sync-test
+            quaestor-ledger-test
+            memebank-test
+            scintilla-run-test
+            file-tunnel-test
+            shared-auth-test
+            hypesiege-test
+            streempilot-test
+            sonus-auris-test
+            messaging-intel-test
+            3fa-app-test
+            declarative-migrations-test
+            cliptown-test
+            claritas-viz-test
+            embedded-alerts-test
+          )
+          total=0
+          for organization in "${organizations[@]}"; do
+            count="$(node scripts/list-test-org-fleet-repositories.mjs --org "$organization" --json | jq '.repositoryCount')"
+            total=$((total + count))
+          done
+          test "$total" -eq 287
+
+      - name: Export the persisted fleet PAT without logging it
+        shell: bash
+        env:
+          STORED_FLEET_PAT: ${{ secrets.FLEET_GH_TOKEN }}
+        run: |
+          set -euo pipefail
+          test -n "$STORED_FLEET_PAT"
+          printf 'GH_TOKEN=%s\n' "$STORED_FLEET_PAT" >> "$GITHUB_ENV"
+
+      - name: Provision one repository at a time
+        shell: bash
+        env:
+          TEST_ORG_FLEET_SKIP_TOPICS: "true"
+        run: |
+          set -euo pipefail
+
+          organizations=(
+            fiducia-cloud-test
+            evento-globolo-test
+            opto-sync-test
+            quaestor-ledger-test
+            memebank-test
+            scintilla-run-test
+            file-tunnel-test
+            shared-auth-test
+            hypesiege-test
+            streempilot-test
+            sonus-auris-test
+            messaging-intel-test
+            3fa-app-test
+            declarative-migrations-test
+            cliptown-test
+            claritas-viz-test
+            embedded-alerts-test
+          )
+          failures=()
+          processed=0
+          writes=0
+
+          {
+            echo '## Paced test-fleet completion'
+            echo
+            echo '| Organization | Specialized repos | Visible repos | Result |'
+            echo '|---|---:|---:|---:|'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          gh_api_with_rate_limit_retry() {
+            local attempt=1
+            local max_attempts=6
+            local status=1
+            local error_file
+            local quota_json
+            local remaining
+            local reset_epoch
+            local now_epoch
+            local delay_seconds
+
+            while (( attempt <= max_attempts )); do
+              error_file="$RUNNER_TEMP/gh-api-${attempt}-${RANDOM}.err"
+              set +e
+              gh api "$@" 2>"$error_file"
+              status=$?
+              set -e
+              if (( status == 0 )); then
+                rm -f "$error_file"
+                return 0
+              fi
+
+              if grep -Eqi 'API rate limit exceeded|secondary rate limit|abuse detection|temporarily blocked' "$error_file"; then
+                delay_seconds=$((attempt * 60))
+                if grep -qi 'API rate limit exceeded' "$error_file" && quota_json="$(gh api rate_limit 2>/dev/null)"; then
+                  remaining="$(jq -r '.resources.core.remaining // -1' <<<"$quota_json")"
+                  reset_epoch="$(jq -r '.resources.core.reset // 0' <<<"$quota_json")"
+                  now_epoch="$(date +%s)"
+                  if [[ "$remaining" == "0" && "$reset_epoch" =~ ^[0-9]+$ && "$reset_epoch" -gt "$now_epoch" ]]; then
+                    delay_seconds=$((reset_epoch - now_epoch + 5))
+                  fi
+                fi
+                if (( delay_seconds > 0 && delay_seconds <= 3900 && attempt < max_attempts )); then
+                  printf '::notice::GitHub API quota unavailable; retrying after %ss (attempt %s/%s)\n' \
+                    "$delay_seconds" "$attempt" "$max_attempts" >&2
+                  rm -f "$error_file"
+                  sleep "$delay_seconds"
+                  attempt=$((attempt + 1))
+                  continue
+                fi
+              fi
+
+              cat "$error_file" >&2
+              rm -f "$error_file"
+              return "$status"
+            done
+
+            printf '::error::GitHub API request exhausted %s bounded attempts\n' "$max_attempts" >&2
+            return "$status"
+          }
+
+          apply_filtered_repository() {
+            local organization="$1"
+            local repository="$2"
+            local summary_file="$RUNNER_TEMP/fleet-${organization}-${repository}.json"
+
+            for attempt in 1 2 3; do
+              rm -f "$summary_file"
+              if node scripts/bootstrap-test-org-fleet-worktree-safe.mjs \
+                  --apply \
+                  --org "$organization" \
+                  --repo "$repository" \
+                  --concurrency 1 \
+                  --summary-json > "$summary_file"; then
+                local request_writes
+                request_writes="$(jq '(.created // 0) + (.committed // 0) + (.pullRequests // 0)' "$summary_file")"
+                writes=$((writes + request_writes))
+                if [[ "$request_writes" -gt 0 ]]; then
+                  sleep 15
+                else
+                  sleep 2
+                fi
+                return 0
+              fi
+
+              if [[ "$attempt" -lt 3 ]]; then
+                sleep $((attempt * 90))
+              fi
+            done
+            return 1
+          }
+
+          finalize_organization() {
+            local organization="$1"
+            local summary_file="$RUNNER_TEMP/fleet-${organization}-final.json"
+            for attempt in 1 2 3; do
+              rm -f "$summary_file"
+              if node scripts/bootstrap-test-org-fleet-worktree-safe.mjs \
+                  --apply \
+                  --org "$organization" \
+                  --concurrency 1 \
+                  --summary-json > "$summary_file"; then
+                local request_writes
+                request_writes="$(jq '(.created // 0) + (.committed // 0) + (.pullRequests // 0)' "$summary_file")"
+                writes=$((writes + request_writes))
+                [[ "$request_writes" -gt 0 ]] && sleep 15
+                return 0
+              fi
+              [[ "$attempt" -lt 3 ]] && sleep $((attempt * 90))
+            done
+            return 1
+          }
+
+          for organization in "${organizations[@]}"; do
+            echo "::group::Paced provisioning for $organization"
+            gh_api_with_rate_limit_retry "orgs/$organization" --silent
+            mapfile -t repositories < <(node scripts/list-test-org-fleet-repositories.mjs --org "$organization")
+            organization_failed=false
+
+            for repository in "${repositories[@]}"; do
+              processed=$((processed + 1))
+              echo "[$processed/287] $organization/$repository"
+              if ! apply_filtered_repository "$organization" "$repository"; then
+                organization_failed=true
+                echo "::error::Failed to provision $organization/$repository after three idempotent attempts"
+              fi
+            done
+
+            if [[ "$organization_failed" == false ]] && ! finalize_organization "$organization"; then
+              organization_failed=true
+              echo "::error::Final governance/idempotency pass failed for $organization"
+            fi
+
+            visible="$(gh_api_with_rate_limit_retry --paginate "orgs/$organization/repos?type=all&per_page=100" --jq '.[].name' | wc -l | tr -d '[:space:]')"
+            if [[ "$organization_failed" == true ]]; then
+              failures+=("$organization")
+              printf '| `%s` | %s | %s | **failure** |\n' "$organization" "${#repositories[@]}" "$visible" >> "$GITHUB_STEP_SUMMARY"
+            else
+              printf '| `%s` | %s | %s | success |\n' "$organization" "${#repositories[@]}" "$visible" >> "$GITHUB_STEP_SUMMARY"
+            fi
+            echo "::endgroup::"
+          done
+
+          {
+            echo
+            echo "Specialized repository filters processed: $processed"
+            echo
+            echo "Observed create/commit/PR write operations: $writes"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          if (( ${#failures[@]} > 0 )); then
+            printf '::error::Paced fleet completion failed for: %s\n' "${failures[*]}"
+            exit 1
+          fi
+
+          test "$processed" -eq 287
+          echo 'All selected organizations completed; `r2g` and `r2g-test` were never selected.' >> "$GITHUB_STEP_SUMMARY"

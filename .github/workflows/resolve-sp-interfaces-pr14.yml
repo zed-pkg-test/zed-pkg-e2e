@@ -1,0 +1,155 @@
+name: resolve sp-interfaces PR 14 semantically
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/pr-merge/RESOLVE-SP-INTERFACES-14"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: resolve-sp-interfaces
+  cancel-in-progress: false
+
+jobs:
+  resolve:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      GH_TOKEN: ${{ secrets.FLEET_GH_TOKEN }}
+      REPOSITORY: StreemPilot/sp-interfaces
+      HEAD_BRANCH: agent/streamyard-parity-foundation
+      EXPECTED_HEAD: c30470fd8646d5f3fc37eead57df40131b1542eb
+      EXPECTED_MAIN: 945675569c52a7b669f610dbc186871023f9f78f
+    steps:
+      - name: Validate credential and exact branch heads
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test -n "$GH_TOKEN"
+          test "$(gh api user --jq '.login')" = "ORESoftware"
+          gh auth setup-git
+
+          workdir="$(mktemp -d)"
+          echo "WORKDIR=$workdir" >> "$GITHUB_ENV"
+          git clone --no-tags "https://github.com/${REPOSITORY}.git" "$workdir/repo"
+          cd "$workdir/repo"
+          git fetch origin \
+            "+refs/heads/main:refs/remotes/origin/main" \
+            "+refs/heads/${HEAD_BRANCH}:refs/remotes/origin/${HEAD_BRANCH}"
+          test "$(git rev-parse origin/main)" = "$EXPECTED_MAIN"
+          test "$(git rev-parse "origin/${HEAD_BRANCH}")" = "$EXPECTED_HEAD"
+          git checkout -B "$HEAD_BRANCH" "origin/$HEAD_BRANCH"
+          git config user.name "Alexander Mills"
+          git config user.email "alex@oresoftware.com"
+
+      - name: Merge the restored canonical contracts into the WebSocket branch
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          cd "$WORKDIR/repo"
+
+          set +e
+          git merge --no-commit --no-ff origin/main
+          status=$?
+          set -e
+          if ((status != 0)); then
+            mapfile -t conflicts < <(git diff --name-only --diff-filter=U | sort)
+            printf '::error::unexpected conflicts while combining independent contract work: %s\n' "${conflicts[*]}"
+            exit 1
+          fi
+
+          git diff --cached --check
+          git commit -m "merge: combine control WebSocket contract with restored interfaces" \
+            -m "Preserve the restored schemas, SQL invariant, generators, bindings, CI, tests, and Zed package metadata while adding PR 14's bounded authenticated /v1/ws control-plane contract."
+
+          git merge-base --is-ancestor "$EXPECTED_HEAD" HEAD
+          git merge-base --is-ancestor "$EXPECTED_MAIN" HEAD
+          test "$(git rev-list --parents -n 1 HEAD | wc -w)" -eq 3
+
+          required=(
+            .zpkg.toml
+            .github/workflows/ci.yml
+            package.json
+            scripts/generate.mjs
+            schema/domain.schema.json
+            schema/messaging.schema.json
+            schema/signaling.schema.json
+            schema/control-websocket.schema.json
+            sql/schema.sql
+            sql/migrations/20260803_chat_comment_invariants.sql
+            tests/chat-sql-invariants.test.mjs
+            tests/control-websocket-contract.test.mjs
+            generated/rust/Cargo.toml
+            generated/typescript/index.ts
+            generated/dart/streempilot_interfaces.dart
+          )
+          for path in "${required[@]}"; do
+            test -s "$path" || { echo "::error file=$path::required combined file missing"; exit 1; }
+          done
+
+          node <<'NODE'
+          const fs = require('node:fs');
+          const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
+          const schema = JSON.parse(fs.readFileSync('schema/control-websocket.schema.json', 'utf8'));
+          if (pkg.exports['./schema/control-websocket'] !== './schema/control-websocket.schema.json') {
+            throw new Error('control WebSocket schema export is missing');
+          }
+          const topics = schema.$defs.topic.enum;
+          const expected = ['studio.presence', 'broadcast.state', 'destination.health', 'recording.state', 'chat.message'];
+          if (JSON.stringify(topics) !== JSON.stringify(expected)) throw new Error('unexpected control topics');
+          if (schema.properties.maximumClientCommandBytes.const !== 8192) throw new Error('command bound changed');
+          const serialized = JSON.stringify(schema).toLowerCase();
+          for (const forbidden of ['raw.media', 'sdp_offer', 'stream_key', 'oauth_token']) {
+            if (serialized.includes(forbidden)) throw new Error(`forbidden control-socket payload: ${forbidden}`);
+          }
+          NODE
+
+      - name: Validate the exact combined head
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          cd "$WORKDIR/repo"
+          npm ci
+          npm run check:generated
+          node --test tests/*.test.mjs
+          npx tsc --strict --noEmit --target es2022 generated/typescript/index.ts
+          cargo check --locked --manifest-path generated/rust/Cargo.toml
+          cargo test --locked --manifest-path generated/rust/Cargo.toml
+          if command -v dart >/dev/null 2>&1; then
+            dart analyze generated/dart
+          fi
+          git diff --check origin/main...HEAD
+
+          mapfile -t changed < <(git diff --name-only origin/main...HEAD | sort)
+          expected=(package.json schema/control-websocket.schema.json tests/control-websocket-contract.test.mjs)
+          [[ "${changed[*]}" == "${expected[*]}" ]] || {
+            printf '::error::unexpected final diff paths: %s\n' "${changed[*]}"
+            exit 1
+          }
+
+      - name: Push exact semantic head
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          cd "$WORKDIR/repo"
+          new_head="$(git rev-parse HEAD)"
+          test "$(git ls-remote origin "refs/heads/${HEAD_BRANCH}" | cut -f1)" = "$EXPECTED_HEAD"
+          git push origin "HEAD:refs/heads/${HEAD_BRANCH}"
+          test "$(git ls-remote origin "refs/heads/${HEAD_BRANCH}" | cut -f1)" = "$new_head"
+          echo "SEMANTIC_HEAD=$new_head" >> "$GITHUB_ENV"
+
+      - name: Record result
+        shell: bash
+        run: |
+          {
+            echo "## sp-interfaces PR 14 semantic resolution"
+            echo
+            echo "- Old PR head: \`$EXPECTED_HEAD\`"
+            echo "- Restored main integrated: \`$EXPECTED_MAIN\`"
+            echo "- Resolved head: \`$SEMANTIC_HEAD\`"
+            echo "- Independent SQL/Zed restoration and control-WebSocket contract both retained"
+            echo "- Generator, Node, TypeScript, and Rust validation passed"
+          } >> "$GITHUB_STEP_SUMMARY"

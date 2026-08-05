@@ -1,0 +1,105 @@
+# One-time idempotent recovery for the cross-organization test fleet.
+name: recover test organization fleet v3
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - bootstrap/execute-test-org-fleet-v2.once
+
+permissions:
+  contents: read
+
+concurrency:
+  group: apply-test-org-fleet-all
+  cancel-in-progress: true
+
+jobs:
+  authorize:
+    name: Validate one-time fleet recovery authorization
+    runs-on: ubuntu-24.04
+    timeout-minutes: 2
+    outputs:
+      organizations: ${{ steps.matrix.outputs.organizations }}
+    steps:
+      - name: Check out the authorization marker
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          show-progress: false
+      - id: matrix
+        name: Validate marker and publish the in-scope matrix
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(tr -d '\r\n' < bootstrap/execute-test-org-fleet-v2.once)" = "APPLY_TEST_FLEET_V3"
+          organizations='["zed-pkg-test","3fa-app-test","declarative-migrations-test","cliptown-test","claritas-viz-test","embedded-alerts-test","evento-globolo-test","fiducia-cloud-test","memebank-test","opto-sync-test","quaestor-ledger-test","sonus-auris-test","messaging-intel-test","scintilla-run-test","file-tunnel-test","shared-auth-test","hypesiege-test","streempilot-test"]'
+          printf 'organizations=%s\n' "$organizations" >> "$GITHUB_OUTPUT"
+
+  recover:
+    name: Recover ${{ matrix.organization }}
+    needs: authorize
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    strategy:
+      fail-fast: false
+      max-parallel: 1
+      matrix:
+        organization: ${{ fromJSON(needs.authorize.outputs.organizations) }}
+    steps:
+      - name: Check out without persisted credentials
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          show-progress: false
+
+      - name: Validate the fleet and worktree-safe launcher
+        run: |
+          node --check scripts/bootstrap-test-org-fleet.mjs
+          node --check scripts/bootstrap-test-org-fleet-worktree-safe.mjs
+          node scripts/validate-test-org-fleet.mjs
+          node --test tests/test-org-fleet.test.mjs
+
+      - name: Export the persisted fleet PAT without logging it
+        shell: bash
+        env:
+          STORED_FLEET_PAT: ${{ secrets.FLEET_GH_TOKEN }}
+        run: |
+          set -euo pipefail
+          test -n "$STORED_FLEET_PAT"
+          printf 'GH_TOKEN=%s\n' "$STORED_FLEET_PAT" >> "$GITHUB_ENV"
+
+      - name: Verify organization visibility
+        shell: bash
+        env:
+          FLEET_ORGANIZATION: ${{ matrix.organization }}
+        run: |
+          set -euo pipefail
+          gh api "orgs/$FLEET_ORGANIZATION" --silent
+
+      - name: Cool down between serialized organization writes
+        run: sleep 15
+
+      - name: Create or adopt repositories, push commits, and open draft PRs
+        shell: bash
+        env:
+          FLEET_ORGANIZATION: ${{ matrix.organization }}
+          TEST_ORG_FLEET_SKIP_TOPICS: "true"
+        run: |
+          set -euo pipefail
+          node scripts/bootstrap-test-org-fleet-worktree-safe.mjs \
+            --apply \
+            --org "$FLEET_ORGANIZATION" \
+            --concurrency 1
+
+      - name: Record completion
+        shell: bash
+        env:
+          FLEET_ORGANIZATION: ${{ matrix.organization }}
+        run: |
+          {
+            echo "## $FLEET_ORGANIZATION"
+            echo
+            echo "Worktree-safe idempotent repository creation/adoption, generated commits, and draft pull requests completed."
+          } >> "$GITHUB_STEP_SUMMARY"

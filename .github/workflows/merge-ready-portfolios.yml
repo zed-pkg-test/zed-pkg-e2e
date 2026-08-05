@@ -1,0 +1,111 @@
+name: merge independently validated ready portfolios
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/pr-merge/MERGE-READY-PORTFOLIOS"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: merge-ready-portfolios
+  cancel-in-progress: false
+
+jobs:
+  discover:
+    if: "${{ github.event.head_commit.message == 'chore: merge independently validated ready portfolios' }}"
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      FLEET_GH_TOKEN: ${{ secrets.FLEET_GH_TOKEN }}
+    steps:
+      - name: Validate stored fleet credential
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test -n "$FLEET_GH_TOKEN"
+          GH_TOKEN="$FLEET_GH_TOKEN" gh api user --jq '.login' | grep -Fx ORESoftware
+
+      - name: Check out trusted fleet scripts
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+
+      - name: Discover exact ready portfolios and download immutable archives
+        shell: bash
+        run: node .github/scripts/ready-portfolio-fleet.mjs discover
+
+      - name: Upload immutable portfolio bundle
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: ready-portfolio-bundle
+          path: portfolio-bundle
+          if-no-files-found: error
+          retention-days: 1
+
+  validate:
+    needs: discover
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - name: Check out trusted credential-free validator
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+
+      - name: Download immutable archives without a fleet credential
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: ready-portfolio-bundle
+          path: portfolio-bundle
+
+      - name: Install only the factory contract test dependencies
+        shell: bash
+        run: python3 -m pip install 'pytest>=8,<10' 'PyYAML>=6,<7'
+
+      - name: Validate exact archives with all GitHub credentials removed
+        shell: bash
+        env:
+          GH_TOKEN: ""
+          GITHUB_TOKEN: ""
+          FLEET_GH_TOKEN: ""
+        run: python3 .github/scripts/validate-ready-portfolios.py
+
+      - name: Upload signed-by-workflow validation results
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: ready-portfolio-validation
+          path: portfolio-validated
+          if-no-files-found: error
+          retention-days: 1
+
+  merge:
+    needs: validate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    env:
+      FLEET_GH_TOKEN: ${{ secrets.FLEET_GH_TOKEN }}
+    steps:
+      - name: Validate stored fleet credential
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test -n "$FLEET_GH_TOKEN"
+          GH_TOKEN="$FLEET_GH_TOKEN" gh api user --jq '.login' | grep -Fx ORESoftware
+
+      - name: Check out trusted exact-head merger
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+
+      - name: Download credential-free validation result
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: ready-portfolio-validation
+          path: portfolio-validated
+
+      - name: Revalidate, promote, merge, and post-verify exact heads
+        shell: bash
+        run: node .github/scripts/ready-portfolio-fleet.mjs merge
