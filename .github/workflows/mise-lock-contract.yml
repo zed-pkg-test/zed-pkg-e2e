@@ -10,7 +10,7 @@ on:
       zed_cli_ref:
         description: Immutable zed-cli commit to certify
         required: false
-        default: 82ed67aaa98495b5aa85faef1d25671373eb1991
+        default: 7977b1d43231a68e1ac34903e0f18cef5135add6
 
 permissions:
   contents: read
@@ -26,8 +26,8 @@ defaults:
 env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: "1"
-  ZED_CLI_REF: ${{ github.event.inputs.zed_cli_ref || '82ed67aaa98495b5aa85faef1d25671373eb1991' }}
-  ZED_INTERFACES_REF: c2e049006453c26ca8ca291783f681fce75cb01f
+  ZED_CLI_REF: ${{ github.event.inputs.zed_cli_ref || '7977b1d43231a68e1ac34903e0f18cef5135add6' }}
+  ZED_INTERFACES_REF: a23cdd2ac509a39ca6fd6d21a3774fdd3a0f7660
 
 jobs:
   certify:
