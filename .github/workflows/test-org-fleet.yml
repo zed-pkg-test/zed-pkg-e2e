@@ -9,6 +9,7 @@ on:
       - "scripts/bootstrap-test-org-fleet.mjs"
       - "scripts/bootstrap-test-org-fleet.parts/**"
       - "scripts/audit-test-org-fleet.mjs"
+      - "scripts/audit-test-org-fleet-live.mjs"
       - "scripts/read-fleet-manifest.mjs"
       - "scripts/validate-test-org-fleet.mjs"
       - "tests/test-org-fleet.test.mjs"
@@ -29,6 +30,7 @@ on:
       - "scripts/bootstrap-test-org-fleet.mjs"
       - "scripts/bootstrap-test-org-fleet.parts/**"
       - "scripts/audit-test-org-fleet.mjs"
+      - "scripts/audit-test-org-fleet-live.mjs"
       - "scripts/read-fleet-manifest.mjs"
       - "scripts/validate-test-org-fleet.mjs"
       - "tests/test-org-fleet.test.mjs"
@@ -65,6 +67,7 @@ jobs:
         run: |
           node --check scripts/bootstrap-test-org-fleet.mjs
           node --check scripts/audit-test-org-fleet.mjs
+          node --check scripts/audit-test-org-fleet-live.mjs
           node --check scripts/validate-test-org-fleet.mjs
 
       - name: Validate manifest
