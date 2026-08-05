@@ -84,9 +84,9 @@ async function branchHead(repo, branch) {
     'GET',
     `/repos/${OWNER}/${encodeURIComponent(repo)}/git/ref/heads/${encodeURIComponent(branch)}`,
     undefined,
-    [404],
+    [404, 409],
   );
-  return result.status === 404 ? null : result.data.object.sha;
+  return [404, 409].includes(result.status) ? null : result.data.object.sha;
 }
 
 async function createInitialCommit(spec) {
