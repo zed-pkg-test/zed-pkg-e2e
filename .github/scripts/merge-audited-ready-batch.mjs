@@ -137,11 +137,12 @@ for (const [repo, number, expectedHead] of candidates) {
       continue;
     }
 
-    const method = check.repository.squash_merge_allowed ? 'squash' :
-      check.repository.rebase_merge_allowed ? 'rebase' :
-        check.repository.merge_commit_allowed ? 'merge' : null;
+    const method = check.repository.allow_squash_merge ? 'squash' :
+      check.repository.allow_rebase_merge ? 'rebase' :
+        check.repository.allow_merge_commit ? 'merge' : null;
     if (!method) {
       skipped.push({ key, reason: 'no-merge-method' });
+      console.log(`SKIPPED ${key} no allowed merge method`);
       continue;
     }
 
