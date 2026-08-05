@@ -17,7 +17,7 @@ concurrency:
 
 jobs:
   inventory:
-    name: Classify and probe every fixture repository
+    name: Audit core lifecycle and complete public fleet
     runs-on: ubuntu-24.04
     timeout-minutes: 12
     steps:
@@ -31,21 +31,20 @@ jobs:
       - name: Run all Python contract tests
         run: |
           set -euo pipefail
-          python3 -m unittest discover -s tests -p 'test_*.py' -v
+          python3 -Werror -m unittest discover -s tests -p 'test_*.py' -v
 
-      - name: Validate checked-in lifecycle coverage
+      - name: Validate checked-in core lifecycle coverage
         run: |
           set -euo pipefail
           python3 scripts/org_fixture_inventory.py \
             --output "$RUNNER_TEMP/zed-pkg-test-inventory-static.json"
 
-      - name: Probe the live public organization and every package manifest
+      - name: Probe the complete live public fleet and all Zed manifests
         env:
           GITHUB_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          python3 scripts/org_fixture_inventory.py \
-            --live \
+          python3 scripts/org_fleet_inventory.py \
             --output "$RUNNER_TEMP/zed-pkg-test-inventory-live.json"
           python3 - "$RUNNER_TEMP/zed-pkg-test-inventory-live.json" <<'PY'
           import json
@@ -53,18 +52,25 @@ jobs:
           from pathlib import Path
 
           report = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
-          assert report["inventory_repository_count"] == 22, report
-          assert report["package_repository_count"] == 21, report
-          assert report["lifecycle_repository_count"] == 22, report
-          assert report["live_repository_count"] == 22, report
-          assert len(report["manifests"]) == 22, report
-          assert sum(item["present"] for item in report["manifests"]) == 21, report
+          assert report["schema"] == "zed-pkg-test/public-fleet-inventory-v2", report
+          assert report["core_repository_count"] == 22, report
+          assert report["core_package_count"] == 21, report
+          assert report["live_repository_count"] >= report["core_repository_count"], report
+          assert report["supplemental_repository_count"] == (
+              report["live_repository_count"] - report["core_repository_count"]
+          ), report
+          assert report["missing_core_repositories"] == [], report
+          assert report["errors"] == [], report
+          assert report["required_manifest_present_count"] == report["required_manifest_count"], report
+          assert report["manifest_present_count"] >= report["required_manifest_count"], report
           print(
               "verified",
               report["live_repository_count"],
-              "repositories and",
-              sum(item["present"] for item in report["manifests"]),
-              "package manifests",
+              "public repositories,",
+              report["manifest_present_count"],
+              "valid package manifests, and",
+              report["supplemental_repository_count"],
+              "supplemental repositories",
           )
           PY
 
