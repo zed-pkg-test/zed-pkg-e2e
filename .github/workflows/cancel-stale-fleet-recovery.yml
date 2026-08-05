@@ -1,0 +1,57 @@
+# One-time cancellation of the superseded recovery run.
+name: cancel stale fleet recovery
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/cancel-stale-fleet-recovery.yml"
+      - ".github/fleet-cancel/START"
+
+permissions:
+  actions: write
+  contents: read
+
+jobs:
+  cancel:
+    if: github.repository == 'zed-pkg-test/zed-pkg-e2e' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    env:
+      GH_TOKEN: ${{ github.token }}
+      STALE_RUN_ID: "30972360883"
+    steps:
+      - name: Cancel the superseded recovery run
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          endpoint="repos/$GITHUB_REPOSITORY/actions/runs/$STALE_RUN_ID"
+          status="$(gh api "$endpoint" --jq '.status')"
+          conclusion="$(gh api "$endpoint" --jq '.conclusion // ""')"
+
+          if [[ "$status" == "completed" ]]; then
+            echo "Stale run already completed with conclusion: ${conclusion:-unknown}"
+            exit 0
+          fi
+
+          if ! gh api --method POST "$endpoint/cancel" --silent; then
+            status="$(gh api "$endpoint" --jq '.status')"
+            if [[ "$status" != "completed" ]]; then
+              echo "::error::Unable to cancel stale run $STALE_RUN_ID"
+              exit 1
+            fi
+          fi
+
+          for _ in $(seq 1 60); do
+            status="$(gh api "$endpoint" --jq '.status')"
+            conclusion="$(gh api "$endpoint" --jq '.conclusion // ""')"
+            if [[ "$status" == "completed" ]]; then
+              echo "Stale run stopped with conclusion: ${conclusion:-unknown}"
+              exit 0
+            fi
+            sleep 2
+          done
+
+          echo "::error::Stale run did not stop after cancellation"
+          exit 1
