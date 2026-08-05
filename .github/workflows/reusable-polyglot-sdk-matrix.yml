@@ -1,0 +1,288 @@
+name: Reusable polyglot SDK consumer matrix
+
+on:
+  workflow_call:
+    inputs:
+      client_repository:
+        description: owner/repository containing the client SDK matrix
+        required: true
+        type: string
+      client_ref:
+        description: Git ref to test
+        required: false
+        default: main
+        type: string
+    secrets:
+      CLIENT_SDK_READ_TOKEN:
+        required: false
+  workflow_dispatch:
+    inputs:
+      client_repository:
+        description: owner/repository containing the client SDK matrix
+        required: true
+        default: zed-pkg/zed-clients
+        type: string
+      client_ref:
+        description: Git ref to test
+        required: true
+        default: main
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: polyglot-sdk-${{ inputs.client_repository }}-${{ inputs.client_ref }}
+  cancel-in-progress: true
+
+jobs:
+  consumer:
+    name: ${{ matrix.language }} consumer
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - language: gleam
+            paths: clients/gleam|clients/gleamlang|gleam|gleamlang
+            tools: gleam@latest
+            required: true
+          - language: erlang
+            paths: clients/erlang|erlang
+            tools: erlang@latest
+            required: true
+          - language: elixir
+            paths: clients/elixir|elixir
+            tools: erlang@latest
+              elixir@latest
+            required: true
+          - language: dart
+            paths: clients/dart|dart
+            tools: dart@latest
+            required: true
+          - language: rust
+            paths: clients/rust|rust
+            tools: rust@stable
+            required: true
+          - language: java
+            paths: clients/java|java
+            tools: java@21
+            required: true
+          - language: go
+            paths: clients/go|clients/golang|go|golang
+            tools: go@latest
+            required: true
+          - language: python3
+            paths: clients/python3|clients/python|python3|python
+            tools: python@3.12
+            required: true
+          - language: ruby
+            paths: clients/ruby|ruby
+            tools: ruby@latest
+            required: true
+          - language: php
+            paths: clients/php|php
+            tools: php@latest
+              composer@latest
+            required: true
+          - language: typescript-node
+            paths: clients/typescript/node|clients/typescript/nodejs|clients/typescript|typescript/node|typescript
+            tools: node@22
+            required: true
+          - language: typescript-deno
+            paths: clients/typescript/deno|typescript/deno|clients/typescript|typescript
+            tools: deno@latest
+            required: true
+          - language: typescript-bun
+            paths: clients/typescript/bun|typescript/bun|clients/typescript|typescript
+            tools: bun@latest
+            required: true
+          - language: typescript-edge
+            paths: clients/typescript/edge|clients/typescript/edge-runtime|typescript/edge|clients/typescript|typescript
+            tools: node@22
+            required: true
+          - language: kotlin
+            paths: clients/kotlin|kotlin
+            tools: java@21
+              kotlin@latest
+            required: false
+          - language: swift
+            paths: clients/swift|swift
+            tools: swift@latest
+            required: false
+          - language: zig
+            paths: clients/zig|zig
+            tools: zig@latest
+            required: true
+          - language: cpp
+            paths: clients/cpp|clients/cxx|clients/c++|cpp|cxx
+            tools: cmake@latest
+            required: true
+          - language: c
+            paths: clients/c|c
+            tools: cmake@latest
+            required: false
+          - language: csharp
+            paths: clients/csharp|clients/dotnet|csharp|dotnet
+            tools: dotnet@8
+            required: false
+          - language: wasm
+            paths: clients/wasm|wasm
+            tools: rust@stable
+            required: false
+
+    steps:
+      - name: Check out SDK repository
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ inputs.client_repository }}
+          ref: ${{ inputs.client_ref }}
+          path: sdk
+          token: ${{ secrets.CLIENT_SDK_READ_TOKEN || github.token }}
+
+      - name: Install language toolchain
+        uses: jdx/mise-action@v2
+        with:
+          tool_versions: ${{ matrix.tools }}
+          install: true
+          cache: true
+
+      - name: Locate and test SDK consumer
+        shell: bash
+        env:
+          LANGUAGE: ${{ matrix.language }}
+          CANDIDATE_PATHS: ${{ matrix.paths }}
+          REQUIRED: ${{ matrix.required }}
+        run: |
+          set -euo pipefail
+
+          IFS='|' read -r -a candidates <<< "$CANDIDATE_PATHS"
+          sdk_dir=""
+          for candidate in "${candidates[@]}"; do
+            if [[ -d "sdk/$candidate" ]]; then
+              sdk_dir="sdk/$candidate"
+              break
+            fi
+          done
+
+          if [[ -z "$sdk_dir" ]]; then
+            if [[ "$REQUIRED" == "true" ]]; then
+              echo "Required $LANGUAGE SDK directory missing. Checked: $CANDIDATE_PATHS" >&2
+              exit 1
+            fi
+            echo "Optional $LANGUAGE SDK is not present; skipping."
+            exit 0
+          fi
+
+          cd "$sdk_dir"
+          echo "Testing $LANGUAGE SDK at $sdk_dir"
+
+          case "$LANGUAGE" in
+            gleam)
+              test -f gleam.toml
+              gleam deps download
+              gleam test
+              ;;
+            erlang)
+              if [[ -f rebar.config || -f rebar.config.script ]]; then
+                rebar3 eunit
+              else
+                mapfile -d '' files < <(find . -name '*.erl' -print0)
+                test "${#files[@]}" -gt 0
+                erlc "${files[@]}"
+              fi
+              ;;
+            elixir)
+              test -f mix.exs
+              mix deps.get
+              mix test
+              ;;
+            dart)
+              test -f pubspec.yaml
+              dart pub get
+              if [[ -d test ]]; then dart test; else dart analyze; fi
+              ;;
+            rust)
+              test -f Cargo.toml
+              cargo test --all-targets --all-features
+              ;;
+            java)
+              if [[ -x ./gradlew ]]; then
+                ./gradlew test
+              elif [[ -f pom.xml ]]; then
+                mvn -B test
+              else
+                mapfile -d '' files < <(find . -name '*.java' -print0)
+                test "${#files[@]}" -gt 0
+                javac "${files[@]}"
+              fi
+              ;;
+            go)
+              test -f go.mod
+              go test ./...
+              ;;
+            python3)
+              python -m pip install --upgrade pip pytest
+              if [[ -f pyproject.toml || -f setup.py || -f setup.cfg ]]; then python -m pip install -e .; fi
+              if [[ -d tests || -d test ]]; then python -m pytest; else python -m compileall .; fi
+              ;;
+            ruby)
+              if [[ -f Gemfile ]]; then
+                gem install bundler
+                bundle install
+                if bundle exec rake -T 2>/dev/null | grep -q test; then bundle exec rake test; else bundle exec ruby -c "$(find . -name '*.rb' | head -1)"; fi
+              else
+                find . -name '*.rb' -print0 | xargs -0 -n1 ruby -c
+              fi
+              ;;
+            php)
+              if [[ -f composer.json ]]; then
+                composer install --no-interaction --prefer-dist
+                composer test --no-interaction || vendor/bin/phpunit
+              else
+                find . -name '*.php' -print0 | xargs -0 -n1 php -l
+              fi
+              ;;
+            typescript-node|typescript-edge)
+              if [[ -f package-lock.json ]]; then npm ci; else npm install; fi
+              npm test --if-present
+              npm run build --if-present
+              if [[ -f tsconfig.json ]]; then npx tsc --noEmit; fi
+              ;;
+            typescript-deno)
+              deno test --allow-env --allow-net --allow-read
+              ;;
+            typescript-bun)
+              bun install
+              bun test
+              ;;
+            kotlin)
+              if [[ -x ./gradlew ]]; then ./gradlew test; else kotlinc $(find . -name '*.kt') -d build/sdk.jar; fi
+              ;;
+            swift)
+              test -f Package.swift
+              swift test
+              ;;
+            zig)
+              test -f build.zig
+              zig build test
+              ;;
+            cpp|c)
+              test -f CMakeLists.txt
+              cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+              cmake --build build --parallel
+              ctest --test-dir build --output-on-failure
+              ;;
+            csharp)
+              dotnet test
+              ;;
+            wasm)
+              test -f Cargo.toml
+              cargo test --all-targets
+              ;;
+            *)
+              echo "No runner registered for $LANGUAGE" >&2
+              exit 1
+              ;;
+          esac
