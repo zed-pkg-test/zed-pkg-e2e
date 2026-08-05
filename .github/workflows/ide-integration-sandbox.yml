@@ -74,7 +74,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: zed-pkg/.github
-          ref: c5421f6a9546a92f8f9983b6afd095971763d23e
+          ref: 1c6791bf4bcf4f775def0cc9b7058e9a70066551
           path: candidates
       - uses: actions/setup-node@v4
         with: {node-version: "22"}
@@ -104,7 +104,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-        with: {repository: zed-pkg/.github, ref: c5421f6a9546a92f8f9983b6afd095971763d23e, path: candidates}
+        with: {repository: zed-pkg/.github, ref: 1c6791bf4bcf4f775def0cc9b7058e9a70066551, path: candidates}
       - uses: actions/setup-java@v4
         with: {distribution: temurin, java-version: "21", cache: maven}
       - run: mvn --batch-mode --file candidates/blueprints/zed-eclipse/pom.xml test
@@ -113,14 +113,14 @@ jobs:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
-        with: {repository: zed-pkg/.github, ref: c5421f6a9546a92f8f9983b6afd095971763d23e, path: candidates}
+        with: {repository: zed-pkg/.github, ref: 1c6791bf4bcf4f775def0cc9b7058e9a70066551, path: candidates}
       - run: swift test --package-path candidates/blueprints/zed-xcode
 
   visual-studio:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
-        with: {repository: zed-pkg/.github, ref: c5421f6a9546a92f8f9983b6afd095971763d23e, path: candidates}
+        with: {repository: zed-pkg/.github, ref: 1c6791bf4bcf4f775def0cc9b7058e9a70066551, path: candidates}
       - uses: actions/setup-dotnet@v4
         with: {dotnet-version: "8.0.x"}
       - run: dotnet test candidates/blueprints/zed-visual-studio/Zed.VisualStudio.sln --configuration Release
@@ -129,7 +129,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-        with: {repository: zed-pkg/.github, ref: c5421f6a9546a92f8f9983b6afd095971763d23e, path: candidates}
+        with: {repository: zed-pkg/.github, ref: 1c6791bf4bcf4f775def0cc9b7058e9a70066551, path: candidates}
       - run: cmake -S candidates/blueprints/zed-qtcreator -B /tmp/zed-qtcreator -DBUILD_TESTING=ON
       - run: cmake --build /tmp/zed-qtcreator --parallel 2
       - run: ctest --test-dir /tmp/zed-qtcreator --output-on-failure
