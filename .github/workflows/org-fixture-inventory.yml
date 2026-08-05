@@ -44,7 +44,7 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          python3 scripts/org_fleet_inventory.py \
+          python3 scripts/org_fleet_contract.py \
             --output "$RUNNER_TEMP/zed-pkg-test-inventory-live.json"
           python3 - "$RUNNER_TEMP/zed-pkg-test-inventory-live.json" <<'PY'
           import json
@@ -52,7 +52,8 @@ jobs:
           from pathlib import Path
 
           report = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
-          assert report["schema"] == "zed-pkg-test/public-fleet-inventory-v2", report
+          assert report["schema"] == "zed-pkg-test/public-fleet-inventory-v3", report
+          assert report["package_organizations"] == ["zed-pkg-test", "zedtest"], report
           assert report["core_repository_count"] == 22, report
           assert report["core_package_count"] == 21, report
           assert report["live_repository_count"] >= report["core_repository_count"], report
@@ -63,14 +64,19 @@ jobs:
           assert report["errors"] == [], report
           assert report["required_manifest_present_count"] == report["required_manifest_count"], report
           assert report["manifest_present_count"] >= report["required_manifest_count"], report
+          assert all(
+              row["manifest"]["package_org_allowed"] is not False
+              for row in report["repositories"]
+          ), report
           print(
               "verified",
               report["live_repository_count"],
               "public repositories,",
               report["manifest_present_count"],
-              "valid package manifests, and",
+              "valid package manifests,",
               report["supplemental_repository_count"],
-              "supplemental repositories",
+              "supplemental repositories, and reviewed package namespaces",
+              ",".join(report["package_organizations"]),
           )
           PY
 
