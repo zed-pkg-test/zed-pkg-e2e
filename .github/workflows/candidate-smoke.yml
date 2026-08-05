@@ -1,0 +1,313 @@
+name: zed-pkg-test candidate smoke
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/candidate-smoke.yml"
+      - "scripts/lifecycle.py"
+      - "scripts/candidate_lifecycle.py"
+      - "docs/candidate-validation.md"
+  workflow_dispatch:
+    inputs:
+      zed_cli_ref:
+        description: Exact 40-character zed-pkg/zed-cli commit to test
+        required: false
+        default: 3a91d64abf1fc0bdee6eab2ff804113b1429849f
+        type: string
+      harness_ref:
+        description: Exact 40-character zed-pkg-test/zed-pkg-e2e commit
+        required: false
+        type: string
+      fixtures_json:
+        description: JSON array of pinned fixture repository/ref objects
+        required: false
+        default: >-
+          [{"repo":"node-lib","ref":"2d41e658a382fdff27ef87a0db24dbaff280a685"},{"repo":"node-app","ref":"ef794674647b3620e711f4f855865f8ad3340498"},{"repo":"rust-lib","ref":"f2534ffafbc4f7e900075dfc8e48b9259aced2fe"},{"repo":"rust-app","ref":"38b0a5425176a53621d1c07be791701dbd30eefe"},{"repo":"go-lib","ref":"e09dec6790a60ba75d5d338eece1068a4b8454b1"},{"repo":"go-app","ref":"8e035feb84cf80a294e631bda4ea7a44b1c4d7cf"},{"repo":"python-lib","ref":"b2db8ce2962fbaae690db7a9dabd14eb1d0362de"},{"repo":"python-app","ref":"a0c58cc6942a8cd30ad5eb318b9ada2fa9b2edb1"},{"repo":"polyglot-lib","ref":"e62ceb6337324a294d4fc861692a267ff0db97d0"},{"repo":"workspace-monorepo","ref":"72c47a51887733b9035bac1a3efdbf92880ef791"},{"repo":"multiversion-lib","ref":"ba9ee7269559a122f2b58fb89f134aaa4b7d0aee"},{"repo":"awkward-lib","ref":"3e24f62ef4df5d8bfc6e63df07d28eaf1f4dac9e"},{"repo":"submodule-consumer","ref":"bc193f9d805e286c95e9b0c49580c5171224e45c"},{"repo":"subtree-consumer","ref":"3da0c249e481104a8c9058e6107dd47f8a80b10f"},{"repo":"shared-schema","ref":"c3fe49a621337be58b16717fb1acb57139a29b45"}]
+        type: string
+  workflow_call:
+    inputs:
+      zed_cli_ref:
+        description: Exact 40-character zed-pkg/zed-cli commit to test
+        required: true
+        type: string
+      harness_ref:
+        description: Exact 40-character zed-pkg-test/zed-pkg-e2e commit
+        required: true
+        type: string
+      fixtures_json:
+        description: JSON array of pinned fixture repository/ref objects
+        required: false
+        default: >-
+          [{"repo":"node-lib","ref":"2d41e658a382fdff27ef87a0db24dbaff280a685"},{"repo":"node-app","ref":"ef794674647b3620e711f4f855865f8ad3340498"},{"repo":"rust-lib","ref":"f2534ffafbc4f7e900075dfc8e48b9259aced2fe"},{"repo":"rust-app","ref":"38b0a5425176a53621d1c07be791701dbd30eefe"},{"repo":"go-lib","ref":"e09dec6790a60ba75d5d338eece1068a4b8454b1"},{"repo":"go-app","ref":"8e035feb84cf80a294e631bda4ea7a44b1c4d7cf"},{"repo":"python-lib","ref":"b2db8ce2962fbaae690db7a9dabd14eb1d0362de"},{"repo":"python-app","ref":"a0c58cc6942a8cd30ad5eb318b9ada2fa9b2edb1"},{"repo":"polyglot-lib","ref":"e62ceb6337324a294d4fc861692a267ff0db97d0"},{"repo":"workspace-monorepo","ref":"72c47a51887733b9035bac1a3efdbf92880ef791"},{"repo":"multiversion-lib","ref":"ba9ee7269559a122f2b58fb89f134aaa4b7d0aee"},{"repo":"awkward-lib","ref":"3e24f62ef4df5d8bfc6e63df07d28eaf1f4dac9e"},{"repo":"submodule-consumer","ref":"bc193f9d805e286c95e9b0c49580c5171224e45c"},{"repo":"subtree-consumer","ref":"3da0c249e481104a8c9058e6107dd47f8a80b10f"},{"repo":"shared-schema","ref":"c3fe49a621337be58b16717fb1acb57139a29b45"}]
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: candidate-smoke-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref || github.run_id }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: "1"
+  ZED_CLI_REF: ${{ inputs.zed_cli_ref || '3a91d64abf1fc0bdee6eab2ff804113b1429849f' }}
+  HARNESS_REF: ${{ inputs.harness_ref || github.event.pull_request.head.sha || github.sha }}
+  ZED_INTERFACES_REF: dc0e0a0620b9462817950b552d3d334a184b1cb1
+
+jobs:
+  contract:
+    name: Validate immutable candidate contract
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      fixtures: ${{ steps.validate.outputs.fixtures }}
+      fixture_refs: ${{ steps.validate.outputs.fixture_refs }}
+    steps:
+      - name: Validate exact refs and fixture matrix
+        id: validate
+        env:
+          FIXTURES_JSON: >-
+            ${{ inputs.fixtures_json || '[{"repo":"node-lib","ref":"2d41e658a382fdff27ef87a0db24dbaff280a685"},{"repo":"node-app","ref":"ef794674647b3620e711f4f855865f8ad3340498"},{"repo":"rust-lib","ref":"f2534ffafbc4f7e900075dfc8e48b9259aced2fe"},{"repo":"rust-app","ref":"38b0a5425176a53621d1c07be791701dbd30eefe"},{"repo":"go-lib","ref":"e09dec6790a60ba75d5d338eece1068a4b8454b1"},{"repo":"go-app","ref":"8e035feb84cf80a294e631bda4ea7a44b1c4d7cf"},{"repo":"python-lib","ref":"b2db8ce2962fbaae690db7a9dabd14eb1d0362de"},{"repo":"python-app","ref":"a0c58cc6942a8cd30ad5eb318b9ada2fa9b2edb1"},{"repo":"polyglot-lib","ref":"e62ceb6337324a294d4fc861692a267ff0db97d0"},{"repo":"workspace-monorepo","ref":"72c47a51887733b9035bac1a3efdbf92880ef791"},{"repo":"multiversion-lib","ref":"ba9ee7269559a122f2b58fb89f134aaa4b7d0aee"},{"repo":"awkward-lib","ref":"3e24f62ef4df5d8bfc6e63df07d28eaf1f4dac9e"},{"repo":"submodule-consumer","ref":"bc193f9d805e286c95e9b0c49580c5171224e45c"},{"repo":"subtree-consumer","ref":"3da0c249e481104a8c9058e6107dd47f8a80b10f"},{"repo":"shared-schema","ref":"c3fe49a621337be58b16717fb1acb57139a29b45"}]' }}
+        run: |
+          set -euo pipefail
+          [[ "$ZED_CLI_REF" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$HARNESS_REF" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$ZED_INTERFACES_REF" =~ ^[0-9a-f]{40}$ ]]
+          python3 - <<'PY'
+          import json
+          import os
+          import re
+
+          fixtures = json.loads(os.environ["FIXTURES_JSON"])
+          if not isinstance(fixtures, list) or not fixtures:
+              raise SystemExit("fixtures_json must be a non-empty JSON array")
+          if len(fixtures) > 22:
+              raise SystemExit("candidate smoke is capped at 22 fixture repositories")
+
+          allowed = {
+              "awkward-lib",
+              "dart-app",
+              "dart-lib",
+              "gleam-app",
+              "gleam-lib",
+              "go-app",
+              "go-lib",
+              "multiversion-lib",
+              "node-app",
+              "node-lib",
+              "polyglot-go-app",
+              "polyglot-lib",
+              "polyglot-node-app",
+              "python-app",
+              "python-lib",
+              "rust-app",
+              "rust-lib",
+              "shared-schema",
+              "submodule-consumer",
+              "subtree-consumer",
+              "workspace-monorepo",
+              "zed-pkg-e2e",
+          }
+          seen = set()
+          for fixture in fixtures:
+              if not isinstance(fixture, dict) or set(fixture) != {"repo", "ref"}:
+                  raise SystemExit("each fixture must contain only repo and ref")
+              repo = fixture["repo"]
+              ref = fixture["ref"]
+              if repo not in allowed:
+                  raise SystemExit(f"fixture repository is not approved: {repo!r}")
+              if repo in seen:
+                  raise SystemExit(f"fixture repository is duplicated: {repo}")
+              if not isinstance(ref, str) or not re.fullmatch(r"[0-9a-f]{40}", ref):
+                  raise SystemExit(f"fixture ref is not an exact commit: {repo}={ref!r}")
+              seen.add(repo)
+
+          compact = json.dumps(fixtures, separators=(",", ":"))
+          refs = json.dumps(
+              {fixture["repo"]: fixture["ref"] for fixture in fixtures},
+              separators=(",", ":"),
+              sort_keys=True,
+          )
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
+              output.write(f"fixtures={compact}\n")
+              output.write(f"fixture_refs={refs}\n")
+          PY
+
+  build-zed:
+    name: Build exact zed CLI candidate
+    needs: contract
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Check out zed-cli candidate
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: zed-pkg/zed-cli
+          ref: ${{ env.ZED_CLI_REF }}
+          path: zed-cli
+          fetch-depth: 1
+          persist-credentials: false
+          show-progress: false
+
+      - name: Check out matching zed-interfaces
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: zed-pkg/zed-interfaces
+          ref: ${{ env.ZED_INTERFACES_REF }}
+          path: zed-interfaces
+          fetch-depth: 1
+          persist-credentials: false
+          show-progress: false
+
+      - name: Install declared Rust toolchain
+        run: |
+          set -euo pipefail
+          rustup toolchain install stable --profile minimal --component rustfmt
+          rustup default stable
+          rustc --version --verbose
+          cargo --version --verbose
+
+      - name: Validate and build candidate once
+        run: |
+          set -euo pipefail
+          test "$(git -C zed-cli rev-parse HEAD)" = "$ZED_CLI_REF"
+          test "$(git -C zed-interfaces rev-parse HEAD)" = "$ZED_INTERFACES_REF"
+          cargo fmt --all --check --manifest-path zed-cli/Cargo.toml
+          cargo test --locked --manifest-path zed-cli/Cargo.toml --lib r2g::tests
+          cargo build --locked --release --manifest-path zed-cli/Cargo.toml --bin zed
+          install -Dm755 zed-cli/target/release/zed "$RUNNER_TEMP/zed-bin/zed"
+          (
+            cd "$RUNNER_TEMP/zed-bin"
+            sha256sum zed | tee SHA256SUMS
+          )
+          "$RUNNER_TEMP/zed-bin/zed" --version
+
+      - name: Upload exact candidate binary
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: candidate-zed-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/zed-bin
+          if-no-files-found: error
+          retention-days: 7
+          include-hidden-files: false
+
+  fixture:
+    name: Candidate / ${{ matrix.fixture.repo }}
+    needs: [contract, build-zed]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      max-parallel: 5
+      matrix:
+        fixture: ${{ fromJSON(needs.contract.outputs.fixtures) }}
+    steps:
+      - name: Check out exact lifecycle harness
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: zed-pkg-test/zed-pkg-e2e
+          ref: ${{ env.HARNESS_REF }}
+          path: harness
+          fetch-depth: 1
+          persist-credentials: false
+          show-progress: false
+
+      - name: Check out exact fixture
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: zed-pkg-test/${{ matrix.fixture.repo }}
+          ref: ${{ matrix.fixture.ref }}
+          path: fixture
+          fetch-depth: 1
+          submodules: recursive
+          persist-credentials: false
+          show-progress: false
+
+      - name: Download exact candidate binary
+        uses: actions/download-artifact@974686ed5098c7f9c9289ec946b9058e496a2561 # v8.0.0
+        with:
+          name: candidate-zed-${{ github.run_id }}-${{ github.run_attempt }}
+          path: tooling
+
+      - name: Verify pins and binary checksum
+        run: |
+          set -euo pipefail
+          test "$(git -C harness rev-parse HEAD)" = "$HARNESS_REF"
+          test "$(git -C fixture rev-parse HEAD)" = "${{ matrix.fixture.ref }}"
+          chmod +x tooling/zed
+          (
+            cd tooling
+            sha256sum --check SHA256SUMS
+          )
+          tooling/zed --version
+
+      - name: Validate pinned lifecycle wrapper
+        run: |
+          set -euo pipefail
+          python3 -m py_compile \
+            harness/scripts/lifecycle.py \
+            harness/scripts/candidate_lifecycle.py
+          python3 harness/scripts/candidate_lifecycle.py --help >/dev/null
+
+      - name: Run stateless fixture lifecycle
+        env:
+          WORK_ROOT: ${{ runner.temp }}/candidate-smoke/${{ matrix.fixture.repo }}
+          FIXTURE_REFS_JSON: ${{ needs.contract.outputs.fixture_refs }}
+        run: |
+          set -euo pipefail
+          test ! -e "$WORK_ROOT"
+          python3 harness/scripts/candidate_lifecycle.py \
+            --repo "${{ matrix.fixture.repo }}" \
+            --fixture-dir fixture \
+            --zed tooling/zed \
+            --work-root "$WORK_ROOT" \
+            --fixture-refs-json "$FIXTURE_REFS_JSON"
+
+      - name: Collect failure diagnostics
+        if: failure()
+        env:
+          WORK_ROOT: ${{ runner.temp }}/candidate-smoke/${{ matrix.fixture.repo }}
+        run: |
+          set +e
+          mkdir -p "$WORK_ROOT/diagnostics"
+          git -C fixture status --porcelain=v1 --untracked-files=all \
+            > "$WORK_ROOT/diagnostics/fixture-status.txt" 2>&1
+          git -C harness status --porcelain=v1 --untracked-files=all \
+            > "$WORK_ROOT/diagnostics/harness-status.txt" 2>&1
+          find "$WORK_ROOT" -maxdepth 8 -printf '%y %P -> %l\n' \
+            | LC_ALL=C sort > "$WORK_ROOT/diagnostics/work-tree.txt" 2>&1
+
+      - name: Upload failure diagnostics
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: candidate-diagnostics-${{ matrix.fixture.repo }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/candidate-smoke/${{ matrix.fixture.repo }}/diagnostics
+          if-no-files-found: warn
+          retention-days: 14
+          include-hidden-files: false
+
+  candidate-gate:
+    name: Representative fixture smoke passed
+    if: always()
+    needs: [contract, build-zed, fixture]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Enforce aggregate result
+        env:
+          CONTRACT_RESULT: ${{ needs.contract.result }}
+          BUILD_RESULT: ${{ needs.build-zed.result }}
+          FIXTURE_RESULT: ${{ needs.fixture.result }}
+        run: |
+          set -euo pipefail
+          printf 'contract=%s\nbuild=%s\nfixtures=%s\n' \
+            "$CONTRACT_RESULT" "$BUILD_RESULT" "$FIXTURE_RESULT"
+          test "$CONTRACT_RESULT" = success
+          test "$BUILD_RESULT" = success
+          test "$FIXTURE_RESULT" = success
