@@ -65,6 +65,12 @@ test('paced executor rejects excluded organizations and paces write-producing re
   assert.match(workflow, /test "\$total" -eq 287/);
   assert.match(workflow, /tests\/bootstrap-retry-policy\.test\.mjs/);
   assert.match(workflow, /tests\/git-transport-worktree\.test\.mjs/);
+  assert.match(workflow, /gh_api_with_rate_limit_retry\(\)/);
+  assert.match(workflow, /gh api rate_limit/);
+  assert.match(workflow, /reset_epoch - now_epoch \+ 5/);
+  assert.match(workflow, /gh_api_with_rate_limit_retry "orgs\/\$organization" --silent/);
+  assert.match(workflow, /gh_api_with_rate_limit_retry --paginate/);
+  assert.doesNotMatch(workflow, /^\s+gh api "orgs\/\$organization" --silent\s*$/m);
   assert.doesNotMatch(workflow, /^\s+r2g(?:-test)?\s*$/m);
   assert.equal(credentialLiteral.test(workflow), false);
 });
