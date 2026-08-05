@@ -89,6 +89,21 @@ test('secret-backed apply workflow covers every test organization and never embe
   assert.doesNotMatch(workflow, /^\s+(?:token|pat):\s*$/m);
 });
 
+test('fleet apply serializes organizations and retries GitHub secondary content limits', () => {
+  const workflowPath = path.join(root, '.github', 'workflows', 'apply-test-org-fleet.yml');
+  const launcherPath = path.join(root, 'scripts', 'bootstrap-test-org-fleet.mjs');
+  const workflow = fs.readFileSync(workflowPath, 'utf8');
+  const launcher = fs.readFileSync(launcherPath, 'utf8');
+
+  assert.match(workflow, /timeout-minutes: 90/);
+  assert.match(workflow, /max-parallel: 1/);
+  assert.match(launcher, /attempt < 9/);
+  assert.match(launcher, /secondary rate limit\|temporarily blocked from content creation\|abuse detection/);
+  assert.match(launcher, /x-ratelimit-reset/);
+  assert.match(launcher, /Math\.min\(240000, 15000 \* \(2 \*\* attempt\)\)/);
+  assert.match(launcher, /retrying GitHub API request after rate limit/);
+});
+
 test('one-time handoff persists only ciphertext and dispatches the secret-backed fleet workflow', () => {
   const workflowPath = path.join(root, '.github', 'workflows', 'secure-fleet-token-handoff.yml');
   const workflow = fs.readFileSync(workflowPath, 'utf8');
