@@ -43,16 +43,36 @@ jobs:
           node --test tests/live-test-org-fleet-audit.test.mjs
 
   live:
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     env:
-      GH_TOKEN: ${{ github.token }}
+      # The repository-scoped GITHUB_TOKEN cannot enumerate private repositories
+      # owned by the other 17 organizations. Configure a read-only cross-org token
+      # or GitHub App installation token as FLEET_AUDIT_TOKEN.
+      GH_TOKEN: ${{ secrets.FLEET_AUDIT_TOKEN }}
     steps:
       - name: Check out without persisted credentials
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
           show-progress: false
+
+      - name: Require complete cross-organization visibility
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          if [[ -z "${GH_TOKEN:-}" ]]; then
+            {
+              echo '# Live paired test-fleet audit'
+              echo
+              echo '**Result:** not executed because `FLEET_AUDIT_TOKEN` is not configured.'
+              echo
+              echo 'The normal repository `GITHUB_TOKEN` is intentionally rejected: it cannot see private repositories in sibling organizations and would turn permission gaps into false missing-repository findings.'
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+          echo "::add-mask::$GH_TOKEN"
 
       - name: Compare all paired organizations with the canonical manifest
         id: audit
@@ -68,7 +88,7 @@ jobs:
           test -e live-test-fleet-audit.stderr || : > live-test-fleet-audit.stderr
 
       - name: Summarize and enforce the complete machine-readable report
-        if: always()
+        if: always() && steps.audit.outcome != 'skipped'
         shell: bash
         env:
           AUDIT_EXIT_CODE: ${{ steps.audit.outputs.exit_code }}
@@ -174,7 +194,7 @@ jobs:
           NODE
 
       - name: Upload complete live-audit evidence
-        if: always()
+        if: always() && steps.audit.outcome != 'skipped'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: live-paired-test-fleet-audit-${{ github.run_id }}-${{ github.run_attempt }}
