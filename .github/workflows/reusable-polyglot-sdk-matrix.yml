@@ -54,7 +54,8 @@ jobs:
             required: true
           - language: elixir
             paths: clients/elixir|elixir
-            tools: erlang@latest
+            tools: |-
+              erlang@latest
               elixir@latest
             required: true
           - language: dart
@@ -83,7 +84,8 @@ jobs:
             required: true
           - language: php
             paths: clients/php|php
-            tools: php@latest
+            tools: |-
+              php@latest
               composer@latest
             required: true
           - language: typescript-node
@@ -104,7 +106,8 @@ jobs:
             required: true
           - language: kotlin
             paths: clients/kotlin|kotlin
-            tools: java@21
+            tools: |-
+              java@21
               kotlin@latest
             required: false
           - language: swift
@@ -185,7 +188,7 @@ jobs:
               gleam test
               ;;
             erlang)
-              if [[ -f rebar.config || -f rebar.config.script ]]; then
+              if command -v rebar3 >/dev/null 2>&1 && [[ -f rebar.config || -f rebar.config.script ]]; then
                 rebar3 eunit
               else
                 mapfile -d '' files < <(find . -name '*.erl' -print0)
@@ -258,7 +261,7 @@ jobs:
               bun test
               ;;
             kotlin)
-              if [[ -x ./gradlew ]]; then ./gradlew test; else kotlinc $(find . -name '*.kt') -d build/sdk.jar; fi
+              if [[ -x ./gradlew ]]; then ./gradlew test; else mkdir -p build && kotlinc $(find . -name '*.kt') -d build/sdk.jar; fi
               ;;
             swift)
               test -f Package.swift
