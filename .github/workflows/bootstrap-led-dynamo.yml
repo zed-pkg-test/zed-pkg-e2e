@@ -1,0 +1,40 @@
+name: bootstrap led-dynamo repository family
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/bootstrap-led-dynamo.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: bootstrap-led-dynamo-repository-family
+  cancel-in-progress: false
+
+jobs:
+  provision:
+    if: github.repository == 'zed-pkg-test/zed-pkg-e2e'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    env:
+      GH_TOKEN: ${{ secrets.FLEET_GH_TOKEN }}
+      LEDDY_BOOTSTRAP_CONFIRM: CREATE_LEDDY_REPOSITORIES
+    steps:
+      - name: Check out control repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          show-progress: false
+      - name: Validate secret-backed authorization
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$GH_TOKEN"
+          gh api user --silent
+          gh api orgs/led-dynamo --silent
+      - name: Validate bootstrap program
+        run: node --check scripts/bootstrap-led-dynamo.mjs
+      - name: Create, configure, and seed repositories
+        run: node scripts/bootstrap-led-dynamo.mjs
