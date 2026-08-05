@@ -1,0 +1,138 @@
+# One-time single-runner completion of the cross-organization test fleet.
+name: finish test organization fleet on one runner
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - bootstrap/execute-test-org-fleet-single-runner.once
+
+permissions:
+  contents: read
+
+concurrency:
+  group: apply-test-org-fleet-all
+  cancel-in-progress: true
+
+jobs:
+  finish:
+    name: Finish all remaining test organizations
+    runs-on: ubuntu-24.04
+    timeout-minutes: 360
+    steps:
+      - name: Check out without persisted credentials
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          show-progress: false
+
+      - name: Validate authorization and fleet contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(tr -d '\r\n' < bootstrap/execute-test-org-fleet-single-runner.once)" = "APPLY_TEST_FLEET_SINGLE_RUNNER_V1"
+          node --check scripts/bootstrap-test-org-fleet.mjs
+          node --check scripts/bootstrap-test-org-fleet-worktree-safe.mjs
+          node --check scripts/validate-test-org-fleet.mjs
+          node scripts/validate-test-org-fleet.mjs
+          node --test tests/test-org-fleet.test.mjs
+
+      - name: Export the persisted fleet PAT without logging it
+        shell: bash
+        env:
+          STORED_FLEET_PAT: ${{ secrets.FLEET_GH_TOKEN }}
+        run: |
+          set -euo pipefail
+          test -n "$STORED_FLEET_PAT"
+          printf 'GH_TOKEN=%s\n' "$STORED_FLEET_PAT" >> "$GITHUB_ENV"
+
+      - name: Create or adopt repositories, push commits, and open draft PRs
+        shell: bash
+        env:
+          TEST_ORG_FLEET_SKIP_TOPICS: "true"
+        run: |
+          set -euo pipefail
+
+          organizations=(
+            fiducia-cloud-test
+            evento-globolo-test
+            opto-sync-test
+            quaestor-ledger-test
+            3fa-app-test
+            declarative-migrations-test
+            cliptown-test
+            claritas-viz-test
+            embedded-alerts-test
+            memebank-test
+            sonus-auris-test
+            messaging-intel-test
+            scintilla-run-test
+            file-tunnel-test
+            shared-auth-test
+            hypesiege-test
+            streempilot-test
+          )
+
+          failures=()
+          {
+            echo '## Single-runner fleet completion'
+            echo
+            echo '| Organization | Result | Attempts | Visible repositories |'
+            echo '|---|---:|---:|---:|'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          for organization in "${organizations[@]}"; do
+            echo "::group::Provision $organization"
+            gh api "orgs/$organization" --silent
+            sleep 15
+
+            completed=false
+            attempts=0
+            for attempt in 1 2 3; do
+              attempts="$attempt"
+              echo "Applying $organization (attempt $attempt of 3)"
+              if node scripts/bootstrap-test-org-fleet-worktree-safe.mjs \
+                --apply \
+                --org "$organization" \
+                --concurrency 1; then
+                completed=true
+                break
+              fi
+
+              if [[ "$attempt" -lt 3 ]]; then
+                delay=$((attempt * 60))
+                echo "Attempt $attempt failed for $organization; cooling down for ${delay}s before the idempotent retry."
+                sleep "$delay"
+              fi
+            done
+
+            repository_count="$(
+              gh api --paginate "orgs/$organization/repos?type=all&per_page=100" \
+                --jq '.[].name' | wc -l | tr -d '[:space:]'
+            )"
+
+            if [[ "$completed" == true ]]; then
+              printf '| `%s` | success | %s | %s |\n' \
+                "$organization" "$attempts" "$repository_count" >> "$GITHUB_STEP_SUMMARY"
+            else
+              failures+=("$organization")
+              printf '| `%s` | **failure** | %s | %s |\n' \
+                "$organization" "$attempts" "$repository_count" >> "$GITHUB_STEP_SUMMARY"
+            fi
+            echo "::endgroup::"
+          done
+
+          if (( ${#failures[@]} > 0 )); then
+            printf '::error::Fleet completion failed for: %s\n' "${failures[*]}"
+            {
+              echo
+              echo "Failed organizations: ${failures[*]}"
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+
+          {
+            echo
+            echo 'All remaining in-scope organizations completed. `r2g` and `r2g-test` were not selected.'
+          } >> "$GITHUB_STEP_SUMMARY"
