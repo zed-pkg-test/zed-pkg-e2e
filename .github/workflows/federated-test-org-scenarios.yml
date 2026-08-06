@@ -1,0 +1,177 @@
+name: Federated test-org scenarios
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "17 8 * * *"
+  pull_request:
+    paths:
+      - .github/workflows/federated-test-org-scenarios.yml
+      - scripts/run-federated-test-org-scenarios.py
+      - evidence/**
+
+permissions:
+  actions: read
+  contents: read
+
+concurrency:
+  group: federated-test-org-scenarios-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  GH_TOKEN: ${{ secrets.TEST_FLEET_READ_TOKEN || github.token }}
+
+jobs:
+  execute:
+    name: Offline cache, solver, security, and manager federation
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - name: Check out exact test harness
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Select latest retained Linux release candidate
+        id: candidate
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh --version
+          gh api --method GET \
+            -H 'Accept: application/vnd.github+json' \
+            /repos/zed-pkg/zed-cli/actions/artifacts \
+            -f name=zed-x86_64-unknown-linux-gnu \
+            -f per_page=100 > artifacts.json
+          python3 - <<'PY'
+          import json
+          import os
+          import re
+
+          data = json.load(open('artifacts.json', encoding='utf-8'))
+          candidates = [
+              artifact
+              for artifact in data.get('artifacts', [])
+              if not artifact.get('expired')
+              and artifact.get('workflow_run', {}).get('head_branch', '').startswith('release/')
+          ]
+          if not candidates:
+              raise SystemExit('no retained zed x86_64 Linux release candidate artifact found')
+          candidates.sort(key=lambda artifact: artifact['created_at'], reverse=True)
+          selected = candidates[0]
+          digest = selected.get('digest')
+          source_commit = selected.get('workflow_run', {}).get('head_sha', '')
+          if not isinstance(digest, str) or re.fullmatch(r'sha256:[0-9a-f]{64}', digest) is None:
+              raise SystemExit(f'artifact lacks a canonical SHA-256 digest: {digest!r}')
+          if re.fullmatch(r'[0-9a-f]{40}', source_commit) is None:
+              raise SystemExit(f'artifact lacks an immutable source commit: {source_commit!r}')
+          output = os.environ['GITHUB_OUTPUT']
+          with open(output, 'a', encoding='utf-8') as stream:
+              stream.write(f"artifact_id={selected['id']}\n")
+              stream.write(f"artifact_digest={digest}\n")
+              stream.write(f"source_commit={source_commit}\n")
+              stream.write(f"source_branch={selected['workflow_run']['head_branch']}\n")
+              stream.write(f"created_at={selected['created_at']}\n")
+          print(json.dumps(selected, indent=2))
+          PY
+
+      - name: Download and verify Actions artifact ZIP
+        shell: bash
+        env:
+          ARTIFACT_ID: ${{ steps.candidate.outputs.artifact_id }}
+          ARTIFACT_DIGEST: ${{ steps.candidate.outputs.artifact_digest }}
+        run: |
+          set -euo pipefail
+          gh api \
+            -H 'Accept: application/vnd.github+json' \
+            "/repos/zed-pkg/zed-cli/actions/artifacts/$ARTIFACT_ID/zip" \
+            > zed-release-candidate.zip
+          actual="sha256:$(sha256sum zed-release-candidate.zip | awk '{print $1}')"
+          test "$actual" = "$ARTIFACT_DIGEST"
+          mkdir artifact
+          unzip -q zed-release-candidate.zip -d artifact
+
+      - name: Verify inner release checksum and extract zed
+        id: binary
+        shell: bash
+        run: |
+          set -euo pipefail
+          archive="$(find artifact -type f -name 'zed-x86_64-unknown-linux-gnu.tar.gz' -print -quit)"
+          checksum="$(find artifact -type f -name 'zed-x86_64-unknown-linux-gnu.tar.gz.sha256' -print -quit)"
+          test -n "$archive"
+          test -n "$checksum"
+          test "$(find artifact -type f -name 'zed-x86_64-unknown-linux-gnu.tar.gz' | wc -l)" -eq 1
+          test "$(find artifact -type f -name 'zed-x86_64-unknown-linux-gnu.tar.gz.sha256' | wc -l)" -eq 1
+          (
+            cd "$(dirname "$checksum")"
+            sha256sum --check "$(basename "$checksum")"
+          )
+          mkdir binary
+          tar -xzf "$archive" -C binary
+          chmod 0755 binary/zed
+          binary/zed --version
+          printf 'archive=%s\n' "$archive" >> "$GITHUB_OUTPUT"
+
+      - name: Execute four independent test-org profiles
+        shell: bash
+        env:
+          ZED_BIN: ${{ github.workspace }}/binary/zed
+          ZED_BINARY_ARCHIVE: ${{ steps.binary.outputs.archive }}
+          ZED_SOURCE_COMMIT: ${{ steps.candidate.outputs.source_commit }}
+          ZED_E2E_ROOT: ${{ runner.temp }}/zed-test-org-federation
+          ZED_E2E_REPORT: ${{ github.workspace }}/federated-test-org-report.json
+        run: |
+          set -euo pipefail
+          python3 -m py_compile scripts/run-federated-test-org-scenarios.py
+          python3 scripts/run-federated-test-org-scenarios.py 2>&1 | tee federated-test-org-run.log
+          python3 - <<'PY'
+          import json
+          import os
+
+          report = json.load(open('federated-test-org-report.json', encoding='utf-8'))
+          suites = report.get('suites', {})
+          expected = {
+              'zed-pkg-test/offline-cache-e2e',
+              'zed-pkg-test/version-solver-e2e',
+              'zed-pkg-test/security-adversarial-e2e',
+              'zed-pkg-test/manager-interop-e2e',
+          }
+          if set(suites) != expected:
+              raise SystemExit(f'unexpected suite inventory: {sorted(suites)}')
+          failures = [name for name, suite in suites.items() if suite.get('status') != 'pass']
+          if failures:
+              raise SystemExit(f'federated suites failed: {failures}')
+          checks = [
+              (suite_name, check)
+              for suite_name, suite in suites.items()
+              for check in suite.get('checks', [])
+          ]
+          if len(checks) != 19:
+              raise SystemExit(f'expected 19 checks, found {len(checks)}')
+          failed_checks = [
+              f"{suite_name}: {check.get('name', '<unnamed>')}"
+              for suite_name, check in checks
+              if check.get('status') != 'pass'
+          ]
+          if failed_checks:
+              raise SystemExit(f'individual checks failed: {failed_checks}')
+          summary = os.environ['GITHUB_STEP_SUMMARY']
+          with open(summary, 'a', encoding='utf-8') as stream:
+              stream.write('## Federated zed-pkg-test result\n\n')
+              stream.write(f"- Source commit: `{report['binary']['source_commit']}`\n")
+              stream.write(f"- Binary: `{report['binary']['version']}`\n")
+              stream.write(f"- Inner archive SHA-256: `{report['binary']['archive_sha256']}`\n")
+              stream.write(f"- Suites: `{len(suites)}`\n")
+              stream.write(f"- Checks: `{len(checks)}/19 passed`\n")
+          PY
+
+      - name: Retain execution receipt and failure log
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: federated-test-org-${{ steps.candidate.outputs.source_commit || github.run_id }}
+          path: |
+            federated-test-org-report.json
+            federated-test-org-run.log
+          if-no-files-found: warn
+          retention-days: 14

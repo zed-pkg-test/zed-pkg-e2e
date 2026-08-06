@@ -12,6 +12,16 @@ on:
         required: false
         default: main
         type: string
+      interfaces_repository:
+        description: sibling interfaces repository required by Rust SDKs
+        required: false
+        default: zed-pkg/zed-interfaces
+        type: string
+      interfaces_ref:
+        description: interfaces Git ref to test
+        required: false
+        default: main
+        type: string
     secrets:
       CLIENT_SDK_READ_TOKEN:
         required: false
@@ -24,6 +34,16 @@ on:
         type: string
       client_ref:
         description: Git ref to test
+        required: true
+        default: main
+        type: string
+      interfaces_repository:
+        description: sibling interfaces repository required by Rust SDKs
+        required: true
+        default: zed-pkg/zed-interfaces
+        type: string
+      interfaces_ref:
+        description: interfaces Git ref to test
         required: true
         default: main
         type: string
@@ -46,112 +66,138 @@ jobs:
         include:
           - language: gleam
             paths: clients/gleam|clients/gleamlang|gleam|gleamlang
-            tools: gleam@latest
+            tools: |-
+              erlang latest
+              gleam latest
+            commands: erl|gleam
             required: true
           - language: erlang
             paths: clients/erlang|erlang
-            tools: erlang@latest
+            tools: erlang latest
+            commands: erlc
             required: true
           - language: elixir
             paths: clients/elixir|elixir
             tools: |-
-              erlang@latest
-              elixir@latest
+              erlang latest
+              elixir latest
+            commands: elixir|mix
             required: true
           - language: dart
             paths: clients/dart|dart
-            tools: dart@latest
+            tools: dart latest
+            commands: dart
             required: true
           - language: rust
             paths: clients/rust|rust
-            tools: rust@stable
+            tools: rust stable
+            commands: cargo|rustc
             required: true
+            needs_interfaces: true
           - language: java
             paths: clients/java|java
-            tools: java@21
+            tools: java 21
+            commands: java|javac
             required: true
           - language: go
             paths: clients/go|clients/golang|go|golang
-            tools: go@latest
+            tools: go latest
+            commands: go
             required: true
           - language: python3
             paths: clients/python3|clients/python|python3|python
-            tools: python@3.12
+            tools: python 3.12
+            commands: python
             required: true
           - language: ruby
             paths: clients/ruby|ruby
-            tools: ruby@latest
+            tools: ruby latest
+            commands: ruby
             required: true
           - language: php
             paths: clients/php|php
             tools: |-
-              php@latest
-              composer@latest
+              php latest
+              composer latest
+            commands: php|composer
             required: true
           - language: typescript-node
             paths: clients/typescript/node|clients/typescript/nodejs|clients/typescript|typescript/node|typescript
-            tools: node@22
+            tools: node 22
+            commands: node|npm
             required: true
           - language: typescript-deno
             paths: clients/typescript/deno|typescript/deno|clients/typescript|typescript
-            tools: deno@latest
+            tools: |-
+              node 22
+              deno latest
+            commands: node|npm|deno
             required: true
           - language: typescript-bun
             paths: clients/typescript/bun|typescript/bun|clients/typescript|typescript
-            tools: bun@latest
+            tools: |-
+              node 22
+              bun latest
+            commands: node|npm|bun
             required: true
           - language: typescript-edge
             paths: clients/typescript/edge|clients/typescript/edge-runtime|typescript/edge|clients/typescript|typescript
-            tools: node@22
+            tools: node 22
+            commands: node|npm
             required: true
           - language: kotlin
             paths: clients/kotlin|kotlin
             tools: |-
-              java@21
-              kotlin@latest
-            required: false
+              java 21
+              kotlin latest
+            commands: java|kotlinc
+            required: true
           - language: swift
             paths: clients/swift|swift
-            tools: swift@latest
-            required: false
+            tools: swift latest
+            commands: swift
+            required: true
+          - language: wasm
+            paths: clients/wasm|wasm
+            tools: rust stable
+            commands: cargo|rustc
+            required: true
+            needs_interfaces: true
+          # Discovery lanes stay optional until zed-clients declares them in
+          # its canonical .zpkg.toml package surface.
           - language: zig
             paths: clients/zig|zig
-            tools: zig@latest
-            required: true
+            tools: zig latest
+            commands: zig
+            required: false
           - language: cpp
             paths: clients/cpp|clients/cxx|clients/c++|cpp|cxx
-            tools: cmake@latest
-            required: true
+            tools: cmake latest
+            commands: cmake
+            required: false
           - language: c
             paths: clients/c|c
-            tools: cmake@latest
+            tools: cmake latest
+            commands: cmake
             required: false
           - language: csharp
             paths: clients/csharp|clients/dotnet|csharp|dotnet
-            tools: dotnet@8
-            required: false
-          - language: wasm
-            paths: clients/wasm|wasm
-            tools: rust@stable
+            tools: dotnet 8
+            commands: dotnet
             required: false
 
     steps:
       - name: Check out SDK repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           repository: ${{ inputs.client_repository }}
           ref: ${{ inputs.client_ref }}
           path: sdk
           token: ${{ secrets.CLIENT_SDK_READ_TOKEN || github.token }}
+          persist-credentials: false
 
-      - name: Install language toolchain
-        uses: jdx/mise-action@v2
-        with:
-          tool_versions: ${{ matrix.tools }}
-          install: true
-          cache: true
-
-      - name: Locate and test SDK consumer
+      - name: Locate SDK slice
+        id: locate
         shell: bash
         env:
           LANGUAGE: ${{ matrix.language }}
@@ -159,7 +205,6 @@ jobs:
           REQUIRED: ${{ matrix.required }}
         run: |
           set -euo pipefail
-
           IFS='|' read -r -a candidates <<< "$CANDIDATE_PATHS"
           sdk_dir=""
           for candidate in "${candidates[@]}"; do
@@ -175,11 +220,59 @@ jobs:
               exit 1
             fi
             echo "Optional $LANGUAGE SDK is not present; skipping."
+            echo 'present=false' >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
-          cd "$sdk_dir"
-          echo "Testing $LANGUAGE SDK at $sdk_dir"
+          echo "Found $LANGUAGE SDK at $sdk_dir"
+          echo 'present=true' >> "$GITHUB_OUTPUT"
+          echo "sdk_dir=$sdk_dir" >> "$GITHUB_OUTPUT"
+
+      - name: Check out exact sibling interfaces package
+        if: steps.locate.outputs.present == 'true' && matrix.needs_interfaces == true
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          repository: ${{ inputs.interfaces_repository }}
+          ref: ${{ inputs.interfaces_ref }}
+          path: zed-interfaces
+          token: ${{ secrets.CLIENT_SDK_READ_TOKEN || github.token }}
+          persist-credentials: false
+
+      - name: Install language toolchain
+        if: steps.locate.outputs.present == 'true'
+        uses: jdx/mise-action@c37c93293d6b742fc901e1406b8f764f6fb19dac # v2
+        with:
+          tool_versions: ${{ matrix.tools }}
+          install: true
+          cache: true
+          github_token: ${{ github.token }}
+
+      - name: Verify installed toolchain
+        if: steps.locate.outputs.present == 'true'
+        shell: bash
+        env:
+          COMMANDS: ${{ matrix.commands }}
+        run: |
+          set -euo pipefail
+          IFS='|' read -r -a commands <<< "$COMMANDS"
+          for command in "${commands[@]}"; do
+            command -v "$command" >/dev/null || {
+              echo "required executable was not installed: $command" >&2
+              exit 1
+            }
+            "$command" --version 2>/dev/null || true
+          done
+
+      - name: Test SDK consumer
+        if: steps.locate.outputs.present == 'true'
+        shell: bash
+        env:
+          LANGUAGE: ${{ matrix.language }}
+          SDK_DIR: ${{ steps.locate.outputs.sdk_dir }}
+        run: |
+          set -euo pipefail
+          cd "$SDK_DIR"
+          echo "Testing $LANGUAGE SDK at $SDK_DIR"
 
           case "$LANGUAGE" in
             gleam)
@@ -188,16 +281,14 @@ jobs:
               gleam test
               ;;
             erlang)
-              if command -v rebar3 >/dev/null 2>&1 && [[ -f rebar.config || -f rebar.config.script ]]; then
-                rebar3 eunit
-              else
-                mapfile -d '' files < <(find . -name '*.erl' -print0)
-                test "${#files[@]}" -gt 0
-                erlc "${files[@]}"
-              fi
+              mapfile -d '' files < <(find . -name '*.erl' -print0)
+              test "${#files[@]}" -gt 0
+              mkdir -p _build/e2e
+              erlc -o _build/e2e "${files[@]}"
               ;;
             elixir)
               test -f mix.exs
+              mix local.hex --force
               mix deps.get
               mix test
               ;;
@@ -218,7 +309,8 @@ jobs:
               else
                 mapfile -d '' files < <(find . -name '*.java' -print0)
                 test "${#files[@]}" -gt 0
-                javac "${files[@]}"
+                mkdir -p build/e2e
+                javac -d build/e2e "${files[@]}"
               fi
               ;;
             go)
@@ -227,41 +319,80 @@ jobs:
               ;;
             python3)
               python -m pip install --upgrade pip pytest
-              if [[ -f pyproject.toml || -f setup.py || -f setup.cfg ]]; then python -m pip install -e .; fi
-              if [[ -d tests || -d test ]]; then python -m pytest; else python -m compileall .; fi
+              if [[ -f pyproject.toml || -f setup.py || -f setup.cfg ]]; then
+                python -m pip install -e .
+              fi
+              if [[ -d tests || -d test ]]; then
+                python -m pytest
+              else
+                python -m compileall .
+              fi
               ;;
             ruby)
               if [[ -f Gemfile ]]; then
                 gem install bundler
                 bundle install
-                if bundle exec rake -T 2>/dev/null | grep -q test; then bundle exec rake test; else bundle exec ruby -c "$(find . -name '*.rb' | head -1)"; fi
+                if bundle exec rake -T 2>/dev/null | grep -q test; then
+                  bundle exec rake test
+                else
+                  mapfile -d '' files < <(find . -name '*.rb' -print0)
+                  test "${#files[@]}" -gt 0
+                  for file in "${files[@]}"; do ruby -c "$file"; done
+                fi
               else
-                find . -name '*.rb' -print0 | xargs -0 -n1 ruby -c
+                mapfile -d '' files < <(find . -name '*.rb' -print0)
+                test "${#files[@]}" -gt 0
+                for file in "${files[@]}"; do ruby -c "$file"; done
               fi
               ;;
             php)
               if [[ -f composer.json ]]; then
                 composer install --no-interaction --prefer-dist
-                composer test --no-interaction || vendor/bin/phpunit
+                if php -r '$d=json_decode(file_get_contents("composer.json"), true); exit(isset($d["scripts"]["test"]) ? 0 : 1);'; then
+                  composer run-script test --no-interaction
+                elif [[ -x vendor/bin/phpunit ]]; then
+                  vendor/bin/phpunit
+                else
+                  mapfile -d '' files < <(find . -name '*.php' -not -path './vendor/*' -print0)
+                  test "${#files[@]}" -gt 0
+                  for file in "${files[@]}"; do php -l "$file"; done
+                fi
               else
-                find . -name '*.php' -print0 | xargs -0 -n1 php -l
+                mapfile -d '' files < <(find . -name '*.php' -print0)
+                test "${#files[@]}" -gt 0
+                for file in "${files[@]}"; do php -l "$file"; done
               fi
               ;;
-            typescript-node|typescript-edge)
-              if [[ -f package-lock.json ]]; then npm ci; else npm install; fi
-              npm test --if-present
-              npm run build --if-present
-              if [[ -f tsconfig.json ]]; then npx tsc --noEmit; fi
+            typescript-node)
+              npm ci
+              npm run build
+              npm test
+              npx tsc --noEmit
               ;;
             typescript-deno)
-              deno test --allow-env --allow-net --allow-read
+              npm ci
+              npm run build
+              deno eval 'await import("./dist/runtimes/deno/index.js")'
               ;;
             typescript-bun)
-              bun install
-              bun test
+              npm ci
+              npm run build
+              bun -e 'await import("./dist/runtimes/bun/index.js")'
+              ;;
+            typescript-edge)
+              npm ci
+              npm run build
+              node -e 'import("./dist/runtimes/edge/index.js")'
               ;;
             kotlin)
-              if [[ -x ./gradlew ]]; then ./gradlew test; else mkdir -p build && kotlinc $(find . -name '*.kt') -d build/sdk.jar; fi
+              if [[ -x ./gradlew ]]; then
+                ./gradlew test
+              else
+                mapfile -d '' files < <(find . -name '*.kt' -print0)
+                test "${#files[@]}" -gt 0
+                mkdir -p build
+                kotlinc "${files[@]}" -d build/sdk.jar
+              fi
               ;;
             swift)
               test -f Package.swift
