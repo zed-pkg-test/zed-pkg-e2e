@@ -3,3 +3,7 @@ playwright-report/
 test-results/
 .stack/
 .zed/
+tmp
+temp
+tmp/worktrees
+temp/worktrees
