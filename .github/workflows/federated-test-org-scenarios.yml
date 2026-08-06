@@ -37,6 +37,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          gh --version
           gh api --method GET \
             -H 'Accept: application/vnd.github+json' \
             /repos/zed-pkg/zed-cli/actions/artifacts \
@@ -45,6 +46,7 @@ jobs:
           python3 - <<'PY'
           import json
           import os
+          import re
 
           data = json.load(open('artifacts.json', encoding='utf-8'))
           candidates = [
@@ -58,13 +60,16 @@ jobs:
           candidates.sort(key=lambda artifact: artifact['created_at'], reverse=True)
           selected = candidates[0]
           digest = selected.get('digest')
-          if not isinstance(digest, str) or not digest.startswith('sha256:'):
-              raise SystemExit(f'artifact lacks a SHA-256 digest: {digest!r}')
+          source_commit = selected.get('workflow_run', {}).get('head_sha', '')
+          if not isinstance(digest, str) or re.fullmatch(r'sha256:[0-9a-f]{64}', digest) is None:
+              raise SystemExit(f'artifact lacks a canonical SHA-256 digest: {digest!r}')
+          if re.fullmatch(r'[0-9a-f]{40}', source_commit) is None:
+              raise SystemExit(f'artifact lacks an immutable source commit: {source_commit!r}')
           output = os.environ['GITHUB_OUTPUT']
           with open(output, 'a', encoding='utf-8') as stream:
               stream.write(f"artifact_id={selected['id']}\n")
               stream.write(f"artifact_digest={digest}\n")
-              stream.write(f"source_commit={selected['workflow_run']['head_sha']}\n")
+              stream.write(f"source_commit={source_commit}\n")
               stream.write(f"source_branch={selected['workflow_run']['head_branch']}\n")
               stream.write(f"created_at={selected['created_at']}\n")
           print(json.dumps(selected, indent=2))
@@ -84,6 +89,10 @@ jobs:
           actual="sha256:$(sha256sum zed-release-candidate.zip | awk '{print $1}')"
           test "$actual" = "$ARTIFACT_DIGEST"
           mkdir artifact
+          unzip -q artifact.zip 2>/dev/null && {
+            echo 'unexpected stale artifact.zip file' >&2
+            exit 1
+          } || true
           unzip -q zed-release-candidate.zip -d artifact
 
       - name: Verify inner release checksum and extract zed
@@ -118,7 +127,7 @@ jobs:
         run: |
           set -euo pipefail
           python3 -m py_compile scripts/run-federated-test-org-scenarios.py
-          python3 scripts/run-federated-test-org-scenarios.py
+          python3 scripts/run-federated-test-org-scenarios.py 2>&1 | tee federated-test-org-run.log
           python3 - <<'PY'
           import json
           import os
@@ -136,9 +145,20 @@ jobs:
           failures = [name for name, suite in suites.items() if suite.get('status') != 'pass']
           if failures:
               raise SystemExit(f'federated suites failed: {failures}')
-          checks = sum(len(suite.get('checks', [])) for suite in suites.values())
-          if checks != 19:
-              raise SystemExit(f'expected 19 checks, found {checks}')
+          checks = [
+              (suite_name, check)
+              for suite_name, suite in suites.items()
+              for check in suite.get('checks', [])
+          ]
+          if len(checks) != 19:
+              raise SystemExit(f'expected 19 checks, found {len(checks)}')
+          failed_checks = [
+              f"{suite_name}: {check.get('name', '<unnamed>')}"
+              for suite_name, check in checks
+              if check.get('status') != 'pass'
+          ]
+          if failed_checks:
+              raise SystemExit(f'individual checks failed: {failed_checks}')
           summary = os.environ['GITHUB_STEP_SUMMARY']
           with open(summary, 'a', encoding='utf-8') as stream:
               stream.write('## Federated zed-pkg-test result\n\n')
@@ -146,13 +166,16 @@ jobs:
               stream.write(f"- Binary: `{report['binary']['version']}`\n")
               stream.write(f"- Inner archive SHA-256: `{report['binary']['archive_sha256']}`\n")
               stream.write(f"- Suites: `{len(suites)}`\n")
-              stream.write(f"- Checks: `{checks}/19 passed`\n")
+              stream.write(f"- Checks: `{len(checks)}/19 passed`\n")
           PY
 
-      - name: Retain execution receipt
+      - name: Retain execution receipt and failure log
+        if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: federated-test-org-${{ steps.candidate.outputs.source_commit }}
-          path: federated-test-org-report.json
-          if-no-files-found: error
+          name: federated-test-org-${{ steps.candidate.outputs.source_commit || github.run_id }}
+          path: |
+            federated-test-org-report.json
+            federated-test-org-run.log
+          if-no-files-found: warn
           retention-days: 14
