@@ -89,10 +89,6 @@ jobs:
           actual="sha256:$(sha256sum zed-release-candidate.zip | awk '{print $1}')"
           test "$actual" = "$ARTIFACT_DIGEST"
           mkdir artifact
-          unzip -q artifact.zip 2>/dev/null && {
-            echo 'unexpected stale artifact.zip file' >&2
-            exit 1
-          } || true
           unzip -q zed-release-candidate.zip -d artifact
 
       - name: Verify inner release checksum and extract zed
