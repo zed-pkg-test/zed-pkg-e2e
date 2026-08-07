@@ -1,0 +1,175 @@
+name: gitmodules metadata boundary
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: gitmodules-metadata-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: "1"
+  ZED_CLI_REF: 0786987fe3a173659463940f4f905dc3b5bd19a8
+  ZED_INTERFACES_REF: c2e049006453c26ca8ca291783f681fce75cb01f
+
+jobs:
+  unix-black-box:
+    name: Black-box metadata contract / ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-15]
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Check out acceptance harness
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: harness
+          fetch-depth: 1
+          persist-credentials: false
+          show-progress: false
+
+      - name: Check out exact zed-cli candidate
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: zed-pkg/zed-cli
+          ref: ${{ env.ZED_CLI_REF }}
+          path: zed-cli
+          fetch-depth: 1
+          persist-credentials: false
+          show-progress: false
+
+      - name: Check out exact interface contract
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: zed-pkg/zed-interfaces
+          ref: ${{ env.ZED_INTERFACES_REF }}
+          path: zed-interfaces
+          fetch-depth: 1
+          persist-credentials: false
+          show-progress: false
+
+      - name: Verify immutable inputs and harness source
+        run: |
+          set -euo pipefail
+          test "$(git -C zed-cli rev-parse HEAD)" = "$ZED_CLI_REF"
+          test "$(git -C zed-interfaces rev-parse HEAD)" = "$ZED_INTERFACES_REF"
+          grep -F "rev = \"$ZED_INTERFACES_REF\"" zed-cli/Cargo.toml
+          test -z "${ZED_PKG_TOKEN:-}"
+          PYTHONPYCACHEPREFIX="$RUNNER_TEMP/pycache" \
+            python3 -m py_compile harness/scripts/gitmodules_metadata_contract.py
+
+      - name: Install stable Rust validation tools
+        run: |
+          set -euo pipefail
+          rustup toolchain install stable --profile minimal --component rustfmt --component clippy
+          rustup default stable
+          rustc --version --verbose
+          cargo --version --verbose
+
+      - name: Enforce formatting and focused metadata tests
+        run: |
+          set -euo pipefail
+          cargo fmt --all --check --manifest-path zed-cli/Cargo.toml
+          cargo test --locked --manifest-path zed-cli/Cargo.toml --lib \
+            git_submodules::manifest_kind_tests -- --nocapture
+
+      - name: Run all-target lint gate
+        if: runner.os == 'Linux'
+        run: cargo clippy --locked --manifest-path zed-cli/Cargo.toml --all-targets -- -D warnings
+
+      - name: Build the exact release binary
+        run: cargo build --locked --release --manifest-path zed-cli/Cargo.toml --bin zed
+
+      - name: Run real Git metadata attacks
+        env:
+          WORK_ROOT: ${{ runner.temp }}/zed-gitmodules-metadata
+        run: |
+          set -euo pipefail
+          python3 harness/scripts/gitmodules_metadata_contract.py \
+            --zed zed-cli/target/release/zed \
+            --work-root "$WORK_ROOT"
+
+      - name: Require clean source checkouts
+        run: |
+          set -euo pipefail
+          test -z "$(git -C harness status --porcelain=v1 --untracked-files=all)"
+          test -z "$(git -C zed-cli status --porcelain=v1 --untracked-files=all)"
+          test -z "$(git -C zed-interfaces status --porcelain=v1 --untracked-files=all)"
+
+      - name: Upload bounded metadata evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: gitmodules-metadata-${{ matrix.os }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/zed-gitmodules-metadata/evidence
+          if-no-files-found: warn
+          retention-days: 14
+          include-hidden-files: false
+
+  windows-product-gate:
+    name: Windows metadata unit and lint gate
+    runs-on: windows-2025
+    timeout-minutes: 45
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - name: Check out exact zed-cli candidate
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: zed-pkg/zed-cli
+          ref: ${{ env.ZED_CLI_REF }}
+          path: zed-cli
+          fetch-depth: 1
+          persist-credentials: false
+          show-progress: false
+
+      - name: Check out exact interface contract
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: zed-pkg/zed-interfaces
+          ref: ${{ env.ZED_INTERFACES_REF }}
+          path: zed-interfaces
+          fetch-depth: 1
+          persist-credentials: false
+          show-progress: false
+
+      - name: Verify immutable inputs
+        run: |
+          if ((git -C zed-cli rev-parse HEAD) -ne $env:ZED_CLI_REF) { throw "zed-cli pin mismatch" }
+          if ((git -C zed-interfaces rev-parse HEAD) -ne $env:ZED_INTERFACES_REF) { throw "interface pin mismatch" }
+          Select-String -Path zed-cli/Cargo.toml -SimpleMatch "rev = `"$env:ZED_INTERFACES_REF`"" | Out-Null
+
+      - name: Install stable Rust validation tools
+        run: |
+          rustup toolchain install stable --profile minimal --component rustfmt --component clippy
+          rustup default stable
+          rustc --version --verbose
+          cargo --version --verbose
+
+      - name: Enforce formatting and focused metadata tests
+        run: |
+          cargo fmt --all --check --manifest-path zed-cli/Cargo.toml
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          cargo test --locked --manifest-path zed-cli/Cargo.toml --lib git_submodules::manifest_kind_tests -- --nocapture
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Run all-target Windows lint gate
+        run: cargo clippy --locked --manifest-path zed-cli/Cargo.toml --all-targets -- -D warnings
+
+      - name: Require clean product checkouts
+        run: |
+          if (git -C zed-cli status --porcelain=v1 --untracked-files=all) { throw "zed-cli checkout mutated" }
+          if (git -C zed-interfaces status --porcelain=v1 --untracked-files=all) { throw "zed-interfaces checkout mutated" }
