@@ -1,0 +1,71 @@
+# One-time exact audit of repositories, generated branches, and draft pull requests.
+name: audit generated test organization fleet
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/audit-test-org-fleet-once.yml"
+      - "bootstrap/audit-test-org-fleet.once"
+      - "scripts/audit-test-org-fleet.mjs"
+      - "scripts/audit-test-org-fleet-live.mjs"
+      - "tests/audit-test-org-fleet.test.mjs"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: audit-generated-test-org-fleet
+  cancel-in-progress: true
+
+jobs:
+  audit:
+    if: github.repository == 'zed-pkg-test/zed-pkg-e2e' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - name: Check out without persisted credentials
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          show-progress: false
+
+      - name: Validate authorization and audit contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(tr -d '\r\n' < bootstrap/audit-test-org-fleet.once)" = "AUDIT_TEST_FLEET_V1"
+          node --check scripts/audit-test-org-fleet.mjs
+          node --check scripts/audit-test-org-fleet-live.mjs
+          node scripts/audit-test-org-fleet-live.mjs --plan-json > /tmp/test-org-fleet-audit-plan.json
+          node --test tests/audit-test-org-fleet.test.mjs
+          jq -e '
+            .organizations == 18
+            and .repositories == 341
+            and .generatedRepositories == 319
+            and .retainedRepositories == 22
+          ' /tmp/test-org-fleet-audit-plan.json > /dev/null
+
+      - name: Export the persisted fleet PAT without logging it
+        shell: bash
+        env:
+          STORED_FLEET_PAT: ${{ secrets.FLEET_GH_TOKEN }}
+        run: |
+          set -euo pipefail
+          test -n "$STORED_FLEET_PAT"
+          printf 'GH_TOKEN=%s\n' "$STORED_FLEET_PAT" >> "$GITHUB_ENV"
+
+      - name: Audit all expected repositories, branches, and pull requests
+        shell: bash
+        run: |
+          set +e
+          node scripts/audit-test-org-fleet-live.mjs \
+            --output /tmp/test-org-fleet-live-audit.json \
+            --markdown /tmp/test-org-fleet-live-audit.md
+          status=$?
+          set -e
+
+          cat /tmp/test-org-fleet-live-audit.md >> "$GITHUB_STEP_SUMMARY"
+          echo
+          jq -c '.summary' /tmp/test-org-fleet-live-audit.json
+          exit "$status"
