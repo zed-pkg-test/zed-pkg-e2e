@@ -1,0 +1,45 @@
+name: probe sonus-ci ARC runner
+
+on:
+  push:
+    branches: [agent/probe-sonus-ci-arc]
+    paths:
+      - ".github/workflows/probe-sonus-ci-arc.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: probe-sonus-ci-arc
+  cancel-in-progress: true
+
+jobs:
+  probe:
+    runs-on: [self-hosted, linux, sonus-ci]
+    timeout-minutes: 10
+    steps:
+      - name: Check out without persisted credentials
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          show-progress: false
+
+      - name: Install a pinned Node runtime
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '22'
+          cache: ''
+
+      - name: Verify the fleet runtime without secrets
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$RUNNER_OS" = Linux
+          test -n "$RUNNER_NAME"
+          git --version
+          node --version
+          python3 --version
+          node --check scripts/bootstrap-test-org-fleet-worktree-safe.mjs
+          node scripts/validate-test-org-fleet.mjs
+          node --test tests/bootstrap-retry-policy.test.mjs tests/paced-fleet-executor.test.mjs
+          node -e 'fetch("https://api.github.com/rate_limit", {headers:{"user-agent":"zed-pkg-test-arc-probe"}}).then(r=>{if(!r.ok) throw new Error(String(r.status)); console.log("github-api-ok")})'
