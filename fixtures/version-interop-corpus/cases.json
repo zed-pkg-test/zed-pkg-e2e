@@ -1,0 +1,173 @@
+{
+  "schema": "zed.version-interop-corpus/v1",
+  "interface_commit": "032b52f6e335e5696cb793d6a955c8f0658a95eb",
+  "precedence": [
+    {
+      "id": "release-build-metadata",
+      "input": "1.4.2+linux-arm64",
+      "expected": "1.4.2"
+    },
+    {
+      "id": "alternate-release-build-metadata",
+      "input": "1.4.2+darwin-arm64",
+      "expected": "1.4.2"
+    },
+    {
+      "id": "prerelease-build-metadata",
+      "input": "1.4.2-rc.1+linux-arm64",
+      "expected": "1.4.2-rc.1"
+    }
+  ],
+  "collisions": [
+    {
+      "id": "same-release-different-platform-metadata",
+      "left": "1.4.2+linux-arm64",
+      "right": "1.4.2+darwin-arm64",
+      "expected": true
+    },
+    {
+      "id": "plain-and-build-metadata",
+      "left": "1.4.2",
+      "right": "1.4.2+build.7",
+      "expected": true
+    },
+    {
+      "id": "prerelease-versus-release",
+      "left": "1.4.2-rc.1",
+      "right": "1.4.2",
+      "expected": false
+    },
+    {
+      "id": "different-patch-versions",
+      "left": "1.4.3+linux-arm64",
+      "right": "1.4.2+darwin-arm64",
+      "expected": false
+    }
+  ],
+  "valid_records": [
+    {
+      "id": "npm-multiplatform",
+      "kind": "npm-multiplatform"
+    },
+    {
+      "id": "cargo-portable",
+      "kind": "cargo-portable"
+    }
+  ],
+  "invalid_records": [
+    {
+      "id": "unsupported-schema",
+      "base": "npm-multiplatform",
+      "mutation": "unsupported-schema",
+      "expected_error": "UnsupportedSchema"
+    },
+    {
+      "id": "empty-publication-set",
+      "base": "npm-multiplatform",
+      "mutation": "no-publications",
+      "expected_error": "NoPublications"
+    },
+    {
+      "id": "invalid-source-semver",
+      "base": "npm-multiplatform",
+      "mutation": "invalid-source-semver",
+      "expected_error": "InvalidSemver"
+    },
+    {
+      "id": "build-metadata-at-publication-boundary",
+      "base": "npm-multiplatform",
+      "mutation": "build-metadata",
+      "expected_error": "BuildMetadataNotAllowed"
+    },
+    {
+      "id": "source-publication-version-drift",
+      "base": "npm-multiplatform",
+      "mutation": "version-drift",
+      "expected_error": "VersionDrift"
+    },
+    {
+      "id": "invalid-npm-name",
+      "base": "npm-multiplatform",
+      "mutation": "invalid-npm-name",
+      "expected_error": "InvalidPackageName"
+    },
+    {
+      "id": "invalid-cargo-name",
+      "base": "cargo-portable",
+      "mutation": "invalid-cargo-name",
+      "expected_error": "InvalidPackageName"
+    },
+    {
+      "id": "platform-selector-required",
+      "base": "npm-multiplatform",
+      "mutation": "platform-required",
+      "expected_error": "PlatformRequired"
+    },
+    {
+      "id": "meta-package-cannot-have-platform",
+      "base": "npm-multiplatform",
+      "mutation": "unexpected-platform",
+      "expected_error": "UnexpectedPlatform"
+    },
+    {
+      "id": "uppercase-platform-token",
+      "base": "npm-multiplatform",
+      "mutation": "invalid-platform-token",
+      "expected_error": "InvalidPlatformToken"
+    },
+    {
+      "id": "duplicate-meta-selector",
+      "base": "npm-multiplatform",
+      "mutation": "duplicate-meta-platform",
+      "expected_error": "DuplicateMetaPlatform"
+    },
+    {
+      "id": "meta-selector-package-mismatch",
+      "base": "npm-multiplatform",
+      "mutation": "platform-package-mismatch",
+      "expected_error": "PlatformPackageMismatch"
+    },
+    {
+      "id": "missing-platform-publication",
+      "base": "npm-multiplatform",
+      "mutation": "missing-platform-publication",
+      "expected_error": "MissingPlatformPublication"
+    },
+    {
+      "id": "duplicate-platform-publication",
+      "base": "npm-multiplatform",
+      "mutation": "duplicate-platform-publication",
+      "expected_error": "DuplicatePlatformPublication"
+    },
+    {
+      "id": "multiple-meta-packages",
+      "base": "npm-multiplatform",
+      "mutation": "multiple-meta-packages",
+      "expected_error": "MultipleMetaPackages"
+    },
+    {
+      "id": "platform-package-selects-platform-package",
+      "base": "npm-multiplatform",
+      "mutation": "platform-packages-not-allowed",
+      "expected_error": "PlatformPackagesNotAllowed"
+    },
+    {
+      "id": "uppercase-artifact-digest",
+      "base": "npm-multiplatform",
+      "mutation": "invalid-sha256",
+      "expected_error": "InvalidSha256"
+    },
+    {
+      "id": "zero-byte-artifact",
+      "base": "npm-multiplatform",
+      "mutation": "empty-artifact",
+      "expected_error": "EmptyArtifact"
+    },
+    {
+      "id": "duplicate-package-version-identity",
+      "base": "npm-multiplatform",
+      "mutation": "duplicate-package-version",
+      "expected_error": "DuplicatePackageVersion"
+    }
+  ]
+}
