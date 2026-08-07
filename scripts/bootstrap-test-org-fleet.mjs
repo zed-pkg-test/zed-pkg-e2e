@@ -126,7 +126,8 @@ esac
     if (filePaths.length) runGit(['add', '--', ...filePaths]);
 
     for (const gitlink of gitlinks) {
-      fs.rmSync(path.join(worktree, gitlink.path), { recursive: true, force: true });
+      const gitlinkPath = path.join(worktree, gitlink.path);
+      fs.rmSync(gitlinkPath, { recursive: true, force: true });
       runGit([
         'update-index',
         '--add',

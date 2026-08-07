@@ -19,9 +19,12 @@ on:
       - ".github/fleet-handoff/START"
       - ".github/fleet-resume/START"
       - ".github/workflows/apply-test-org-fleet.yml"
+      - ".github/workflows/cancel-stale-fleet-recovery.yml"
+      - ".github/workflows/dispatch-test-org-fleet-once.yml"
       - ".github/workflows/resume-test-org-fleet.yml"
       - ".github/workflows/secure-fleet-token-handoff.yml"
       - ".github/workflows/test-org-fleet.yml"
+      - "bootstrap/execute-test-org-fleet-v2.once"
   push:
     branches: [main]
     paths:
@@ -40,9 +43,12 @@ on:
       - ".github/fleet-handoff/START"
       - ".github/fleet-resume/START"
       - ".github/workflows/apply-test-org-fleet.yml"
+      - ".github/workflows/cancel-stale-fleet-recovery.yml"
+      - ".github/workflows/dispatch-test-org-fleet-once.yml"
       - ".github/workflows/resume-test-org-fleet.yml"
       - ".github/workflows/secure-fleet-token-handoff.yml"
       - ".github/workflows/test-org-fleet.yml"
+      - "bootstrap/execute-test-org-fleet-v2.once"
   workflow_dispatch:
 
 permissions:
