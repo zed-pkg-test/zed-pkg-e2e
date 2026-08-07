@@ -1,0 +1,18 @@
+[tools]
+node = { version = "22.4.0", postinstall = "never-run-by-adapter" }
+
+[env]
+STRING_VALUE = "alpha"
+INTEGER_VALUE = 7
+FLOAT_VALUE = 2.5
+BOOLEAN_VALUE = true
+ARRAY_VALUE = ["first", "second"]
+TABLE_VALUE = { nested = "value", enabled = true }
+
+[vars]
+channel = "stable"
+retries = 3
+
+[tasks.never-run]
+description = "Adapter operations must preserve but never execute this task"
+run = "touch ADAPTER_EXECUTED_TASK"
