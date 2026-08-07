@@ -165,6 +165,56 @@ jobs:
           printf 'mode=%s\n' "$selected" >> "$GITHUB_OUTPUT"
           echo "Using $selected authentication for ${{ matrix.organization }}"
 
+      - name: Select a secret-backed credential
+        id: auth
+        shell: bash
+        env:
+          REQUESTED_AUTHENTICATION: ${{ inputs.authentication }}
+          STORED_FLEET_PAT: ${{ secrets.FLEET_GH_TOKEN }}
+          FLEET_APP_CLIENT_ID: ${{ vars.FLEET_APP_CLIENT_ID }}
+          FLEET_APP_PRIVATE_KEY: ${{ secrets.FLEET_APP_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+
+          has_pat=false
+          has_app=false
+          [[ -n "$STORED_FLEET_PAT" ]] && has_pat=true
+          [[ -n "$FLEET_APP_CLIENT_ID" && -n "$FLEET_APP_PRIVATE_KEY" ]] && has_app=true
+
+          case "$REQUESTED_AUTHENTICATION" in
+            auto)
+              if [[ "$has_pat" == true ]]; then
+                selected=pat
+              elif [[ "$has_app" == true ]]; then
+                selected=github-app
+              else
+                echo "::error::Configure FLEET_GH_TOKEN or both FLEET_APP_CLIENT_ID and FLEET_APP_PRIVATE_KEY"
+                exit 1
+              fi
+              ;;
+            pat)
+              if [[ "$has_pat" != true ]]; then
+                echo "::error::authentication=pat requires the FLEET_GH_TOKEN Actions secret"
+                exit 1
+              fi
+              selected=pat
+              ;;
+            github-app)
+              if [[ "$has_app" != true ]]; then
+                echo "::error::authentication=github-app requires FLEET_APP_CLIENT_ID and FLEET_APP_PRIVATE_KEY"
+                exit 1
+              fi
+              selected=github-app
+              ;;
+            *)
+              echo "::error::Unsupported authentication mode: $REQUESTED_AUTHENTICATION"
+              exit 1
+              ;;
+          esac
+
+          printf 'mode=%s\n' "$selected" >> "$GITHUB_OUTPUT"
+          echo "Using $selected authentication for ${{ matrix.organization }}"
+
       - name: Mint a short-lived installation token
         if: steps.auth.outputs.mode == 'github-app'
         id: app-token
