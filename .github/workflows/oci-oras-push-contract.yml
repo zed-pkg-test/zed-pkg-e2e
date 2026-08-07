@@ -1,0 +1,196 @@
+name: authenticated ORAS OCI push contract
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/oci-oras-push-contract.yml"
+      - "scripts/oci_oras_push_contract.py"
+      - "scripts/oci_layout_contract.py"
+      - "scripts/oci_plan_contract.py"
+      - "docs/oci-oras-push-contract.md"
+  workflow_dispatch:
+    inputs:
+      zed_cli_ref:
+        description: Exact 40-character zed-pkg/zed-cli ORAS push candidate
+        required: true
+        default: 1241f1cbe90e0b9cf9d71cd7ba30f5e3c1c1c296
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: oci-oras-push-contract-${{ github.event.pull_request.number || github.ref || github.run_id }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: "1"
+  HARNESS_REF: ${{ github.event.pull_request.head.sha || github.sha }}
+  ZED_CLI_REF: ${{ inputs.zed_cli_ref || '1241f1cbe90e0b9cf9d71cd7ba30f5e3c1c1c296' }}
+  NODE_LIB_REF: 2d41e658a382fdff27ef87a0db24dbaff280a685
+  REGISTRY_IMAGE: registry@sha256:a3d8aaa63ed8681a604f1dea0aa03f100d5895b6a58ace528858a7b332415373
+  REGISTRY_HOST: 127.0.0.1:5000
+  REGISTRY_USERNAME: zed-contract
+  REGISTRY_PASSWORD: zed-contract-password-not-a-secret
+
+jobs:
+  contract:
+    name: Exact authenticated-push candidate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - name: Validate immutable inputs
+        run: |
+          set -euo pipefail
+          [[ "$HARNESS_REF" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$ZED_CLI_REF" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$NODE_LIB_REF" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$REGISTRY_IMAGE" =~ ^registry@sha256:[0-9a-f]{64}$ ]]
+
+      - name: Check out exact harness
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.HARNESS_REF }}
+          path: harness
+          fetch-depth: 1
+          persist-credentials: false
+          show-progress: false
+
+      - name: Check out exact zed CLI candidate
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: zed-pkg/zed-cli
+          ref: ${{ env.ZED_CLI_REF }}
+          path: zed-cli
+          fetch-depth: 1
+          persist-credentials: false
+          show-progress: false
+
+      - name: Check out exact node library fixture
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: zed-pkg-test/node-lib
+          ref: ${{ env.NODE_LIB_REF }}
+          path: fixtures/node-lib
+          fetch-depth: 1
+          persist-credentials: false
+          show-progress: false
+
+      - name: Install exact stable ORAS CLI
+        uses: oras-project/setup-oras@4fb5323ce5e4debde6f8fe277e461b0815a75992
+        with:
+          version: 1.3.2
+
+      - name: Install declared Rust tools and registry prerequisites
+        run: |
+          set -euo pipefail
+          rustup toolchain install stable --profile minimal --component rustfmt --component clippy
+          rustup default stable
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends apache2-utils strace
+          rustc --version --verbose
+          cargo --version --verbose
+          cargo clippy --version
+          oras version
+          strace --version | head -1
+          docker version
+
+      - name: Verify exact checkouts and harness syntax
+        run: |
+          set -euo pipefail
+          test "$(git -C harness rev-parse HEAD)" = "$HARNESS_REF"
+          test "$(git -C zed-cli rev-parse HEAD)" = "$ZED_CLI_REF"
+          test "$(git -C fixtures/node-lib rev-parse HEAD)" = "$NODE_LIB_REF"
+          python3 -m py_compile \
+            harness/scripts/oci_plan_contract.py \
+            harness/scripts/oci_layout_contract.py \
+            harness/scripts/oci_oras_push_contract.py
+
+      - name: Build, test, and lint the exact candidate
+        run: |
+          set -euo pipefail
+          cargo fmt --all --check --manifest-path zed-cli/Cargo.toml
+          cargo test --locked --manifest-path zed-cli/Cargo.toml --all-targets oci_push
+          cargo test --locked --manifest-path zed-cli/Cargo.toml --all-targets cli_oci
+          cargo test --locked --manifest-path zed-cli/Cargo.toml cli_flags_toml_is_in_sync_with_clap
+          cargo test --locked --manifest-path zed-cli/Cargo.toml readme_documents_every_command
+          cargo clippy --locked --manifest-path zed-cli/Cargo.toml --all-targets -- -D warnings
+          cargo build --locked --release --manifest-path zed-cli/Cargo.toml --bin zed
+          zed-cli/target/release/zed --version
+
+      - name: Start isolated basic-auth OCI registry
+        run: |
+          set -euo pipefail
+          mkdir -p evidence registry-auth
+          htpasswd -Bbn "$REGISTRY_USERNAME" "$REGISTRY_PASSWORD" > registry-auth/htpasswd
+          chmod 600 registry-auth/htpasswd
+          docker run --detach \
+            --name zed-oci-contract-registry \
+            --publish 127.0.0.1:5000:5000 \
+            --volume "$PWD/registry-auth:/auth:ro" \
+            --env REGISTRY_AUTH=htpasswd \
+            --env REGISTRY_AUTH_HTPASSWD_REALM='Zed OCI Contract' \
+            --env REGISTRY_AUTH_HTPASSWD_PATH=/auth/htpasswd \
+            "$REGISTRY_IMAGE"
+
+          for attempt in $(seq 1 60); do
+            status=$(curl --silent --output /dev/null --write-out '%{http_code}' \
+              --user "$REGISTRY_USERNAME:$REGISTRY_PASSWORD" \
+              "http://$REGISTRY_HOST/v2/" || true)
+            if [[ "$status" == 200 ]]; then
+              exit 0
+            fi
+            sleep 1
+          done
+          docker logs zed-oci-contract-registry >&2 || true
+          echo 'registry did not become healthy' >&2
+          exit 1
+
+      - name: Run black-box authenticated ORAS push contract
+        run: |
+          set -euo pipefail
+          rm -rf evidence/contract
+          python3 harness/scripts/oci_oras_push_contract.py \
+            --zed zed-cli/target/release/zed \
+            --oras "$(command -v oras)" \
+            --strace "$(command -v strace)" \
+            --node-lib fixtures/node-lib \
+            --registry "$REGISTRY_HOST" \
+            --username "$REGISTRY_USERNAME" \
+            --password "$REGISTRY_PASSWORD" \
+            --evidence evidence/contract
+
+      - name: Capture registry evidence
+        if: always()
+        run: |
+          set +e
+          mkdir -p evidence
+          docker inspect zed-oci-contract-registry > evidence/registry-inspect.json 2>&1
+          docker logs zed-oci-contract-registry > evidence/registry.log 2>&1
+          docker rm --force zed-oci-contract-registry
+          rm -rf registry-auth
+
+      - name: Reject test-password leakage from evidence
+        if: always()
+        run: |
+          set -euo pipefail
+          if grep --recursive --fixed-strings --binary-files=without-match \
+            "$REGISTRY_PASSWORD" evidence; then
+            echo 'test registry password leaked into uploaded evidence' >&2
+            exit 1
+          fi
+
+      - name: Upload authenticated push evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: oci-oras-push-contract-${{ github.run_id }}-${{ github.run_attempt }}
+          path: evidence
+          if-no-files-found: warn
+          retention-days: 7
+          include-hidden-files: false
