@@ -118,12 +118,16 @@ test('fleet apply serializes organizations and retries GitHub secondary content 
   assert.match(launcher, /retrying GitHub API request after rate limit/);
 });
 
-test('generated harness branches use authenticated git transport instead of REST blob fan-out', () => {
+test('generated harness branches use authenticated git transport without staging the askpass helper', () => {
   const launcherPath = path.join(root, 'scripts', 'bootstrap-test-org-fleet.mjs');
   const launcher = fs.readFileSync(launcherPath, 'utf8');
 
   assert.match(launcher, /spawnSync\('git'/);
   assert.match(launcher, /GIT_ASKPASS_REQUIRE: 'force'/);
+  assert.match(launcher, /const askpassDirectory = fs\.mkdtempSync\(path\.join\(os\.tmpdir\(\), 'test-org-fleet-askpass-'\)\)/);
+  assert.match(launcher, /const askpass = path\.join\(askpassDirectory, 'git-askpass\.sh'\)/);
+  assert.doesNotMatch(launcher, /const askpass = path\.join\(worktree, 'git-askpass\.sh'\)/);
+  assert.match(launcher, /fs\.rmSync\(askpassDirectory, \{ recursive: true, force: true \}\)/);
   assert.match(launcher, /\['push', '--quiet', 'origin'/);
   assert.match(launcher, /update-index/);
   assert.match(launcher, /--cacheinfo/);
