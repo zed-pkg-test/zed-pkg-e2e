@@ -1,0 +1,255 @@
+# Dedicated authoritative ARM64 execution lane for the paced cross-organization test fleet.
+name: run authoritative test organization fleet on ARM64
+
+on:
+  push:
+    branches:
+      - agent/run-fleet-arm64
+    paths:
+      - .github/workflows/run-test-org-fleet-arm64.yml
+      - bootstrap/execute-test-org-fleet-paced.once
+
+permissions:
+  contents: read
+
+concurrency:
+  group: apply-test-org-fleet-arm64-authoritative
+  cancel-in-progress: true
+
+jobs:
+  finish:
+    if: github.repository == 'zed-pkg-test/zed-pkg-e2e' && github.ref == 'refs/heads/agent/run-fleet-arm64'
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 360
+    steps:
+      - name: Check out without persisted credentials
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          show-progress: false
+
+      - name: Validate authorization, tools, and fleet contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(tr -d '\r\n' < bootstrap/execute-test-org-fleet-paced.once)" = "APPLY_TEST_FLEET_PACED_ARM64_V2"
+          command -v gh
+          command -v git
+          command -v jq
+          command -v node
+          node --check scripts/list-test-org-fleet-repositories.mjs
+          node --check scripts/bootstrap-test-org-fleet-worktree-safe.mjs
+          node scripts/validate-test-org-fleet.mjs
+          node --test \
+            tests/test-org-fleet.test.mjs \
+            tests/bootstrap-retry-policy.test.mjs \
+            tests/paced-fleet-executor.test.mjs
+
+      - name: Export the persisted fleet PAT without logging it
+        shell: bash
+        env:
+          STORED_FLEET_PAT: ${{ secrets.FLEET_GH_TOKEN }}
+        run: |
+          set -euo pipefail
+          test -n "$STORED_FLEET_PAT"
+          printf 'GH_TOKEN=%s\n' "$STORED_FLEET_PAT" >> "$GITHUB_ENV"
+
+      - name: Cancel superseded fleet writers
+        shell: bash
+        env:
+          GH_REPO: ${{ github.repository }}
+          CURRENT_RUN_ID: ${{ github.run_id }}
+        run: |
+          set -euo pipefail
+
+          for status in queued in_progress; do
+            mapfile -t run_ids < <(
+              gh api --paginate "repos/$GH_REPO/actions/runs?status=$status&per_page=100" \
+                --jq '.workflow_runs[] | select(
+                  .path == ".github/workflows/apply-test-org-fleet.yml" or
+                  .path == ".github/workflows/recover-test-org-fleet-v2.yml" or
+                  .path == ".github/workflows/finish-test-org-fleet-single-runner.yml" or
+                  .path == ".github/workflows/finish-test-org-fleet-paced.yml" or
+                  .path == ".github/workflows/resume-test-org-fleet.yml"
+                ) | .id'
+            )
+
+            for run_id in "${run_ids[@]}"; do
+              [[ "$run_id" == "$CURRENT_RUN_ID" ]] && continue
+              echo "Cancelling superseded fleet run $run_id ($status)"
+              gh run cancel "$run_id" --repo "$GH_REPO" || true
+            done
+          done
+
+          sleep 5
+
+      - name: Provision one repository at a time
+        shell: bash
+        env:
+          TEST_ORG_FLEET_SKIP_TOPICS: "true"
+          GH_REPO: ${{ github.repository }}
+          CURRENT_RUN_ID: ${{ github.run_id }}
+        run: |
+          set -euo pipefail
+
+          legacy_fleet_runs() {
+            for status in queued in_progress; do
+              gh api --paginate "repos/$GH_REPO/actions/runs?status=$status&per_page=100" \
+                --jq '.workflow_runs[] | select(
+                  .path == ".github/workflows/apply-test-org-fleet.yml" or
+                  .path == ".github/workflows/recover-test-org-fleet-v2.yml" or
+                  .path == ".github/workflows/finish-test-org-fleet-single-runner.yml" or
+                  .path == ".github/workflows/finish-test-org-fleet-paced.yml" or
+                  .path == ".github/workflows/resume-test-org-fleet.yml"
+                ) | .id' 2>/dev/null || true
+            done
+          }
+
+          cancel_legacy_fleet_runs() {
+            local run_id
+            while IFS= read -r run_id; do
+              [[ -z "$run_id" || "$run_id" == "$CURRENT_RUN_ID" ]] && continue
+              echo "Guardian cancelling superseded fleet run $run_id"
+              gh run cancel "$run_id" --repo "$GH_REPO" >/dev/null 2>&1 || true
+            done < <(legacy_fleet_runs | sort -u)
+          }
+
+          cancel_legacy_fleet_runs
+          (
+            while sleep 45; do
+              cancel_legacy_fleet_runs
+            done
+          ) &
+          guardian_pid=$!
+          cleanup_guardian() {
+            kill "$guardian_pid" >/dev/null 2>&1 || true
+            wait "$guardian_pid" >/dev/null 2>&1 || true
+          }
+          trap cleanup_guardian EXIT
+
+          organizations=(
+            fiducia-cloud-test
+            evento-globolo-test
+            opto-sync-test
+            quaestor-ledger-test
+            memebank-test
+            scintilla-run-test
+            file-tunnel-test
+            shared-auth-test
+            hypesiege-test
+            streempilot-test
+            sonus-auris-test
+            messaging-intel-test
+            3fa-app-test
+            declarative-migrations-test
+            cliptown-test
+            claritas-viz-test
+            embedded-alerts-test
+          )
+
+          failures=()
+          processed=0
+          writes=0
+
+          {
+            echo '## Authoritative ARM64 paced test-fleet completion'
+            echo
+            echo '| Organization | Specialized repos | Visible repos | Result |'
+            echo '|---|---:|---:|---:|'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          apply_repository() {
+            local organization="$1"
+            local repository="$2"
+            local summary_file="$RUNNER_TEMP/fleet-${organization}-${repository}.json"
+
+            for attempt in 1 2 3; do
+              rm -f "$summary_file"
+              if node scripts/bootstrap-test-org-fleet-worktree-safe.mjs \
+                  --apply \
+                  --org "$organization" \
+                  --repo "$repository" \
+                  --concurrency 1 \
+                  --summary-json > "$summary_file"; then
+                local request_writes
+                request_writes="$(jq '(.created // 0) + (.committed // 0) + (.pullRequests // 0)' "$summary_file")"
+                writes=$((writes + request_writes))
+                if [[ "$request_writes" -gt 0 ]]; then
+                  sleep 15
+                else
+                  sleep 2
+                fi
+                return 0
+              fi
+              [[ "$attempt" -lt 3 ]] && sleep $((attempt * 90))
+            done
+            return 1
+          }
+
+          finalize_organization() {
+            local organization="$1"
+            local summary_file="$RUNNER_TEMP/fleet-${organization}-final.json"
+
+            for attempt in 1 2 3; do
+              rm -f "$summary_file"
+              if node scripts/bootstrap-test-org-fleet-worktree-safe.mjs \
+                  --apply \
+                  --org "$organization" \
+                  --concurrency 1 \
+                  --summary-json > "$summary_file"; then
+                local request_writes
+                request_writes="$(jq '(.created // 0) + (.committed // 0) + (.pullRequests // 0)' "$summary_file")"
+                writes=$((writes + request_writes))
+                [[ "$request_writes" -gt 0 ]] && sleep 15
+                return 0
+              fi
+              [[ "$attempt" -lt 3 ]] && sleep $((attempt * 90))
+            done
+            return 1
+          }
+
+          for organization in "${organizations[@]}"; do
+            echo "::group::Paced provisioning for $organization"
+            cancel_legacy_fleet_runs
+            gh api "orgs/$organization" --silent
+            mapfile -t repositories < <(node scripts/list-test-org-fleet-repositories.mjs --org "$organization")
+            organization_failed=false
+
+            for repository in "${repositories[@]}"; do
+              processed=$((processed + 1))
+              echo "[$processed/287] $organization/$repository"
+              if ! apply_repository "$organization" "$repository"; then
+                organization_failed=true
+                echo "::error::Failed to provision $organization/$repository after three idempotent attempts"
+              fi
+            done
+
+            if [[ "$organization_failed" == false ]] && ! finalize_organization "$organization"; then
+              organization_failed=true
+              echo "::error::Final governance/idempotency pass failed for $organization"
+            fi
+
+            visible="$(gh api --paginate "orgs/$organization/repos?type=all&per_page=100" --jq '.[].name' | wc -l | tr -d '[:space:]')"
+            if [[ "$organization_failed" == true ]]; then
+              failures+=("$organization")
+              printf '| `%s` | %s | %s | **failure** |\n' "$organization" "${#repositories[@]}" "$visible" >> "$GITHUB_STEP_SUMMARY"
+            else
+              printf '| `%s` | %s | %s | success |\n' "$organization" "${#repositories[@]}" "$visible" >> "$GITHUB_STEP_SUMMARY"
+            fi
+            echo "::endgroup::"
+          done
+
+          {
+            echo
+            echo "Specialized repository filters processed: $processed"
+            echo
+            echo "Observed create/commit/PR write operations: $writes"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          test "$processed" -eq 287
+          if (( ${#failures[@]} > 0 )); then
+            printf '::error::Authoritative ARM64 fleet completion failed for: %s\n' "${failures[*]}"
+            exit 1
+          fi
+
+          echo 'All selected organizations completed; `r2g` and `r2g-test` were never selected.' >> "$GITHUB_STEP_SUMMARY"
