@@ -9,6 +9,9 @@ The fleet supports two credential sources:
 The workflow input `authentication=auto` prefers `FLEET_GH_TOKEN` when it exists and otherwise uses the GitHub App. Explicit `pat` and `github-app` modes fail closed when their required secret-backed configuration is missing.
 
 No credential value belongs in the repository, workflow source, fleet manifest, generated repositories, commit messages, issue bodies, pull-request descriptions, workflow-dispatch inputs, or logs.
+# Applying the test fleet without a personal access token
+
+The fleet is designed to run with short-lived GitHub App installation tokens. No personal access token is stored in the repository, workflow, generated repositories, commits, or pull requests.
 
 ## Live installation audit
 
@@ -81,6 +84,18 @@ Configure one of the following in `zed-pkg-test/zed-pkg-e2e`:
 Open **Actions → apply test organization fleet → Run workflow** on the default branch.
 
 Choose either `all` or one test organization. An optional repository glob can constrain the run. Choose `auto`, `pat`, or `github-app`, then type `APPLY_TEST_FLEET` exactly in the confirmation field.
+In `zed-pkg-test/zed-pkg-e2e`, configure:
+
+- Actions variable `FLEET_APP_CLIENT_ID` with the GitHub App client ID.
+- Actions secret `FLEET_APP_PRIVATE_KEY` with the GitHub App private key.
+
+Do not commit either value. Do not place them in the fleet manifest, generated source pins, workflow logs, issue bodies, or pull-request descriptions.
+
+## Execution
+
+After the workflow is present on the default branch, open **Actions → apply test organization fleet → Run workflow**.
+
+Choose either `all` or one test organization. An optional repository glob can constrain the run. Type `APPLY_TEST_FLEET` exactly in the confirmation field.
 
 For every selected organization, the workflow:
 
@@ -91,6 +106,11 @@ For every selected organization, the workflow:
 5. writes generated harnesses and immutable source pins;
 6. pushes generated commits to agent branches; and
 7. opens or reuses draft pull requests.
+2. mints a short-lived installation token scoped to that organization;
+3. creates or adopts the `.github` governance repository and specialized test repositories;
+4. writes generated harnesses and immutable source pins;
+5. pushes generated commits to agent branches; and
+6. opens or reuses draft pull requests.
 
 The matrix runs at most three organizations concurrently. Each organization invokes the bootstrap with concurrency one, limiting rate pressure and keeping failures isolated.
 
@@ -104,3 +124,10 @@ The matrix runs at most three organizations concurrently. Each organization invo
 - **Workflow-file write returns 403:** grant the classic PAT's `workflow` scope or the App's Workflows write permission.
 - **A newly created repository is inaccessible to the App:** configure the installation for all repositories rather than selected repositories.
 - **Source repository cannot be resolved:** the generated repository remains source-gated; rerun after the source repository has a default-branch commit or after read access is granted.
+- **Installation not found:** install the fleet App on the named test organization.
+- **Repository creation returns 403:** grant repository Administration write and verify the organization permits the App to create repositories.
+- **Workflow-file write returns 403:** grant Workflows write in addition to Contents write.
+- **A newly created repository is inaccessible:** configure the installation for all repositories rather than selected repositories.
+- **Source repository cannot be resolved:** the generated repository remains source-gated; rerun after the source repository has a default-branch commit or after read access is granted.
+
+The previously pasted classic token must not be reused; rotate or revoke it because it appeared in conversation history.
