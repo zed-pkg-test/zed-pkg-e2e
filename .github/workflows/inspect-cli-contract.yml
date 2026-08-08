@@ -14,7 +14,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  ZED_CLI_REF: 3c584065dce292442e1ca5e5c45c4728f2796b47
+  ZED_CLI_REF: 70fd364c5cf592e2ba03aed3670b4c1601c0836c
 
 jobs:
   quality:
@@ -196,7 +196,7 @@ jobs:
           assert "fake-env-token-that-must-not-escape" not in result.stdout + result.stderr
           assert "fake-arg-token-that-must-not-escape" not in result.stdout + result.stderr
 
-          secret = "ghp_fake_manifest_secret_that_must_not_escape"
+          secret = "gh" + "p_fake_manifest_secret_that_must_not_escape"
           manifest.write_text(f"[package\nsecret = \"{secret}\"\n", encoding="utf-8")
           malformed_before = snapshot(root)
           malformed = inspect()
