@@ -73,7 +73,7 @@ jobs:
         with:
           python-version: '3.12'
 
-      - name: Verify immutable cluster checkout and harness syntax
+      - name: Verify immutable cluster checkout and all test syntax
         run: |
           set -euo pipefail
           [[ "$K8S_CLUSTER_COMMIT" =~ ^[0-9a-f]{40}$ ]]
@@ -84,9 +84,16 @@ jobs:
             scripts/install_pinned_kustomize.py \
             scripts/direct_source_render_canary.py \
             scripts/check_snapshot_endpoint_policy.py \
-            scripts/test_snapshot_endpoint_policy.py
+            scripts/test_snapshot_endpoint_policy.py \
+            "$SOURCE_SNAPSHOT/scripts/ci/check_k8s_network_contract.py" \
+            "$SOURCE_SNAPSHOT/scripts/ci/test_check_k8s_network_contract.py"
           python scripts/test_snapshot_endpoint_policy.py
-          rm -rf scripts/__pycache__
+          (
+            cd "$SOURCE_SNAPSHOT"
+            python scripts/ci/test_check_k8s_network_contract.py
+            python scripts/ci/check_k8s_network_contract.py
+          )
+          rm -rf scripts/__pycache__ "$SOURCE_SNAPSHOT/scripts/ci/__pycache__"
 
       - name: Install checksum-pinned Kustomize v5.8.1
         run: |
@@ -98,7 +105,7 @@ jobs:
           test -f "$kustomize"
           echo "KUSTOMIZE_BINARY=$kustomize" >> "$GITHUB_ENV"
 
-      - name: Verify snapshot endpoint and NetworkPolicy parity
+      - name: Verify snapshot endpoint and NetworkPolicy parity independently
         run: |
           set -euo pipefail
           python scripts/check_snapshot_endpoint_policy.py \
