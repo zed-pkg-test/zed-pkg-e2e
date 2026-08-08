@@ -5,6 +5,7 @@ on:
     paths:
       - .github/workflows/gitops-dispatch-canary.yml
       - scripts/apply_den2725_help_delimiter_fix.py
+      - scripts/resolve_den2725_replay.py
       - scripts/gitops_dispatch_canary.py
       - scripts/gitops_dispatch_canary_entry.py
       - scripts/gitops_dispatch_trailing_options.py
@@ -71,9 +72,25 @@ jobs:
           [[ "$ZED_CLI_COMMIT" =~ ^[0-9a-f]{40}$ ]]
           [[ "$ZED_MAIN_COMMIT" =~ ^[0-9a-f]{40}$ ]]
           test "$(git -C product/zed-cli rev-parse HEAD)" = "$ZED_CLI_COMMIT"
+          python -m py_compile scripts/resolve_den2725_replay.py
+          rm -rf scripts/__pycache__
           git -C product/zed-cli fetch --no-tags https://github.com/zed-pkg/zed-cli.git "$ZED_MAIN_COMMIT"
           test "$(git -C product/zed-cli rev-parse FETCH_HEAD)" = "$ZED_MAIN_COMMIT"
+          set +e
           git -C product/zed-cli -c user.name='zed-pkg-test' -c user.email='zed-pkg-test@users.noreply.github.com' merge --no-commit --no-ff "$ZED_MAIN_COMMIT"
+          merge_status=$?
+          set -e
+          if (( merge_status != 0 )); then
+            conflicts="$(git -C product/zed-cli diff --name-only --diff-filter=U)"
+            expected_conflicts=$'src/lib.rs\nsrc/main.rs'
+            if [[ "$conflicts" != "$expected_conflicts" ]]; then
+              printf 'unexpected replay conflicts:\n%s\n' "$conflicts" >&2
+              exit 1
+            fi
+            git -C product/zed-cli checkout --theirs -- src/lib.rs src/main.rs
+            python scripts/resolve_den2725_replay.py --root product/zed-cli
+            git -C product/zed-cli add src/lib.rs src/main.rs
+          fi
           test -z "$(git -C product/zed-cli diff --name-only --diff-filter=U)"
 
       - name: Apply the reviewed two-file correction in the replay tree
@@ -174,20 +191,21 @@ jobs:
           set -euo pipefail
           tree_sha="$(git -C product/zed-cli write-tree)"
           python - "$tree_sha" <<'PY'
-          import json, os, sys
+          import hashlib, json, os, sys
           from pathlib import Path
-          Path('corrected/replay-metadata.json').write_text(json.dumps({
+          root = Path('corrected')
+          (root / 'replay-metadata.json').write_text(json.dumps({
               '$schema': 'zed-pkg-test/den-2725-final-replay/v1',
               'rootDispatchCommit': os.environ['ZED_CLI_COMMIT'],
               'mainCommit': os.environ['ZED_MAIN_COMMIT'],
               'treeSha': sys.argv[1],
           }, indent=2, sort_keys=True) + '\n', encoding='utf-8')
+          lines = []
+          for path in sorted(item for item in root.rglob('*') if item.is_file() and item.name != 'SHA256SUMS'):
+              digest = hashlib.sha256(path.read_bytes()).hexdigest()
+              lines.append(f"{digest}  {path.as_posix()}")
+          (root / 'SHA256SUMS').write_text('\n'.join(lines) + '\n', encoding='utf-8')
           PY
-          if [[ "$RUNNER_OS" == "macOS" ]]; then
-            find corrected -type f ! -name SHA256SUMS -print0 | sort -z | xargs -0 shasum -a 256 > corrected/SHA256SUMS
-          else
-            find corrected -type f ! -name SHA256SUMS -print0 | sort -z | xargs -0 sha256sum > corrected/SHA256SUMS
-          fi
 
       - name: Require clean harness and exact replay delta
         run: |
