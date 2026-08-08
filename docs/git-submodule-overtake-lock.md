@@ -1,10 +1,11 @@
 # Git-submodule takeover operation-lock certification
 
 This test-org lane certifies `zed-pkg/zed-cli#243` at its current-main-integrated,
-nested-invocation-hardened, and thread-affine exact candidate commit:
+nested-invocation-hardened, thread-affine, and shared-ownership exact candidate
+commit:
 
 ```text
-35f3f238deac1ab5d13a310bf6b1a089f8e3ec54
+6716bd10be51c0022700d59ad97ee2a48dd51228
 ```
 
 The candidate was merged with current product `main` through integration PR
@@ -20,27 +21,34 @@ superproject before acquiring the lock, so an invocation from a nested source
 directory cannot create a second operation-lock identity below the checkout
 root.
 
-## Thread-affinity invariant
+## Reentrant ownership invariants
 
-The reentrancy depth map is thread-local. An owned operation guard must therefore
-be acquired, used, and dropped on one thread. Moving a guard to another thread
-would otherwise clean the marker from the wrong thread and could leave the
-originating thread believing that it still owns a descriptor lock after the
-kernel guard was released.
+The reentrancy cache is thread-local. An owned operation guard must therefore be
+acquired, used, and dropped on one thread. The final candidate stores the actual
+kernel `LockGuard` inside an `Rc`-owned object and keeps only a weak reference in
+the thread-local lookup table. This provides three important properties:
 
-The final candidate makes `OperationGuard` deliberately neither `Send` nor
-`Sync` with a zero-sized thread-affinity marker. A `compile_fail` rustdoc contract
-proves the public type cannot satisfy `Send`; the test-org workflow runs that
-rustdoc in addition to the focused unit and process tests.
+1. `OperationGuard` is naturally neither `Send` nor `Sync`;
+2. every same-thread nested acquisition shares the same descriptor ownership;
+3. dropping outer and inner handles in any order cannot release the operating-
+   system lock before the final live handle is dropped.
+
+Two `compile_fail` rustdoc contracts prove the public type cannot satisfy either
+`Send` or `Sync`. A focused unit regression acquires outer and inner guards,
+drops the outer first, confirms a same-process OS-lock probe is still contended,
+then drops the inner and confirms acquisition succeeds.
+
+This replaces the earlier depth-only marker design, which could unlock too early
+when independently returned nested RAII handles were dropped out of lexical
+order.
 
 ## Why separate black-box tests
 
-Product unit tests prove that an explicit guard can call a nested facade without
-deadlocking, that the public guard remains thread-affine, and that nested
-takeover discovery maps to the superproject's lock path. They do not by
-themselves prove that independent operating system processes contend on the
-same checkout identity, that symlink or nested-path aliases cannot escape
-ownership, or that kernel ownership is released when the owner is terminated.
+Product unit tests prove nested facade reuse, thread affinity, shared descriptor
+lifetime, and superproject path selection. They do not by themselves prove that
+independent operating system processes contend on the same checkout identity,
+that symlink or nested-path aliases cannot escape ownership, or that kernel
+ownership is released when the owner is terminated.
 
 The two test-org scripts exercise those boundaries using the real release
 executable and disposable local Git repositories. A temporary `git` shim pauses
@@ -48,7 +56,7 @@ takeover after the CLI has acquired project ownership but before Git submodule
 synchronization can proceed. The shim never replaces Git semantics; after
 release it `exec`s the exact host Git binary with the original arguments.
 
-## Nine certified checks
+## Nine certified process checks
 
 ### Normal completion
 
@@ -96,15 +104,16 @@ The workflow runs on Ubuntu 24.04 and macOS 15. It:
 - compiles both Python harnesses outside the source tree;
 - runs source diff checks and Rust formatting;
 - runs focused `project_lock` and `git_submodules` library tests;
-- runs the thread-affinity `compile_fail` rustdoc contract;
+- runs both thread-affinity `compile_fail` rustdoc contracts;
 - runs strict Clippy on Linux;
 - builds the exact release executable;
 - executes all three process-contention scenarios; and
 - requires clean product and harness checkouts afterward.
 
 Evidence contains the binary SHA-256, process IDs, observed blocking intervals,
-CLI version, and all nine named checks. No account, public registry, Cloudflare
-resource, credential, Docker daemon, or persistent namespace participates.
+CLI version, and all nine named process checks. No account, public registry,
+Cloudflare resource, credential, Docker daemon, or persistent namespace
+participates.
 
 Merge this test-org PR only after both platform jobs pass on the exact head.
 Then product PR `zed-pkg/zed-cli#243` can be promoted if its own complete matrix
