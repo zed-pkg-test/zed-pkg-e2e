@@ -1,0 +1,96 @@
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
+import test from 'node:test';
+
+import { hardenGeneratedIntegrationPolicy } from '../scripts/test-org-fleet-integration-policy.mjs';
+
+const root = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
+const partsDirectory = path.join(root, 'scripts', 'bootstrap-test-org-fleet.parts');
+const generatedSource = fs
+  .readdirSync(partsDirectory)
+  .sort()
+  .map((name) => fs.readFileSync(path.join(partsDirectory, name), 'utf8'))
+  .join('')
+  .replace(/^#![^\n]*\n/, '');
+
+function hardened() {
+  return hardenGeneratedIntegrationPolicy(generatedSource);
+}
+
+test('generated plans distinguish snapshot validation from protected source certification', () => {
+  const source = hardened();
+  assert.match(source, /protectedSourceIntegration: true/);
+  assert.match(
+    source,
+    /protectedSourceIntegrationStatus: 'not-executed-unless-protected-lane-runs'/,
+  );
+  assert.match(source, /productOverlayPreserved: true/);
+  assert.match(source, /A skipped integration job is not source certification/);
+});
+
+test('generated integration never falls back to the repository GITHUB_TOKEN', () => {
+  const source = hardened();
+  assert.doesNotMatch(
+    source,
+    /secrets\.TEST_FLEET_READ_TOKEN \|\| github\.token/,
+  );
+  assert.match(source, /test -n \"\$TEST_FLEET_READ_TOKEN\"/);
+  assert.match(source, /token: \\?\$\{\{ secrets\.TEST_FLEET_READ_TOKEN \}\}/);
+  assert.match(source, /persist-credentials: false/);
+});
+
+test('generated status artifact records skipped as not executed and not certified', () => {
+  const source = hardened();
+  assert.match(source, /name: Record protected source certification status/);
+  assert.match(source, /if: always\(\)/);
+  assert.match(source, /needs: integration/);
+  assert.match(source, /const executed = result !== 'skipped'/);
+  assert.match(source, /const certified = result === 'success'/);
+  assert.match(source, /protected-source-integration-not-enabled/);
+  assert.match(source, /source-integration-status-/);
+  assert.match(
+    source,
+    /actions\/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a/,
+  );
+});
+
+test('generated file set leaves product-specific overlays outside fleet ownership', () => {
+  const source = hardened();
+  const generatedFiles = source.slice(
+    source.indexOf('const files = new Map(['),
+    source.indexOf('const zpkg = renderZpkg', source.indexOf('const files = new Map([')),
+  );
+  assert.ok(generatedFiles.length > 0);
+  for (const productPath of [
+    'CONTRACT.md',
+    'contract-lock.json',
+    'contract-surface.json',
+    'scripts/contract-parser.mjs',
+    '.github/workflows/api-contract-parity.yml',
+  ]) {
+    assert.equal(
+      generatedFiles.includes(productPath),
+      false,
+      `${productPath} must remain product-overlay owned`,
+    );
+  }
+  assert.match(source, /Product-specific files outside the generated file set are preserved/);
+});
+
+test('policy transform is fail-closed when generated seams change', () => {
+  assert.throws(
+    () => hardenGeneratedIntegrationPolicy(hardened()),
+    /expected one generated seam, found 0/,
+  );
+  assert.throws(
+    () =>
+      hardenGeneratedIntegrationPolicy(
+        generatedSource.replace(
+          '          token: \\${{ secrets.TEST_FLEET_READ_TOKEN || github.token }}',
+          '          token: changed',
+        ),
+      ),
+    /protected checkout token fallback/,
+  );
+});
