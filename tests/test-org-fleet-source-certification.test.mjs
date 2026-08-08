@@ -83,7 +83,10 @@ test('generated file set leaves product-specific overlays outside fleet ownershi
 });
 
 test('source certification documentation preserves the security and evidence meanings', () => {
-  assert.match(sourceCertificationDocumentation, /A skipped protected lane is not a soft pass/);
+  assert.match(
+    sourceCertificationDocumentation,
+    /A skipped lane is \*\*not\*\* source certification/,
+  );
   assert.match(sourceCertificationDocumentation, /must not fall back to `github\.token`/);
   assert.match(sourceCertificationDocumentation, /Product-specific overlays are preserved/);
   assert.match(sourceCertificationDocumentation, /`executed`/);
