@@ -174,6 +174,53 @@ def indexed_gitlink(
     return mode, object_type, revision, indexed_path
 
 
+def verify_snapshot(
+    snapshot: Path,
+    metadata_path: Path,
+    child_commit: str,
+    environment: dict[str, str],
+) -> tuple[dict[str, object], list[dict[str, str]]]:
+    metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+    require(isinstance(metadata, dict), "source snapshot metadata must be an object")
+    require(
+        metadata.get("$schema") == "zed-pkg-test/direct-source-snapshot/v1",
+        "source snapshot schema drift",
+    )
+    require(
+        canonical_repository(str(metadata.get("repository", ""))) == EXPECTED_REPOSITORY,
+        "source snapshot repository identity drift",
+    )
+    require(metadata.get("revision") == child_commit, "source snapshot revision drift")
+    require(metadata.get("sourcePath") == "k8s", "source snapshot path drift")
+    files = metadata.get("files")
+    require(isinstance(files, dict) and files, "source snapshot file map is empty")
+
+    verified: list[dict[str, str]] = []
+    for relative, record in sorted(files.items()):
+        require(isinstance(relative, str), "snapshot file key must be text")
+        require(isinstance(record, dict), f"snapshot file metadata must be an object: {relative}")
+        expected_blob = record.get("gitBlobSha1")
+        require(
+            isinstance(expected_blob, str) and re.fullmatch(r"[0-9a-f]{40}", expected_blob),
+            f"snapshot file lacks an exact Git blob SHA: {relative}",
+        )
+        candidate = snapshot / relative
+        require(candidate.is_file(), f"snapshot file is missing: {relative}")
+        actual_blob = text(run(["git", "hash-object", candidate], environment=environment))
+        require(
+            actual_blob == expected_blob,
+            f"snapshot bytes differ from source Git blob for {relative}: {actual_blob} != {expected_blob}",
+        )
+        verified.append(
+            {
+                "path": relative,
+                "gitBlobSha1": actual_blob,
+                "sha256": sha256_bytes(candidate.read_bytes()),
+            }
+        )
+    return metadata, verified
+
+
 def parse_rendered_documents(rendered: bytes) -> list[dict[str, str]]:
     source = rendered.decode("utf-8", errors="strict")
     require(source.strip(), "Kustomize emitted empty output")
@@ -212,12 +259,17 @@ def parse_rendered_documents(rendered: bytes) -> list[dict[str, str]]:
 def certify(args: argparse.Namespace) -> dict[str, object]:
     environment = sanitized_environment()
     cluster = args.cluster.resolve(strict=True)
-    child = args.child.resolve(strict=True)
+    snapshot = args.snapshot.resolve(strict=True)
     kustomize = args.kustomize.resolve(strict=True)
     install_metadata = json.loads(args.kustomize_metadata.read_text(encoding="utf-8"))
 
     require(git_head(cluster, environment) == args.cluster_commit, "cluster checkout SHA drift")
-    require(git_head(child, environment) == args.child_commit, "child checkout SHA drift")
+    snapshot_metadata, snapshot_files = verify_snapshot(
+        snapshot,
+        args.source_metadata.resolve(strict=True),
+        args.child_commit,
+        environment,
+    )
 
     record_path = cluster / "catalog/gitops/apps/dd-fabrication-server.json"
     record = json.loads(record_path.read_text(encoding="utf-8"))
@@ -236,11 +288,11 @@ def certify(args: argparse.Namespace) -> dict[str, object]:
     source_path = str(source.get("path", ""))
     require(inventory.get("mode") == "git-submodule", "inventory mode drift")
     require(inventory_path == "remote/deployments/fabrication-server-rs", "inventory path drift")
-    require(inventory.get("revision") == args.child_commit, "inventory revision differs from child checkout")
+    require(inventory.get("revision") == args.child_commit, "inventory revision differs from snapshot")
     require(source.get("mode") == "direct-repository", "source is not direct-repository")
     require(source.get("renderer") == "kustomize", "source renderer is not kustomize")
     require(source_path == "k8s", "source path drift")
-    require(source.get("targetRevision") == args.child_commit, "source targetRevision differs from child checkout")
+    require(source.get("targetRevision") == args.child_commit, "source targetRevision differs from snapshot")
     require(migration.get("phase") == "pilot-inert", "migration phase is no longer pilot-inert")
 
     inventory_repository = canonical_repository(str(inventory.get("repository", "")))
@@ -248,6 +300,10 @@ def certify(args: argparse.Namespace) -> dict[str, object]:
     require(inventory_repository == EXPECTED_REPOSITORY, "inventory repository identity drift")
     require(source_repository == EXPECTED_REPOSITORY, "source repository identity drift")
     require(inventory_repository == source_repository, "inventory/source repository mismatch")
+    require(
+        source_repository == canonical_repository(str(snapshot_metadata.get("repository", ""))),
+        "catalog source differs from snapshot source identity",
+    )
 
     module_key, module_url = gitmodule_for_path(cluster, inventory_path, environment)
     require(canonical_repository(module_url) == EXPECTED_REPOSITORY, ".gitmodules repository identity drift")
@@ -257,22 +313,21 @@ def certify(args: argparse.Namespace) -> dict[str, object]:
     require(mode == "160000", f"inventory entry mode is {mode}, not 160000")
     require(object_type == "commit", f"inventory entry type is {object_type}, not commit")
     require(indexed_path == inventory_path, "indexed gitlink path drift")
-    require(indexed_revision == args.child_commit, "indexed gitlink differs from child checkout")
+    require(indexed_revision == args.child_commit, "indexed gitlink differs from snapshot revision")
     require(indexed_revision == inventory.get("revision"), "indexed gitlink differs from catalog inventory")
     require(indexed_revision == source.get("targetRevision"), "indexed gitlink differs from Argo source")
 
     require(
         not (cluster / inventory_path / source_path / "kustomization.yaml").exists(),
-        "cluster checkout unexpectedly materialized the child source; direct-source proof is ambiguous",
+        "cluster checkout unexpectedly materialized the child source; snapshot proof is ambiguous",
     )
-    child_source = child / source_path
-    require((child_source / "kustomization.yaml").is_file(), "child source lacks kustomization.yaml")
+    snapshot_source = snapshot / source_path
+    require((snapshot_source / "kustomization.yaml").is_file(), "snapshot lacks kustomization.yaml")
 
-    version_result = run([kustomize, "version"], environment=environment)
-    version_output = text(version_result)
+    version_output = text(run([kustomize, "version"], environment=environment))
     require("v5.8.1" in version_output, f"unexpected Kustomize version: {version_output}")
-    render_one = run([kustomize, "build", child_source], environment=environment, timeout=180).stdout
-    render_two = run([kustomize, "build", child_source], environment=environment, timeout=180).stdout
+    render_one = run([kustomize, "build", snapshot_source], environment=environment, timeout=180).stdout
+    render_two = run([kustomize, "build", snapshot_source], environment=environment, timeout=180).stdout
     require(render_one == render_two, "repeated Kustomize renders differ")
 
     documents = parse_rendered_documents(render_one)
@@ -287,9 +342,9 @@ def certify(args: argparse.Namespace) -> dict[str, object]:
     args.rendered.write_bytes(render_one)
 
     return {
-        "$schema": "zed-pkg-test/direct-source-render/v1",
+        "$schema": "zed-pkg-test/direct-source-snapshot-render/v1",
         "clusterCommit": args.cluster_commit,
-        "childCommit": args.child_commit,
+        "sourceCommit": args.child_commit,
         "catalog": {
             "name": record["metadata"]["name"],
             "inventoryPath": inventory_path,
@@ -298,6 +353,12 @@ def certify(args: argparse.Namespace) -> dict[str, object]:
             "moduleKey": module_key,
             "gitlinkRevision": indexed_revision,
             "migrationPhase": migration["phase"],
+        },
+        "snapshot": {
+            "exportMode": snapshot_metadata.get("exportMode"),
+            "fileCount": len(snapshot_files),
+            "files": snapshot_files,
+            "limitation": "Private repository reachability is not claimed by this snapshot render.",
         },
         "kustomize": {
             "versionOutput": version_output,
@@ -313,10 +374,11 @@ def certify(args: argparse.Namespace) -> dict[str, object]:
         },
         "result": "passed",
         "checks": [
-            "exact-public-checkout-identities",
-            "catalog-inventory-source-child-parity",
+            "exact-cluster-checkout-identity",
+            "snapshot-git-blob-provenance",
+            "catalog-inventory-source-snapshot-parity",
             "gitmodules-and-indexed-gitlink-parity",
-            "direct-source-not-materialized-in-superproject",
+            "source-not-materialized-in-superproject",
             "checksum-pinned-kustomize-version",
             "deterministic-repeat-render",
             "namespace-scoped-resource-set",
@@ -328,7 +390,8 @@ def certify(args: argparse.Namespace) -> dict[str, object]:
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--cluster", type=Path, required=True)
-    parser.add_argument("--child", type=Path, required=True)
+    parser.add_argument("--snapshot", type=Path, required=True)
+    parser.add_argument("--source-metadata", type=Path, required=True)
     parser.add_argument("--cluster-commit", required=True)
     parser.add_argument("--child-commit", required=True)
     parser.add_argument("--kustomize", type=Path, required=True)
@@ -350,7 +413,7 @@ def main() -> int:
         json.dumps(evidence, indent=2, sort_keys=True) + "\n", encoding="utf-8"
     )
     print(
-        f"rendered {evidence['render']['documentCount']} direct-source resources "
+        f"rendered {evidence['render']['documentCount']} checksum-pinned source resources "
         f"at {evidence['render']['sha256']}"
     )
     return 0
