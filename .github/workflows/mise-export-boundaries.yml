@@ -9,7 +9,7 @@ on:
       zed_cli_ref:
         description: Immutable zed-cli commit to certify
         required: false
-        default: 9fcd902c1e4c34c95f00dd97950d648cc6aba790
+        default: c21f26c2370a426f36445d13186f540980dd1362
   schedule:
     - cron: "17 5 * * 3"
 
@@ -27,7 +27,7 @@ defaults:
 env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: "1"
-  ZED_CLI_REF: ${{ github.event.inputs.zed_cli_ref || '9fcd902c1e4c34c95f00dd97950d648cc6aba790' }}
+  ZED_CLI_REF: ${{ github.event.inputs.zed_cli_ref || 'c21f26c2370a426f36445d13186f540980dd1362' }}
 
 jobs:
   certify:
@@ -82,6 +82,7 @@ jobs:
             harness/scripts/mise_export_ownership_state.py
           cargo fmt --all --check --manifest-path zed-cli/Cargo.toml
           cargo test --locked --manifest-path zed-cli/Cargo.toml mise_export
+          cargo test --locked --manifest-path zed-cli/Cargo.toml --test mise_export_api_boundaries
           cargo test --locked --manifest-path zed-cli/Cargo.toml --test mise_export_cli
           cargo test --locked --manifest-path zed-cli/Cargo.toml --test mise_export_reserved_paths_cli
           cargo clippy --locked --manifest-path zed-cli/Cargo.toml --all-targets -- -D warnings
