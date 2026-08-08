@@ -7,7 +7,8 @@ on:
       - "docs/github-dependency-inventory-conformance.md"
       - "fixtures/github-dependency-inventory/**"
       - "harness/github_dependency_inventory.py"
-      - "harness/test_github_dependency_inventory.py"
+      - "harness/github_inventory_*.py"
+      - "harness/test_github_inventory_*.py"
   push:
     branches: [main]
     paths:
@@ -15,7 +16,8 @@ on:
       - "docs/github-dependency-inventory-conformance.md"
       - "fixtures/github-dependency-inventory/**"
       - "harness/github_dependency_inventory.py"
-      - "harness/test_github_dependency_inventory.py"
+      - "harness/github_inventory_*.py"
+      - "harness/test_github_inventory_*.py"
   workflow_dispatch:
 
 permissions:
@@ -63,10 +65,10 @@ jobs:
           python - <<'PY'
           from pathlib import Path
 
-          for path in (
-              Path("harness/github_dependency_inventory.py"),
-              Path("harness/test_github_dependency_inventory.py"),
-          ):
+          paths = [Path("harness/github_dependency_inventory.py")]
+          paths += sorted(Path("harness").glob("github_inventory_*.py"))
+          paths += sorted(Path("harness").glob("test_github_inventory_*.py"))
+          for path in paths:
               compile(path.read_text(encoding="utf-8"), str(path), "exec")
           PY
 
