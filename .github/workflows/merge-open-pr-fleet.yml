@@ -49,8 +49,27 @@ jobs:
           grep -Fq "github.event.head_commit.message == 'chore: merge safe PR fleet'" "$workflow"
           grep -Fq 'permissions:' "$workflow"
           grep -Fq 'contents: read' "$workflow"
-          grep -Fq 'group: merge-open-pr-fleet-${{ github.event_name }}-${{ github.ref }}' "$workflow"
-          grep -Fq "cancel-in-progress: 4{{ github.event_name == 'pull_request' }}" "$workflow"
+          python3 - <<'PY'
+          from pathlib import Path
+
+          text = Path('.github/workflows/merge-open-pr-fleet.yml').read_text(encoding='utf-8')
+          opener = '$' + '{{'
+          expected_group = (
+              'group: merge-open-pr-fleet-'
+              + opener
+              + ' github.event_name }}-'
+              + opener
+              + ' github.ref }}'
+          )
+          expected_cancel = (
+              'cancel-in-progress: '
+              + opener
+              + " github.event_name == 'pull_request' }}"
+          )
+          assert expected_group in text, 'event/ref-scoped concurrency group is missing'
+          assert expected_cancel in text, 'pull-request cancellation contract is missing'
+          assert not any(ord(character) < 0x20 and character not in '\n\t\r' for character in text)
+          PY
           if grep -Eq -- '(^|[[:space:]])--force(-with-lease)?([[:space:]]|$)|contents:[[:space:]]*write' "$workflow"; then
             echo 'merge workflow must not use a force-update flag or grant the workflow token write access' >&2
             exit 1
