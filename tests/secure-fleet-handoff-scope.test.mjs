@@ -32,7 +32,10 @@ test('encrypted handoff validates and dispatches only the selected organization'
   assert.match(workflow, /gh api "orgs\/\$organization" --silent/);
   assert.match(workflow, /-f organization="\$HANDOFF_ORGANIZATION"/);
   assert.doesNotMatch(workflow, /-f organization=all/);
-  assert.match(workflow, /The `\$HANDOFF_ORGANIZATION` apply workflow was dispatched/);
+  assert.match(
+    workflow,
+    /The \\`\$HANDOFF_ORGANIZATION\\` apply workflow was dispatched/,
+  );
 });
 
 test('encrypted handoff retains ciphertext-only and actor verification controls', () => {
