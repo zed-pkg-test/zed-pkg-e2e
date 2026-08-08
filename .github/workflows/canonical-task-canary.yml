@@ -1,3 +1,5 @@
+# Re-run after zed-pkg-test/zed-interfaces#1 and zed-pkg-test/zed-lib#1
+# corrected the live-fleet package namespaces exposed by the first certification.
 name: canonical task CLI canary
 
 on:
