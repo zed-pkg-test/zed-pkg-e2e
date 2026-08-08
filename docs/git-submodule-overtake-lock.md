@@ -1,10 +1,16 @@
 # Git-submodule takeover operation-lock certification
 
-This test-org lane certifies `zed-pkg/zed-cli#243` at exact candidate commit:
+This test-org lane certifies `zed-pkg/zed-cli#243` at its current-main-integrated
+exact candidate commit:
 
 ```text
-fd09b1ce5c8d2a1b8159a6271d52c4e23078cca8
+20e41810d94ef25d957fb8bda5d916e71211d2de
 ```
+
+The candidate was merged with current product `main` through integration PR
+`zed-pkg/zed-cli#245` before this final certification pin. That preserves the
+independent external GitOps dispatcher and its tests; the reviewed file sets do
+not overlap.
 
 The product change routes `zed overtake --git-submodules` through the same
 checkout-local `.zed/operation.lock` boundary used by install, add, remove, and
@@ -73,6 +79,6 @@ resource, credential, Docker daemon, or persistent namespace participates.
 
 Merge this test-org PR only after both platform jobs pass on the exact head.
 Then product PR `zed-pkg/zed-cli#243` can be promoted if its own complete matrix
-and review state remain green.
+and review state remain green on the same current-main-integrated product head.
 
 Linear: DEN-2038.
