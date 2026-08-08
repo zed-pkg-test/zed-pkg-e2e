@@ -49,8 +49,8 @@ jobs:
           grep -Fq "github.event.head_commit.message == 'chore: merge safe PR fleet'" "$workflow"
           grep -Fq 'permissions:' "$workflow"
           grep -Fq 'contents: read' "$workflow"
-          if grep -Eq 'force(-with-lease)?|contents:[[:space:]]*write' "$workflow"; then
-            echo 'merge workflow must not force-update refs or grant the workflow token write access' >&2
+          if grep -Eq -- '(^|[[:space:]])--force(-with-lease)?([[:space:]]|$)|contents:[[:space:]]*write' "$workflow"; then
+            echo 'merge workflow must not use a force-update flag or grant the workflow token write access' >&2
             exit 1
           fi
 
