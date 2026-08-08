@@ -58,6 +58,7 @@ class InventoryBuilder(
         self.nodes: dict[str, dict[str, Any]] = {}
         self.edges: dict[tuple[Any, ...], dict[str, Any]] = {}
         self.pins: list[dict[str, Any]] = []
+        self._pin_keys: set[tuple[Any, ...]] = set()
         self.failures: list[dict[str, Any]] = []
         self.contradictions: list[dict[str, Any]] = []
         self.package_roots: dict[str, str] = {}
