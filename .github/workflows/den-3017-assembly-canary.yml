@@ -47,6 +47,13 @@ jobs:
           [[ "$ZED_CLI_BASE_REF" =~ ^[0-9a-f]{40}$ ]]
           [[ "$ZED_INTERFACES_REF" =~ ^[0-9a-f]{40}$ ]]
 
+      - name: Check out independent certification harness
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: e2e
+          persist-credentials: false
+          show-progress: false
+
       - name: Check out exact staged patch carrier
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -106,6 +113,23 @@ jobs:
       - name: Run complete library test suite
         working-directory: zed-cli
         run: cargo test --locked --lib
+
+      - name: Build the real CLI
+        working-directory: zed-cli
+        run: cargo build --locked --bin zed
+
+      - name: Run real pack/archive certification
+        working-directory: zed-cli
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import os, subprocess, sys
+          from pathlib import Path
+          root = Path.cwd()
+          binary = root / 'target' / 'debug' / ('zed.exe' if os.name == 'nt' else 'zed')
+          script = root.parent / 'e2e' / 'scripts' / 'publish_ignore_union.py'
+          subprocess.run([sys.executable, str(script), '--zed', str(binary)], check=True)
+          PY
 
       - name: Run strict lint gate
         if: runner.os == 'Linux'
