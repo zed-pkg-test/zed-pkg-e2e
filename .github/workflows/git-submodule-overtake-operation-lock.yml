@@ -1,0 +1,156 @@
+name: Git submodule takeover operation lock
+
+on:
+  pull_request:
+    paths:
+      - scripts/git_submodule_overtake_lock.py
+      - docs/git-submodule-overtake-lock.md
+      - .github/workflows/git-submodule-overtake-operation-lock.yml
+  push:
+    branches: [main]
+    paths:
+      - scripts/git_submodule_overtake_lock.py
+      - docs/git-submodule-overtake-lock.md
+      - .github/workflows/git-submodule-overtake-operation-lock.yml
+  workflow_dispatch:
+    inputs:
+      zed_cli_ref:
+        description: Immutable zed-cli commit to certify
+        required: false
+        default: fd09b1ce5c8d2a1b8159a6271d52c4e23078cca8
+
+permissions:
+  contents: read
+
+concurrency:
+  group: git-submodule-overtake-lock-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: "1"
+  ZED_CLI_REF: ${{ github.event.inputs.zed_cli_ref || 'fd09b1ce5c8d2a1b8159a6271d52c4e23078cca8' }}
+  ZED_INTERFACES_REF: d1bf8ef7c88a75292cbe8d697bfd269f30d62e2b
+  ZED_LOCK_REF: a0dc78d385bc3ab553d3027b427f5f1428239c9c
+
+jobs:
+  contract:
+    name: Process contention / ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-15]
+    steps:
+      - name: Require immutable product and dependency pins
+        run: |
+          set -euo pipefail
+          [[ "$ZED_CLI_REF" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$ZED_INTERFACES_REF" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$ZED_LOCK_REF" =~ ^[0-9a-f]{40}$ ]]
+
+      - name: Check out test-org harness
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: harness
+          fetch-depth: 1
+          persist-credentials: false
+          show-progress: false
+
+      - name: Check out exact zed-cli candidate
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: zed-pkg/zed-cli
+          ref: ${{ env.ZED_CLI_REF }}
+          path: zed-cli
+          fetch-depth: 1
+          persist-credentials: false
+          show-progress: false
+
+      - name: Verify exact candidate dependency graph
+        run: |
+          set -euo pipefail
+          test "$(git -C zed-cli rev-parse HEAD)" = "$ZED_CLI_REF"
+          grep -F "rev = \"$ZED_INTERFACES_REF\"" zed-cli/Cargo.toml
+          grep -F "rev = \"$ZED_LOCK_REF\"" zed-cli/Cargo.toml
+
+      - name: Install stable Rust
+        run: |
+          set -euo pipefail
+          rustup toolchain install stable --profile minimal --component rustfmt --component clippy
+          rustup default stable
+          rustc --version --verbose
+          cargo --version --verbose
+          git --version
+          python3 --version
+
+      - name: Verify source and focused product contracts
+        run: |
+          set -euo pipefail
+          PYTHONPYCACHEPREFIX="$RUNNER_TEMP/python-cache" \
+            python3 -m py_compile harness/scripts/git_submodule_overtake_lock.py
+          git -C harness diff --check
+          git -C zed-cli diff --check
+          cargo fmt --all --check --manifest-path zed-cli/Cargo.toml
+          cargo test --locked --manifest-path zed-cli/Cargo.toml --lib project_lock
+          cargo test --locked --manifest-path zed-cli/Cargo.toml --lib git_submodules
+
+      - name: Run strict Clippy on changed product surfaces
+        if: runner.os == 'Linux'
+        run: |
+          set -euo pipefail
+          cargo clippy --locked --manifest-path zed-cli/Cargo.toml \
+            --lib --bin zed -- -D warnings
+
+      - name: Build exact release executable
+        run: |
+          set -euo pipefail
+          cargo build --locked --release --manifest-path zed-cli/Cargo.toml --bin zed
+          mkdir -p "$RUNNER_TEMP/zed-bin"
+          cp zed-cli/target/release/zed "$RUNNER_TEMP/zed-bin/zed"
+          chmod 0755 "$RUNNER_TEMP/zed-bin/zed"
+          test "$("$RUNNER_TEMP/zed-bin/zed" --version)" = "zed 0.1.0"
+
+      - name: Certify normal and terminated-owner serialization
+        env:
+          WORK_ROOT: ${{ runner.temp }}/zed-overtake-operation-lock
+        run: |
+          set -euo pipefail
+          test ! -e "$WORK_ROOT"
+          python3 harness/scripts/git_submodule_overtake_lock.py \
+            --zed "$RUNNER_TEMP/zed-bin/zed" \
+            --work-root "$WORK_ROOT"
+          python3 - "$WORK_ROOT/evidence/evidence.json" <<'PY'
+          import json
+          import pathlib
+          import sys
+
+          evidence = json.loads(pathlib.Path(sys.argv[1]).read_text(encoding="utf-8"))
+          assert evidence["schema"] == "zed.git-submodule-overtake-operation-lock/v1"
+          assert len(evidence["checks"]) == 6
+          assert evidence["normal_completion"]["observed_block_seconds"] >= 0.7
+          assert evidence["owner_termination"]["observed_block_seconds"] >= 0.7
+          assert evidence["network_credentials"] is False
+          assert evidence["public_registry_mutation"] is False
+          PY
+
+      - name: Require clean source checkouts
+        run: |
+          set -euo pipefail
+          test -z "$(git -C harness status --porcelain=v1 --untracked-files=all)"
+          test -z "$(git -C zed-cli status --porcelain=v1 --untracked-files=all)"
+
+      - name: Upload process-lock evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: git-submodule-overtake-lock-${{ matrix.os }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/zed-overtake-operation-lock/evidence
+          if-no-files-found: warn
+          retention-days: 14
+          include-hidden-files: false
