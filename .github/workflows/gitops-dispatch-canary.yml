@@ -55,13 +55,13 @@ jobs:
           persist-credentials: false
           show-progress: false
 
-      - name: Check out exact root-dispatch candidate
+      - name: Check out exact root-dispatch candidate with ancestry
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: zed-pkg/zed-cli
           ref: ${{ env.ZED_CLI_COMMIT }}
           path: product/zed-cli
-          fetch-depth: 1
+          fetch-depth: 0
           persist-credentials: false
           show-progress: false
 
@@ -71,7 +71,7 @@ jobs:
           [[ "$ZED_CLI_COMMIT" =~ ^[0-9a-f]{40}$ ]]
           [[ "$ZED_MAIN_COMMIT" =~ ^[0-9a-f]{40}$ ]]
           test "$(git -C product/zed-cli rev-parse HEAD)" = "$ZED_CLI_COMMIT"
-          git -C product/zed-cli fetch --no-tags --depth=1 https://github.com/zed-pkg/zed-cli.git "$ZED_MAIN_COMMIT"
+          git -C product/zed-cli fetch --no-tags https://github.com/zed-pkg/zed-cli.git "$ZED_MAIN_COMMIT"
           test "$(git -C product/zed-cli rev-parse FETCH_HEAD)" = "$ZED_MAIN_COMMIT"
           git -C product/zed-cli -c user.name='zed-pkg-test' -c user.email='zed-pkg-test@users.noreply.github.com' merge --no-commit --no-ff "$ZED_MAIN_COMMIT"
           test -z "$(git -C product/zed-cli diff --name-only --diff-filter=U)"
@@ -82,6 +82,7 @@ jobs:
           python -m py_compile scripts/apply_den2725_help_delimiter_fix.py
           rm -rf scripts/__pycache__
           python scripts/apply_den2725_help_delimiter_fix.py --root product/zed-cli
+          git -C product/zed-cli add src/external_subcommands.rs tests/external_gitops_dispatch.rs
           changed="$(git -C product/zed-cli diff "$ZED_MAIN_COMMIT" --name-only)"
           expected=$'.zpkg.toml\ndocs/gitops-validator.md\nscripts/validate-zed-package-graph.sh\nsrc/completion.rs\nsrc/external_subcommands.rs\nsrc/lib.rs\nsrc/main.rs\ntests/external_gitops_dispatch.rs'
           test "$changed" = "$expected"
@@ -157,7 +158,7 @@ jobs:
       - name: Export the exact verified replay tree
         run: |
           set -euo pipefail
-          mkdir -p corrected/.github corrected/docs corrected/scripts corrected/src corrected/tests
+          mkdir -p corrected/docs corrected/scripts corrected/src corrected/tests
           cp product/zed-cli/.zpkg.toml corrected/
           cp product/zed-cli/docs/gitops-validator.md corrected/docs/
           cp product/zed-cli/scripts/validate-zed-package-graph.sh corrected/scripts/
@@ -167,19 +168,6 @@ jobs:
           cp product/zed-cli/src/main.rs corrected/src/
           cp product/zed-cli/tests/external_gitops_dispatch.rs corrected/tests/
           git -C product/zed-cli diff "$ZED_MAIN_COMMIT" --binary > corrected/den-2725-final-replay.patch
-          tree_sha="$(git -C product/zed-cli write-tree)"
-          python - <<'PY'
-          import json, os
-          from pathlib import Path
-          Path('corrected/replay-metadata.json').write_text(json.dumps({
-              '$schema': 'zed-pkg-test/den-2725-final-replay/v1',
-              'rootDispatchCommit': os.environ['ZED_CLI_COMMIT'],
-              'mainCommit': os.environ['ZED_MAIN_COMMIT'],
-              'treeSha': os.environ['TREE_SHA'],
-          }, indent=2, sort_keys=True) + '\n', encoding='utf-8')
-          PY
-        env:
-          TREE_SHA: ${{ env.TREE_SHA }}
 
       - name: Record replay tree metadata and checksums
         run: |
