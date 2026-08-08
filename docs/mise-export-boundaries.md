@@ -8,9 +8,17 @@ This suite independently certifies deterministic, conflict-safe projection from 
 
 Canonical product PR: `zed-pkg/zed-cli#131`.
 
-The product branch was semantically reconstructed on current `main`. Newer task-runtime, tool-profile, GitOps, locking, Nix, and role-auditor behavior remains authoritative. The durable exporter delta is limited to nine source, test, contract, and documentation files; no materializer workflow may remain in the final product diff.
+Pinned product head:
 
-The certification workflow pins a full immutable product commit and never follows a mutable branch during a run. The pin is advanced whenever the product head changes, including ownership-integrity fixes.
+```text
+c21f26c2370a426f36445d13186f540980dd1362
+```
+
+The product branch was semantically reconstructed on current `main`. Newer task-runtime, tool-profile, GitOps, locking, Nix, and role-auditor behavior remains authoritative. The durable exporter delta contains ten source, test, contract, and documentation files; no materializer workflow remains in the product diff.
+
+The public Rust API now enforces the reserved exporter-state source boundary before delegating to the implementation. This protects the CLI, external Rust callers, portable case aliases, and in-project symlink aliases through one shared guard.
+
+The certification workflow pins the full immutable product commit above and never follows a mutable branch during a run.
 
 ## Certified behavior
 
@@ -25,6 +33,8 @@ The harnesses run the real CLI with an empty `PATH` and prove:
 - an existing generated output cannot silently transfer ownership to a different plan, even when both plans currently render byte-identical TOML;
 - a stale or corrupted recorded output digest is rejected rather than silently repaired;
 - ownership-state failures leave both the generated output and state file unchanged;
+- the public Rust API and real CLI reject the reserved exporter-state file as the plan source;
+- the public API rejects a symlink to the reserved exporter-state file on Unix;
 - safe missing output parent directories can be created transactionally;
 - output cannot alias its input plan, including case-only aliases relevant to Windows;
 - output and input cannot target the reserved export-state path;
@@ -43,7 +53,7 @@ The permanent workflow runs on:
 - macOS 15; and
 - Windows Server 2025.
 
-Each platform requires formatting, focused exporter unit tests, both real CLI test targets, all-target Clippy with warnings denied, a locked release build, and both black-box harnesses. An aggregate gate requires every platform to succeed. All ordinary repository-wide E2E workflows remain merge gates on the same certification head.
+Each platform requires formatting, focused exporter unit tests, the public-API boundary target, both real CLI test targets, all-target Clippy with warnings denied, a locked release build, and both black-box harnesses. An aggregate gate requires every platform to succeed. All ordinary repository-wide E2E workflows remain merge gates on the same certification head.
 
 ## Deliberate boundary
 
@@ -61,9 +71,9 @@ The complete current manager-lock identity contract is separately merged and cer
 
 Promotion requires:
 
-1. the workflow pin matching the final immutable head of `zed-pkg/zed-cli#131`;
+1. the workflow pin matching final immutable head `c21f26c2370a426f36445d13186f540980dd1362` of `zed-pkg/zed-cli#131`;
 2. Ubuntu 24.04, macOS 15, and Windows Server 2025 success;
-3. formatting, focused unit tests, real CLI tests, a locked release build, and all-target Clippy with warnings denied;
+3. formatting, focused unit tests, the public API target, real CLI tests, a locked release build, and all-target Clippy with warnings denied;
 4. both black-box harnesses passing on all platforms, with symlink assertions skipped only where the host cannot create symlinks;
 5. ordinary lifecycle, recursive-install, browser, install-boundary, and runtime-mise workflows remaining green; and
 6. exact implementation, certification, and merge commits recorded in DEN-1462 and the canonical mise interoperability policy.
