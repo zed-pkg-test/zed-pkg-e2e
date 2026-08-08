@@ -4,13 +4,19 @@ This suite independently certifies deterministic, conflict-safe projection from 
 
 `zed-pkg` is an independent multi-language package manager and is unrelated to the Zed editor. Here, `zed` refers only to the `zed-pkg` CLI.
 
-## Implementation graph
+## Immutable implementation candidate
 
-- Base exporter: `zed-pkg/zed-cli#113`
-- Stacked ownership/security hardening: `zed-pkg/zed-cli#115`
-- Independent black-box harness: `scripts/mise_export_boundaries.py`
+Canonical product PR: `zed-pkg/zed-cli#131`.
 
-The certification workflow will pin the final immutable implementation commit after #115 is merged into the #113 feature branch. It will never follow a mutable branch.
+Pinned current-main candidate:
+
+```text
+9fcd902c1e4c34c95f00dd97950d648cc6aba790
+```
+
+The product branch was semantically reconstructed on current `main`. Newer task-runtime, tool-profile, GitOps, locking, Nix, and role-auditor behavior remains authoritative. The durable exporter delta is limited to nine source, test, contract, and documentation files; no materializer workflow remains.
+
+The certification workflow pins the full immutable commit and never follows a mutable branch during a run.
 
 ## Certified behavior
 
@@ -32,9 +38,19 @@ The harness runs the real CLI with an empty `PATH` and proves:
 
 Both successful and failed commands are checked for unintended project mutation.
 
+## Three-platform gate
+
+The permanent workflow runs on:
+
+- Ubuntu 24.04;
+- macOS 15; and
+- Windows Server 2025.
+
+Each platform requires formatting, focused exporter unit tests, both real CLI test targets, all-target Clippy with warnings denied, a locked release build, and the black-box harness. An aggregate gate requires every platform to succeed. All ordinary repository-wide E2E workflows remain merge gates on the same certification head.
+
 ## Deliberate boundary
 
-This certifies deterministic manager configuration export and ownership safety. It does not claim:
+This certifies deterministic manager-configuration export and ownership safety. It does not claim:
 
 - complete current `mise.lock` export;
 - native `EnvironmentLock` translation;
@@ -42,13 +58,13 @@ This certifies deterministic manager configuration export and ownership safety. 
 - execution of mise tasks, hooks, templates, plugins, or environment expressions; or
 - installation of runtimes.
 
-The current-lock contract remains DEN-1461. More sophisticated merge planning remains separate follow-up work under DEN-1462.
+The complete current manager-lock identity contract is separately merged and certified through DEN-1461. More sophisticated manager merge planning and lock-aware round trips remain separate follow-up work under DEN-1462.
 
 ## Promotion gate
 
 Promotion requires:
 
-1. a full 40-character final CLI pin;
+1. the exact product head above remaining the final immutable head of `zed-pkg/zed-cli#131`;
 2. Ubuntu 24.04, macOS 15, and Windows Server 2025 success;
 3. formatting, focused unit tests, real CLI tests, a locked release build, and all-target Clippy with warnings denied;
 4. this black-box harness passing on all platforms, with symlink assertions skipped only where the host cannot create symlinks;
