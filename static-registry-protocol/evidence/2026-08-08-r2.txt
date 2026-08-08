@@ -1,0 +1,30 @@
+# live r2.dev run 2026-08-08T04:11Z
+base: https://pub-9b365e012501426c9de90d2746deac9d.r2.dev
+
+== response headers (pkg vs index) ==
+HTTP/1.1 200 OK
+Content-Type: application/zstd
+Cache-Control: public, max-age=31536000, immutable
+HTTP/1.1 200 OK
+Content-Type: application/x-ndjson
+Cache-Control: public, max-age=60, stale-while-revalidate=600
+
+== UA filtering ==
+default curl UA -> 200
+Python-urllib/3.9 UA -> 403
+
+== conformance against https://pub-9b365e012501426c9de90d2746deac9d.r2.dev
+[1] discovery document
+  ok: schema_version matches
+  ok: static-export capabilities advertised correctly
+[2] checkpoint integrity
+  ok: tree_sha256 consistent over 7 files
+  ok: every checkpointed object matches its recorded sha256+size
+[3] indexes: NDJSON, semver order, tarball checksums
+  ok: zpkg-e2e/dep-user: 1 versions verified
+  ok: zpkg-e2e/hello-zed: 3 versions verified
+[4] yank semantics
+  ok: zpkg-e2e/hello-zed@1.2.0: yanked => unresolvable, bytes retained
+[5] absent package => missing/404
+  ok: absent index is a hard miss
+== PASS

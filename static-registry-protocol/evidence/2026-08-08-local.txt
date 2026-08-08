@@ -1,0 +1,27 @@
+# local run 2026-08-08T04:11Z
+== determinism ==
+built 7 objects + checkpoint (tree_sha256=473c19d07618…)
+built 7 objects + checkpoint (tree_sha256=473c19d07618…)
+byte-identical rebuild: yes
+== conformance against tree-a
+[1] discovery document
+  ok: schema_version matches
+  ok: static-export capabilities advertised correctly
+[2] checkpoint integrity
+  ok: tree_sha256 consistent over 7 files
+  ok: every checkpointed object matches its recorded sha256+size
+[3] indexes: NDJSON, semver order, tarball checksums
+  ok: zpkg-e2e/dep-user: 1 versions verified
+  ok: zpkg-e2e/hello-zed: 3 versions verified
+[4] yank semantics
+  ok: zpkg-e2e/hello-zed@1.2.0: yanked => unresolvable, bytes retained
+[5] absent package => missing/404
+  ok: absent index is a hard miss
+== PASS
+== red tests: every mutation must make the checker fail
+  tamper-tarball: red as required
+  tamper-index: red as required
+  drop-checkpoint-entry: red as required
+  resurrect-yanked: red as required
+  wrong-schema: red as required
+== self-test PASS
