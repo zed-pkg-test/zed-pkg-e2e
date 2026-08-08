@@ -60,13 +60,14 @@ jobs:
           for path in (
               Path("static-registry-protocol/build_static_registry.py"),
               Path("static-registry-protocol/check_static_registry.py"),
+              Path("static-registry-protocol/test_http_static_registry.py"),
               Path("static-registry-protocol/test_static_registry.py"),
               Path("static-registry-protocol/test_sync_to_r2.py"),
           ):
               compile(path.read_text(encoding="utf-8"), str(path), "exec")
           PY
 
-      - name: Run fail-closed generator and R2 synchronization tests
+      - name: Run fail-closed generator, HTTP, and R2 synchronization tests
         run: |
           set -euo pipefail
           python -m unittest discover \
