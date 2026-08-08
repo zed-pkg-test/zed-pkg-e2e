@@ -1,0 +1,190 @@
+name: DEN-2725 root GitOps dispatch certification
+
+on:
+  push:
+    branches:
+      - agent/den-2725-root-dispatch-certification
+  pull_request:
+    paths:
+      - ".github/workflows/den2725-root-dispatch-certification.yml"
+      - "scripts/den2725_root_dispatch_hardening.py"
+      - "docs/den2725-root-dispatch-certification.md"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: den-2725-root-dispatch-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  certify:
+    name: ${{ matrix.name }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Linux
+            os: ubuntu-24.04
+            python: python3
+            exe: target/release/zed
+            suffix: ""
+          - name: macOS
+            os: macos-15
+            python: python3
+            exe: target/release/zed
+            suffix: ""
+          - name: Windows
+            os: windows-2025
+            python: python
+            exe: target/release/zed.exe
+            suffix: .exe
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 40
+    defaults:
+      run:
+        shell: bash
+    env:
+      PRODUCT_SHA: 9da2f76606e5c6dad326889cb09ee7b692358823
+      CARGO_TERM_COLOR: always
+      RUST_BACKTRACE: "1"
+    steps:
+      - name: Check out exact certification harness
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          path: harness
+          fetch-depth: 1
+          persist-credentials: false
+          show-progress: false
+
+      - name: Check out exact zed-cli candidate
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: zed-pkg/zed-cli
+          ref: ${{ env.PRODUCT_SHA }}
+          path: product
+          fetch-depth: 1
+          persist-credentials: false
+          show-progress: false
+
+      - name: Verify immutable inputs
+        run: |
+          set -euo pipefail
+          test "$(git -C product rev-parse HEAD)" = "$PRODUCT_SHA"
+          test "$(git -C harness rev-parse HEAD)" = "${{ github.sha }}"
+          test -z "$(git -C product status --short)"
+          test -z "$(git -C harness status --short)"
+
+      - name: Apply the exact reviewed hardening
+        working-directory: product
+        run: |
+          set -euo pipefail
+          ${{ matrix.python }} ../harness/scripts/den2725_root_dispatch_hardening.py
+          cargo fmt --all
+          ${{ matrix.python }} - <<'PY'
+          import subprocess
+
+          changed = {
+              line.strip()
+              for line in subprocess.check_output(
+                  ["git", "diff", "--name-only"], text=True
+              ).splitlines()
+              if line.strip()
+          }
+          expected = {"src/external_subcommands.rs", "docs/gitops-validator.md"}
+          if changed != expected:
+              raise SystemExit(f"unexpected hardening delta: {sorted(changed)!r}")
+          PY
+          git diff --check
+
+      - name: Run source, package, and release gates
+        working-directory: product
+        run: |
+          set -euo pipefail
+          rustup component add rustfmt clippy
+          cargo fmt --all -- --check
+          bash scripts/validate-zed-package-graph.sh
+          cargo test --locked --lib external_subcommands
+          cargo test --locked --test external_gitops_dispatch
+          cargo clippy --locked --all-targets -- -D warnings
+          cargo build --release --locked --bin zed --bin zed-gitops
+          test -x "${{ matrix.exe }}"
+          test -x "target/release/zed-gitops${{ matrix.suffix }}"
+          "${{ matrix.exe }}" gitops validate --help >/dev/null
+
+      - name: Certify black-box dispatch boundaries
+        working-directory: product
+        env:
+          EXE_SUFFIX: ${{ matrix.suffix }}
+          ZED_EXE: ${{ matrix.exe }}
+        run: |
+          set -euo pipefail
+          cat > "$RUNNER_TEMP/dispatch_probe.rs" <<'RS'
+          use std::{env, fs};
+
+          fn main() {
+              let output = env::var("ZED_DISPATCH_EVIDENCE").expect("evidence path");
+              let arguments = env::args().skip(1).collect::<Vec<_>>().join("\u{1f}");
+              let token = env::var("ZED_PKG_TOKEN").unwrap_or_default();
+              let command = env::var("ZED_EXTERNAL_SUBCOMMAND").unwrap_or_default();
+              fs::write(
+                  output,
+                  format!("args={arguments}\ntoken={token}\ncommand={command}\n"),
+              )
+              .expect("write evidence");
+              std::process::exit(23);
+          }
+          RS
+          rustc "$RUNNER_TEMP/dispatch_probe.rs" -o "target/release/zed-probe${EXE_SUFFIX}"
+          cp "target/release/zed-probe${EXE_SUFFIX}" "target/release/zed-install${EXE_SUFFIX}"
+
+          run_probe() {
+            expected_args="$1"
+            expected_token="$2"
+            shift 2
+            evidence="$RUNNER_TEMP/dispatch-evidence.txt"
+            rm -f "$evidence"
+            set +e
+            ZED_DISPATCH_EVIDENCE="$evidence" "$ZED_EXE" "$@"
+            status=$?
+            set -e
+            test "$status" -eq 23
+            grep -Fqx "args=$expected_args" "$evidence"
+            grep -Fqx "token=$expected_token" "$evidence"
+            grep -Fqx "command=probe" "$evidence"
+          }
+
+          run_probe "alpha" "fixture-before" --token fixture-before probe alpha
+          run_probe "beta" "fixture-after" probe beta --token fixture-after
+          separator=$(printf '\037')
+          run_probe "gamma${separator}--${separator}--token${separator}child-owned" "" \
+            probe gamma -- --token child-owned
+
+          builtin_evidence="$RUNNER_TEMP/builtin-evidence.txt"
+          rm -f "$builtin_evidence"
+          ZED_DISPATCH_EVIDENCE="$builtin_evidence" "$ZED_EXE" install --help >/dev/null
+          test ! -e "$builtin_evidence"
+
+      - name: Emit bounded materialization evidence
+        if: always()
+        working-directory: product
+        run: |
+          ${{ matrix.python }} - <<'PY'
+          import base64
+          import hashlib
+          from pathlib import Path
+
+          for path in [
+              Path("src/external_subcommands.rs"),
+              Path("docs/gitops-validator.md"),
+          ]:
+              data = path.read_bytes()
+              label = path.name.upper().replace(".", "_").replace("-", "_")
+              encoded = base64.b64encode(data).decode("ascii")
+              print(f"BEGIN_{label}_BASE64")
+              for offset in range(0, len(encoded), 76):
+                  print(encoded[offset : offset + 76])
+              print(f"END_{label}_BASE64")
+              print(f"SHA256_{label}={hashlib.sha256(data).hexdigest()}")
+          PY
