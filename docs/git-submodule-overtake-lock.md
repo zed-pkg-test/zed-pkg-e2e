@@ -6,16 +6,21 @@ thread-affine, shared-ownership, lint-clean, and recovery-ordered exact candidat
 commit:
 
 ```text
-e0ec6e7f8d50104f22c5719b4236c24cb333a304
+1c74efd0bc137ef9905428a85aabe1fb1a0d2d05
 ```
 
-The candidate was merged with current product `main` through integration PR
-`zed-pkg/zed-cli#245` before the final locking review. That preserves the
-independent external GitOps dispatcher and its tests. Later commits normalize
-formatting, keep macro-adjacent comments lint-clean, move eager transaction
-recovery from the shared-home Store lock to the canonical checkout operation
-lock, and make modular takeover recover pending state before its first Git read
-or transport command.
+The candidate was first merged with current product `main` through integration
+PR `zed-pkg/zed-cli#245`, preserving the independent external GitOps dispatcher
+and its tests. Later commits normalize formatting, keep macro-adjacent comments
+lint-clean, move eager transaction recovery from the shared-home Store lock to
+the canonical checkout operation lock, and make modular takeover recover pending
+state before its first Git read or transport command.
+
+After `main` advanced again with DEN-3018 publish-ignore diagnostics, the product
+branch was reconciled through a true two-parent merge commit. The DEN-2038 lock
+and recovery files and DEN-3018's `src/ops_entry.rs` plus
+`docs/publish-ignore.md` are disjoint and both complete feature sets are present
+in the final tree. No side was selected or discarded.
 
 The product change routes `zed overtake --git-submodules` and eager
 `.zpkg-staging` recovery through the same checkout-local `.zed/operation.lock`
@@ -135,14 +140,16 @@ The workflow runs on Ubuntu 24.04 and macOS 15. It:
 - pins the CLI, `zed-interfaces`, and `zed-lock` to full commit IDs;
 - uses read-only repository permissions and commit-pinned Actions;
 - disables persisted checkout credentials;
-- compiles all three Python harnesses outside the source tree;
+- prevents Python bytecode writes globally and compiles all three harnesses
+  through a runner-temporary cache;
 - runs source diff checks and Rust formatting;
 - runs focused `project_lock` and `git_submodules` library tests;
 - runs both thread-affinity `compile_fail` rustdoc contracts;
 - runs strict Clippy on Linux;
 - builds the exact release executable;
 - executes five process-contention and ordering scenarios; and
-- requires clean product and harness checkouts afterward.
+- prints and rejects any dirty product or harness checkout without cleanup or
+  reset.
 
 Evidence contains the binary SHA-256, process IDs, observed blocking intervals,
 CLI version, and all fifteen named process checks. No account, public registry,
