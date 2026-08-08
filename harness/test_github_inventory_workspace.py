@@ -83,29 +83,30 @@ class WorkspaceInventoryTests(InventoryTestCase):
         )
         self.assertEqual(len(record["zed_workspace_members"]), 3)
         node_ids = {node["id"] for node in result["nodes"]}
-        self.assertTrue(
-            {
-                "zpkg-package:acme/workspace-monorepo",
-                "zpkg-package:acme/workspace-core",
-                "zpkg-package:acme/workspace-utils",
-                "zpkg-package:acme/workspace-cli",
-            }.issubset(node_ids)
-        )
-        self.assertEqual(
-            result["package_roots"]["acme/app"],
-            "zpkg-package:acme/workspace-monorepo",
-        )
+
+        def package_id(name: str) -> str:
+            prefix = f"zpkg-package:acme/{name}"
+            matches = sorted(
+                node_id
+                for node_id in node_ids
+                if node_id == prefix or node_id.startswith(prefix + "@")
+            )
+            self.assertEqual(len(matches), 1, matches)
+            return matches[0]
+
+        root_id = package_id("workspace-monorepo")
+        core_id = package_id("workspace-core")
+        utils_id = package_id("workspace-utils")
+        cli_id = package_id("workspace-cli")
+        self.assertEqual(result["package_roots"]["acme/app"], root_id)
+
         memberships = [
             edge for edge in result["edges"] if edge["kind"] == "zed-workspace-member"
         ]
         self.assertEqual(len(memberships), 3)
         self.assertEqual(
             {edge["target"] for edge in memberships},
-            {
-                "zpkg-package:acme/workspace-core",
-                "zpkg-package:acme/workspace-utils",
-                "zpkg-package:acme/workspace-cli",
-            },
+            {core_id, utils_id, cli_id},
         )
         local_edges = {
             (edge["source"], edge["target"])
@@ -115,18 +116,9 @@ class WorkspaceInventoryTests(InventoryTestCase):
         self.assertEqual(
             local_edges,
             {
-                (
-                    "zpkg-package:acme/workspace-utils",
-                    "zpkg-package:acme/workspace-core",
-                ),
-                (
-                    "zpkg-package:acme/workspace-cli",
-                    "zpkg-package:acme/workspace-core",
-                ),
-                (
-                    "zpkg-package:acme/workspace-cli",
-                    "zpkg-package:acme/workspace-utils",
-                ),
+                (utils_id, core_id),
+                (cli_id, core_id),
+                (cli_id, utils_id),
             },
         )
         manifest_blob_requests = [
