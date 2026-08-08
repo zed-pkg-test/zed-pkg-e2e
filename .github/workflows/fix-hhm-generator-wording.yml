@@ -1,0 +1,38 @@
+name: Fix HHM generator privacy wording
+
+on:
+  push:
+    branches:
+      - agent/add-hhm-test-fleet
+    paths:
+      - scripts/patch-hhm-generator-wording.mjs
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: agent/add-hhm-test-fleet
+          persist-credentials: true
+          fetch-depth: 0
+      - name: Apply the one-line generator correction
+        run: |
+          set -euo pipefail
+          node scripts/patch-hhm-generator-wording.mjs
+          node --check scripts/add-hhm-test-fleet.mjs
+          git diff --check
+      - name: Commit the corrected generator
+        env:
+          BRANCH_NAME: agent/add-hhm-test-fleet
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add scripts/add-hhm-test-fleet.mjs
+          git commit -m "test: clarify synthetic access fixture policy"
+          git push origin "HEAD:refs/heads/$BRANCH_NAME"
