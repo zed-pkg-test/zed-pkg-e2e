@@ -7,13 +7,16 @@ makes the existing two-source publish-ignore contract visible to users.
 
 ```text
 comparison base: 1ab18fcb2ff884e82af4cac4513d7b983a23c84a
-candidate:       bc9d5336c1ccda55d9f98b3d9cabd5a25316c78a
+candidate:       ca42115744b0d6d1ee18045b0e480e17a699af6f
 product PR:      zed-pkg/zed-cli#247
 ```
 
-This candidate supersedes `4b27a48976686e2fd309926fafd0a2411de9fb87`
-with only the exact `cargo fmt` output reported by the product repository's
-otherwise-green check/test/Clippy job.
+This candidate supersedes `bc9d5336c1ccda55d9f98b3d9cabd5a25316c78a`
+with a documentation-only correction from “six” to “five” rule families in an
+example. That prior candidate had superseded
+`4b27a48976686e2fd309926fafd0a2411de9fb87` with only the exact `cargo fmt`
+output reported by the product repository's otherwise-green
+check/test/Clippy job.
 
 The workflow requires the comparison base to be an ancestor of the candidate
 and the complete base-to-candidate delta to contain exactly:
