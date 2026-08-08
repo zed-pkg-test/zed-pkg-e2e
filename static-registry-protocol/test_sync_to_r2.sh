@@ -4,21 +4,19 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SYNC="$ROOT/sync_to_r2.sh"
+BUILDER="$ROOT/build_static_registry.py"
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
 
 FAKE_BIN="$WORK/bin"
 FAKE_LOG="$WORK/aws.log"
 TREE="$WORK/tree"
-mkdir -p "$FAKE_BIN" \
-  "$TREE/.well-known" \
-  "$TREE/index/acme" \
-  "$TREE/pkgs/acme/demo"
+mkdir -p "$FAKE_BIN"
 
-printf '%s\n' '{"schema_version":0}' > "$TREE/.well-known/zpkg-registry.json"
-printf '%s\n' '{"version":"1.0.0"}' > "$TREE/index/acme/demo"
-printf 'artifact\n' > "$TREE/pkgs/acme/demo/1.0.0.tar.zst"
-printf '%s\n' '{"seq":1}' > "$TREE/checkpoint.json"
+SOURCE_DATE_EPOCH=0 python3 "$BUILDER" \
+  --fixtures "$ROOT/fixtures" \
+  --out "$TREE" \
+  > "$WORK/build.log"
 
 cat > "$FAKE_BIN/aws" <<'FAKE_AWS'
 #!/usr/bin/env bash
@@ -93,8 +91,12 @@ assert_upload_contract() {
   local actual="$WORK/actual-keys.txt"
   cat > "$expected" <<'KEYS'
 .well-known/zpkg-registry.json
-index/acme/demo
-pkgs/acme/demo/1.0.0.tar.zst
+index/zpkg-e2e/dep-user
+index/zpkg-e2e/hello-zed
+pkgs/zpkg-e2e/dep-user/0.1.0.tar.zst
+pkgs/zpkg-e2e/hello-zed/1.0.0.tar.zst
+pkgs/zpkg-e2e/hello-zed/1.1.0.tar.zst
+pkgs/zpkg-e2e/hello-zed/1.2.0.tar.zst
 checkpoint.json
 KEYS
   awk -F'|' '$1 == "PUT" { print $2 }' "$FAKE_LOG" > "$actual"
@@ -102,16 +104,16 @@ KEYS
 
   [[ "$(tail -n 1 "$actual")" == "checkpoint.json" ]]
   grep -F 'PUT|.well-known/zpkg-registry.json|application/json|no-cache|' "$FAKE_LOG"
-  grep -F 'PUT|index/acme/demo|application/x-ndjson|no-cache|' "$FAKE_LOG"
-  grep -F 'PUT|pkgs/acme/demo/1.0.0.tar.zst|application/zstd|public, max-age=31536000, immutable|' "$FAKE_LOG"
+  grep -F 'PUT|index/zpkg-e2e/hello-zed|application/x-ndjson|no-cache|' "$FAKE_LOG"
+  grep -F 'PUT|pkgs/zpkg-e2e/hello-zed/1.0.0.tar.zst|application/zstd|public, max-age=31536000, immutable|' "$FAKE_LOG"
   grep -F 'PUT|checkpoint.json|application/json|no-cache|' "$FAKE_LOG"
-  [[ "$(grep -c '^PUT|' "$FAKE_LOG")" -eq 4 ]]
+  [[ "$(grep -c '^PUT|' "$FAKE_LOG")" -eq 8 ]]
   [[ "$(grep -c '^HEAD$' "$FAKE_LOG")" -eq 1 ]]
 }
 
-# Fresh dedicated bucket: all ordinary objects first, checkpoint last.
+# Fresh dedicated bucket: all checkpointed objects first, checkpoint last.
 run_sync false false "$TREE" test-static-registry > "$WORK/fresh.out"
-grep -F 'uploaded 4 objects to r2://test-static-registry (checkpoint last)' "$WORK/fresh.out"
+grep -F 'uploaded 8 objects to r2://test-static-registry (checkpoint last)' "$WORK/fresh.out"
 assert_upload_contract
 
 # Existing mutable v0 checkpoint: fail before any write unless explicitly overridden.
@@ -140,6 +142,19 @@ status=$?
 set -e
 [[ "$status" -eq 2 ]]
 grep -F 'missing ' "$WORK/missing.err"
+[[ ! -s "$FAKE_LOG" ]]
+
+# Tampered checkpointed bytes fail local conformance before any AWS operation.
+TAMPERED_TREE="$WORK/tampered-tree"
+cp -R "$TREE" "$TAMPERED_TREE"
+printf 'tamper' >> "$TAMPERED_TREE/pkgs/zpkg-e2e/hello-zed/1.0.0.tar.zst"
+set +e
+run_sync false false "$TAMPERED_TREE" test-static-registry \
+  > "$WORK/tampered.out" 2> "$WORK/tampered.err"
+status=$?
+set -e
+[[ "$status" -eq 2 ]]
+grep -F 'fails local conformance' "$WORK/tampered.err"
 [[ ! -s "$FAKE_LOG" ]]
 
 printf '%s\n' 'static R2 sync contract: PASS'
