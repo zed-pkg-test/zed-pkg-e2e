@@ -2,19 +2,20 @@
 
 This test-org lane certifies the complete remaining DEN-2038 surface in
 `zed-pkg/zed-cli#243` at its current-main-integrated, nested-invocation-hardened,
-thread-affine, shared-ownership, lint-clean, and recovery-locked exact candidate
+thread-affine, shared-ownership, lint-clean, and recovery-ordered exact candidate
 commit:
 
 ```text
-d163e98b9151340b368301b022c3a45bdf5bd70e
+e0ec6e7f8d50104f22c5719b4236c24cb333a304
 ```
 
 The candidate was merged with current product `main` through integration PR
 `zed-pkg/zed-cli#245` before the final locking review. That preserves the
 independent external GitOps dispatcher and its tests. Later commits normalize
-formatting, keep macro-adjacent comments lint-clean, and move eager transaction
+formatting, keep macro-adjacent comments lint-clean, move eager transaction
 recovery from the shared-home Store lock to the canonical checkout operation
-lock.
+lock, and make modular takeover recover pending state before its first Git read
+or transport command.
 
 The product change routes `zed overtake --git-submodules` and eager
 `.zpkg-staging` recovery through the same checkout-local `.zed/operation.lock`
@@ -51,8 +52,9 @@ Product unit tests prove nested facade reuse, thread affinity, shared descriptor
 lifetime, and superproject path selection. They do not by themselves prove that
 independent operating system processes contend on the same checkout identity,
 that symlink or nested-path aliases cannot escape ownership, that recovery uses
-the same ownership boundary across different Zed homes, or that kernel ownership
-is released when the owner is terminated.
+the same ownership boundary across different Zed homes, that modular takeover
+recovers before Git synchronization, or that kernel ownership is released when
+the owner is terminated.
 
 The three test-org scripts exercise those boundaries using the real release
 executable and disposable local Git repositories. A temporary `git` shim pauses
@@ -60,7 +62,7 @@ takeover after the CLI has acquired project ownership but before Git submodule
 synchronization can proceed. The shim never replaces Git semantics; after
 release it `exec`s the exact host Git binary with the original arguments.
 
-## Thirteen certified process checks
+## Fifteen certified process checks
 
 ### Normal completion
 
@@ -98,7 +100,7 @@ blocking interval demonstrates serialization rather than coincidental ordering.
 This scenario would fail against the earlier implementation that locked the raw
 current directory and only later discovered the superproject.
 
-### Transaction recovery
+### Transaction recovery versus another owner
 
 10. A process using a different Zed home cannot eagerly recover an active
     `.zpkg-staging` journal while takeover owns the checkout.
@@ -114,6 +116,18 @@ synchronization point. Against the old Store-home guard, the second process woul
 restore it concurrently; against the project lock, the journal remains untouched
 until checkout ownership is released.
 
+### Recovery ordering inside modular takeover
+
+14. A pending transaction present before `zed overtake --git-submodules` is
+    recovered before takeover reaches `git submodule sync`.
+15. The exact backup bytes are restored before `.gitmodules` verification,
+    transport synchronization, or adoption begins.
+
+Modular takeover dispatch executes before `main`'s ordinary `run()` path. These
+checks ensure recovery is explicitly performed at the start of the already-owned
+takeover closure rather than deferred until the first `ProjectTransaction` after
+Git work has already occurred.
+
 ## Matrix and promotion boundary
 
 The workflow runs on Ubuntu 24.04 and macOS 15. It:
@@ -127,11 +141,11 @@ The workflow runs on Ubuntu 24.04 and macOS 15. It:
 - runs both thread-affinity `compile_fail` rustdoc contracts;
 - runs strict Clippy on Linux;
 - builds the exact release executable;
-- executes four process-contention scenarios; and
+- executes five process-contention and ordering scenarios; and
 - requires clean product and harness checkouts afterward.
 
 Evidence contains the binary SHA-256, process IDs, observed blocking intervals,
-CLI version, and all thirteen named process checks. No account, public registry,
+CLI version, and all fifteen named process checks. No account, public registry,
 Cloudflare resource, credential, Docker daemon, or persistent namespace
 participates.
 
