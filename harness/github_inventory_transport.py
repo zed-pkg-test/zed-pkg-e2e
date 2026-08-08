@@ -11,8 +11,23 @@ from typing import Any, Mapping
 from github_inventory_types import *  # noqa: F401,F403
 from github_inventory_util import _is_loopback_host
 
+
+def _unsafe_url_path(path: str) -> bool:
+    """Reject path syntax whose routing meaning can change after decoding."""
+
+    if not path.startswith("/") or "\\" in path or "\x00" in path:
+        return True
+    if any(ord(character) < 0x20 or ord(character) == 0x7F for character in path):
+        return True
+    decoded = urllib.parse.unquote(path)
+    if "\\" in decoded or "\x00" in decoded or "//" in decoded:
+        return True
+    return any(segment in {".", ".."} for segment in decoded.split("/"))
+
+
 class Transport:
     base_url: str
+    _base_path: str
 
     def request(
         self,
@@ -26,9 +41,24 @@ class Transport:
     def token_destination_allowed(self) -> bool:
         return True
 
-    def relative_from_link(self, link: str) -> str:
-        base = urllib.parse.urlsplit(self.base_url.rstrip("/") + "/")
-        parsed = urllib.parse.urlsplit(urllib.parse.urljoin(self.base_url.rstrip("/") + "/", link))
+    def normalize_request_path(self, path: str) -> str:
+        parsed = urllib.parse.urlsplit(path)
+        if parsed.scheme or parsed.netloc or parsed.username or parsed.password or parsed.fragment:
+            raise ApiError(400, "request-path", "unsafe_github_api_path")
+        request_path = parsed.path or "/"
+        if _unsafe_url_path(request_path):
+            raise ApiError(400, "request-path", "unsafe_github_api_path")
+        if parsed.query:
+            request_path += "?" + parsed.query
+        return request_path
+
+    def absolute_request_url(self, path: str) -> str:
+        return self.base_url + self.normalize_request_path(path)
+
+    def relative_from_link(self, link: str, *, current_path: str = "/") -> str:
+        base = urllib.parse.urlsplit(self.base_url)
+        current_url = self.absolute_request_url(current_path)
+        parsed = urllib.parse.urlsplit(urllib.parse.urljoin(current_url, link))
         if (parsed.scheme.lower(), parsed.netloc.lower()) != (
             base.scheme.lower(),
             base.netloc.lower(),
@@ -37,11 +67,22 @@ class Transport:
         if parsed.username or parsed.password or parsed.fragment:
             raise ApiError(400, "pagination-link", "unsafe_pagination_link")
         path = parsed.path or "/"
-        if not path.startswith("/"):
+        if _unsafe_url_path(path):
             raise ApiError(400, "pagination-link", "unsafe_pagination_link")
+        base_path = getattr(self, "_base_path", base.path.rstrip("/"))
+        if base_path:
+            if path == base_path:
+                relative = "/"
+            elif path.startswith(base_path + "/"):
+                relative = path[len(base_path) :]
+            else:
+                raise ApiError(400, "pagination-link", "pagination_link_outside_api_base")
+        else:
+            relative = path
         if parsed.query:
-            path += "?" + parsed.query
-        return path
+            relative += "?" + parsed.query
+        return self.normalize_request_path(relative)
+
 
 class _NoRedirect(urllib.request.HTTPRedirectHandler):
     def redirect_request(
@@ -55,6 +96,7 @@ class _NoRedirect(urllib.request.HTTPRedirectHandler):
     ) -> None:
         return None
 
+
 class HttpTransport(Transport):
     def __init__(
         self,
@@ -67,9 +109,18 @@ class HttpTransport(Transport):
             raise InputError("GitHub API base must be an absolute http(s) URL")
         if parsed.username or parsed.password or parsed.query or parsed.fragment:
             raise InputError("GitHub API base must not contain credentials, query, or fragment")
+        raw_path = parsed.path or ""
+        candidate_path = raw_path.rstrip("/")
+        if candidate_path == "/":
+            candidate_path = ""
+        if candidate_path and _unsafe_url_path(candidate_path):
+            raise InputError("GitHub API base contains ambiguous path syntax")
         if parsed.scheme == "http" and not _is_loopback_host(parsed.hostname):
             raise InputError("plain HTTP GitHub API bases are allowed only on loopback")
-        self.base_url = base_url.rstrip("/")
+        self._base_path = candidate_path
+        self.base_url = urllib.parse.urlunsplit(
+            (parsed.scheme.lower(), parsed.netloc, self._base_path, "", "")
+        )
         self._host = parsed.hostname.lower() if parsed.hostname else ""
         self._allow_token_to_custom_origin = allow_token_to_custom_origin
         self._opener = urllib.request.build_opener(_NoRedirect())
@@ -88,7 +139,7 @@ class HttpTransport(Transport):
         timeout: float,
         max_bytes: int,
     ) -> ApiResponse:
-        relative = self.relative_from_link(path)
+        relative = self.normalize_request_path(path)
         url = self.base_url + relative
         request = urllib.request.Request(url, method="GET", headers=dict(headers))
         try:

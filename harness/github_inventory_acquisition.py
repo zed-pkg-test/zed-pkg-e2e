@@ -101,7 +101,7 @@ class InventoryAcquisitionMixin:
                             f"manifest {full_name}:{path} exceeded "
                             f"{self.limits.max_manifest_bytes} bytes"
                         )
-                blob_sha = str(entry.get("sha", ""))
+                blob_sha = str(entry.get("sha", "")).lower()
                 if not GIT_SHA_RE.fullmatch(blob_sha):
                     raise ParseFailure(f"tree entry {path} has invalid blob SHA")
                 data = self.client.get_blob(full_name, blob_sha, declared_size)
@@ -132,11 +132,7 @@ class InventoryAcquisitionMixin:
             if zed_lock:
                 self._parse_zed_lock(zed_lock)
             gitmodules = blobs.get(".gitmodules")
-            gitlinks = {
-                path: str(entry.get("sha", ""))
-                for path, entry in entries.items()
-                if entry.get("type") == "commit" or entry.get("mode") == "160000"
-            }
+            gitlinks = self._exact_gitlinks(entries)
             if "git-submodule" in self.includes:
                 self._parse_git_submodules(gitmodules, full_name, commit_sha, gitlinks)
             if "nix" in self.includes:
@@ -178,6 +174,25 @@ class InventoryAcquisitionMixin:
                 raise ParseFailure(f"duplicate tree path {path}")
             result[path] = dict(entry)
         return result
+
+    def _exact_gitlinks(
+        self, entries: Mapping[str, Mapping[str, Any]]
+    ) -> dict[str, str]:
+        gitlinks: dict[str, str] = {}
+        for path, entry in entries.items():
+            type_is_commit = entry.get("type") == "commit"
+            mode_is_gitlink = str(entry.get("mode", "")) == "160000"
+            if type_is_commit != mode_is_gitlink:
+                raise ParseFailure(
+                    f"tree entry {path} has contradictory gitlink type/mode"
+                )
+            if not type_is_commit:
+                continue
+            object_id = str(entry.get("sha", "")).lower()
+            if not GIT_SHA_RE.fullmatch(object_id):
+                raise ParseFailure(f"gitlink tree entry {path} has invalid object ID")
+            gitlinks[path] = object_id
+        return gitlinks
 
     def _selected_manifest_paths(self, entries: Mapping[str, Mapping[str, Any]]) -> set[str]:
         selected: set[str] = set()

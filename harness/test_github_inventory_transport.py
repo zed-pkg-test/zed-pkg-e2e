@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import base64
+import hashlib
+
 from github_inventory_test_support import *  # noqa: F401,F403
 
 
@@ -36,9 +39,7 @@ class InventoryTransportTests(InventoryTestCase):
                 sleeper=lambda _: None,
             )
         self.assertEqual(result["completeness"]["inventory"], "complete")
-        org_requests = sum(
-            1 for value in server.handler.seen_authorization
-        )
+        org_requests = sum(1 for _ in server.handler.seen_authorization)
         # 3 pagination requests plus exactly 2 retry attempts, followed by
         # repository commit/tree/blob requests.
         self.assertGreaterEqual(org_requests, 5)
@@ -62,6 +63,53 @@ class InventoryTransportTests(InventoryTestCase):
         with self.assertRaises(inventory.ApiError) as captured:
             transport.relative_from_link("https://attacker.invalid/page=2")
         self.assertEqual(captured.exception.code, "cross_origin_pagination_link")
+
+    def test_ghe_api_prefix_pagination_is_normalized_without_duplication(self) -> None:
+        transport = inventory.HttpTransport("https://github.example/api/v3/")
+        current = "/orgs/acme/repos?direction=asc&page=1&per_page=100"
+        expected = "/orgs/acme/repos?direction=asc&page=2&per_page=100"
+
+        self.assertEqual(
+            transport.relative_from_link(
+                "https://github.example/api/v3/orgs/acme/repos?direction=asc&page=2&per_page=100",
+                current_path=current,
+            ),
+            expected,
+        )
+        self.assertEqual(
+            transport.relative_from_link(
+                "/api/v3/orgs/acme/repos?direction=asc&page=2&per_page=100",
+                current_path=current,
+            ),
+            expected,
+        )
+        self.assertEqual(
+            transport.relative_from_link("?direction=asc&page=2&per_page=100", current_path=current),
+            expected,
+        )
+        self.assertEqual(
+            transport.absolute_request_url(expected),
+            "https://github.example/api/v3" + expected,
+        )
+        with self.assertRaises(inventory.ApiError) as captured:
+            transport.relative_from_link(
+                "https://github.example/outside?page=2", current_path=current
+            )
+        self.assertEqual(captured.exception.code, "pagination_link_outside_api_base")
+
+    def test_api_base_rejects_credentials_queries_fragments_and_dot_segments(self) -> None:
+        unsafe = [
+            "https://user:pass@github.example/api/v3",
+            "https://github.example/api/v3?token=secret",
+            "https://github.example/api/v3#fragment",
+            "https://github.example/api/../v3",
+            "https://github.example/api/%2e%2e/v3",
+            "https://github.example/api//v3",
+            "https://github.example/api/%5c/v3",
+        ]
+        for value in unsafe:
+            with self.subTest(value=value), self.assertRaises(inventory.InputError):
+                inventory.HttpTransport(value)
 
     def test_hard_limits_fail_closed_and_preserve_existing_atomic_output(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -165,17 +213,19 @@ class InventoryTransportTests(InventoryTestCase):
         self.assertEqual(client.token, "secret-token")
 
     def test_github_blob_base64_line_wrapping_is_supported(self) -> None:
-        sha = "a" * 40
+        data = b"abc"
+        sha = inventory.git_blob_sha(data)
 
         class WrappedBlobTransport(inventory.Transport):
             base_url = "https://api.github.com"
+            _base_path = ""
 
             def request(self, path, headers, timeout, max_bytes):
                 del path, headers, timeout, max_bytes
                 body = json.dumps(
                     {
                         "sha": sha,
-                        "size": 3,
+                        "size": len(data),
                         "encoding": "base64",
                         "content": "Y\nWJ\nj",
                     }
@@ -188,7 +238,53 @@ class InventoryTransportTests(InventoryTestCase):
             None,
             sleeper=lambda _: None,
         )
-        self.assertEqual(client.get_blob("acme/app", sha, 3), b"abc")
+        self.assertEqual(client.get_blob("acme/app", sha, len(data)), data)
+
+    def test_blob_object_ids_are_recomputed_for_sha1_and_sha256(self) -> None:
+        data = b"object identity"
+        header = f"blob {len(data)}\0".encode("ascii")
+        sha1 = hashlib.sha1(header + data, usedforsecurity=False).hexdigest()
+        sha256 = hashlib.sha256(header + data).hexdigest()
+
+        class BlobTransport(inventory.Transport):
+            base_url = "https://api.github.com"
+            _base_path = ""
+
+            def __init__(self, response_sha: str, response_data: bytes) -> None:
+                self.response_sha = response_sha
+                self.response_data = response_data
+
+            def request(self, path, headers, timeout, max_bytes):
+                del path, headers, timeout, max_bytes
+                body = json.dumps(
+                    {
+                        "sha": self.response_sha,
+                        "size": len(self.response_data),
+                        "encoding": "base64",
+                        "content": base64.b64encode(self.response_data).decode("ascii"),
+                    }
+                ).encode("utf-8")
+                return inventory.ApiResponse(200, {}, body)
+
+        for object_id in (sha1, sha256):
+            with self.subTest(object_id=object_id):
+                client = inventory.GitHubClient(
+                    BlobTransport(object_id, data),
+                    inventory.Budget(inventory.Limits()),
+                    None,
+                    sleeper=lambda _: None,
+                )
+                self.assertEqual(client.get_blob("acme/app", object_id, len(data)), data)
+
+        client = inventory.GitHubClient(
+            BlobTransport(sha1, b"tampered"),
+            inventory.Budget(inventory.Limits()),
+            None,
+            sleeper=lambda _: None,
+        )
+        with self.assertRaises(inventory.ApiError) as captured:
+            client.get_blob("acme/app", sha1, None)
+        self.assertEqual(captured.exception.code, "blob_object_id_mismatch")
 
     def test_field_size_limit_is_fail_closed(self) -> None:
         with self.assertRaises(inventory.LimitError):

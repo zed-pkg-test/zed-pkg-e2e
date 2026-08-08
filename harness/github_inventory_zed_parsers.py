@@ -44,61 +44,78 @@ class ZedParsingMixin:
                     provenance=[provenance(blob, _find_toml_line(text, "name"))],
                 )
                 source_id = package_id
-        dependencies = document.get("dependencies", {})
-        if dependencies is None:
-            dependencies = {}
-        if not isinstance(dependencies, dict):
-            self._source_failure(
-                blob,
-                "parse-zed-manifest",
-                "invalid_dependencies_table",
-                ParseFailure("[dependencies] must be a table"),
-            )
-            return
-        for raw_coordinate, raw_requirement in sorted(dependencies.items(), key=lambda item: str(item[0])):
-            try:
-                coordinate = normalize_repo(str(raw_coordinate))
-            except InputError as error:
-                self._source_failure(blob, "parse-zed-manifest", "invalid_dependency_coordinate", error)
-                continue
-            if not isinstance(raw_requirement, str):
+
+        dependency_tables = (
+            ("dependencies", "zed-declared"),
+            ("build-dependencies", "zed-build-declared"),
+            ("build_dependencies", "zed-build-declared"),
+        )
+        for table_name, edge_kind in dependency_tables:
+            dependencies = document.get(table_name, {})
+            if dependencies is None:
+                dependencies = {}
+            if not isinstance(dependencies, dict):
                 self._source_failure(
                     blob,
                     "parse-zed-manifest",
-                    "invalid_dependency_requirement",
-                    ParseFailure(f"dependency {coordinate} requirement must be a string"),
+                    "invalid_dependencies_table",
+                    ParseFailure(f"[{table_name}] must be a table"),
                 )
                 continue
-            try:
-                _bounded_text(
-                    raw_requirement,
-                    f"dependency {coordinate} requirement",
-                    self.limits.max_field_bytes,
+            for raw_coordinate, raw_requirement in sorted(
+                dependencies.items(), key=lambda item: str(item[0])
+            ):
+                try:
+                    coordinate = normalize_repo(str(raw_coordinate))
+                except InputError as error:
+                    self._source_failure(
+                        blob,
+                        "parse-zed-manifest",
+                        "invalid_dependency_coordinate",
+                        error,
+                    )
+                    continue
+                if not isinstance(raw_requirement, str):
+                    self._source_failure(
+                        blob,
+                        "parse-zed-manifest",
+                        "invalid_dependency_requirement",
+                        ParseFailure(f"dependency {coordinate} requirement must be a string"),
+                    )
+                    continue
+                try:
+                    _bounded_text(
+                        raw_requirement,
+                        f"dependency {coordinate} requirement",
+                        self.limits.max_field_bytes,
+                    )
+                except InputError as error:
+                    self._source_failure(
+                        blob,
+                        "parse-zed-manifest",
+                        "dependency_requirement_too_large",
+                        error,
+                    )
+                    continue
+                target = package_node_id(coordinate)
+                self._ensure_package_node(coordinate, exact_version=None)
+                self._add_edge(
+                    source_id,
+                    target,
+                    edge_kind,
+                    requirement=raw_requirement,
+                    provenance=[
+                        provenance(blob, _find_toml_line(text, str(raw_coordinate)))
+                    ],
                 )
-            except InputError as error:
-                self._source_failure(
-                    blob,
-                    "parse-zed-manifest",
-                    "dependency_requirement_too_large",
-                    error,
-                )
-                continue
-            target = package_node_id(coordinate)
-            self._ensure_package_node(coordinate, exact_version=None)
-            self._add_edge(
-                source_id,
-                target,
-                "zed-declared",
-                requirement=raw_requirement,
-                provenance=[provenance(blob, _find_toml_line(text, str(raw_coordinate)))],
-            )
 
     def _parse_zed_lock(self, blob: SourceBlob) -> None:
         """Record exact selections without inventing dependency topology.
 
-        A flat lock closure proves selected package/version/artifact identities,
-        but not parent-child relationships among those selections. Pins therefore
-        live in a dedicated evidence collection. Only a proven direct declaration
+        A flat lock closure proves exact selected package/version identities and
+        may include immutable artifact or VCS identity. It does not prove
+        parent-child relationships among those selections. Pins therefore live
+        in a dedicated evidence collection. Only a proven direct declaration
         edge may be annotated with a matching unique pin.
         """
 
@@ -149,14 +166,15 @@ class ZedParsingMixin:
                 continue
 
             sha256 = item.get("sha256")
-            if not isinstance(sha256, str) or not re.fullmatch(r"[0-9a-f]{64}", sha256):
-                self._source_failure(
-                    blob,
-                    "parse-zed-lock",
-                    "invalid_lock_artifact_sha256",
-                    ParseFailure(f"lock package {coordinate} has invalid sha256"),
-                )
-                continue
+            if sha256 is not None:
+                if not isinstance(sha256, str) or not re.fullmatch(r"[0-9a-f]{64}", sha256):
+                    self._source_failure(
+                        blob,
+                        "parse-zed-lock",
+                        "invalid_lock_artifact_sha256",
+                        ParseFailure(f"lock package {coordinate} has invalid sha256"),
+                    )
+                    continue
 
             vcs_commit = item.get("vcs_commit")
             if vcs_commit is not None:
@@ -177,9 +195,10 @@ class ZedParsingMixin:
                 "source": source,
                 "package": coordinate,
                 "selected_version": version,
-                "artifact_sha256": sha256,
                 "provenance": [provenance(blob, _find_toml_line(text, str(name)))],
             }
+            if sha256 is not None:
+                pin["artifact_sha256"] = sha256
             if vcs_commit is not None:
                 pin["vcs_commit"] = vcs_commit
 
@@ -206,7 +225,7 @@ class ZedParsingMixin:
             selections = {
                 (
                     str(pin["selected_version"]),
-                    str(pin["artifact_sha256"]),
+                    pin.get("artifact_sha256"),
                     pin.get("vcs_commit"),
                 )
                 for pin in pins
@@ -215,12 +234,11 @@ class ZedParsingMixin:
                 rendered_selections: list[dict[str, Any]] = []
                 for version, artifact_sha256, vcs_commit in sorted(
                     selections,
-                    key=lambda value: (value[0], value[1], value[2] or ""),
+                    key=lambda value: (value[0], value[1] or "", value[2] or ""),
                 ):
-                    selection: dict[str, Any] = {
-                        "version": version,
-                        "artifact_sha256": artifact_sha256,
-                    }
+                    selection: dict[str, Any] = {"version": version}
+                    if artifact_sha256 is not None:
+                        selection["artifact_sha256"] = artifact_sha256
                     if vcs_commit is not None:
                         selection["vcs_commit"] = vcs_commit
                     rendered_selections.append(selection)
@@ -244,10 +262,11 @@ class ZedParsingMixin:
                 if (
                     edge.get("source") == source
                     and edge.get("target") == target
-                    and edge.get("kind") == "zed-declared"
+                    and edge.get("kind") in {"zed-declared", "zed-build-declared"}
                 ):
                     edge["selected_version"] = selected_version
-                    edge["artifact_sha256"] = artifact_sha256
+                    if artifact_sha256 is not None:
+                        edge["artifact_sha256"] = artifact_sha256
                     if vcs_commit is not None:
                         edge["selected_commit"] = vcs_commit
                     edge["selection_provenance"] = list(matching_pin["provenance"])
@@ -262,7 +281,10 @@ class ZedParsingMixin:
                 str(value.get("requirement", "")),
             ),
         ):
-            if edge.get("source") != source or edge.get("kind") != "zed-declared":
+            if edge.get("source") != source or edge.get("kind") not in {
+                "zed-declared",
+                "zed-build-declared",
+            }:
                 continue
             target = str(edge.get("target", ""))
             prefix = "zpkg-package:"
@@ -275,6 +297,7 @@ class ZedParsingMixin:
                 "code": "declared-dependency-missing-lock-pin",
                 "source": source,
                 "target": target,
+                "dependency_kind": edge.get("kind"),
                 "declared_provenance": list(edge.get("provenance", [])),
                 "lock_provenance": [provenance(blob)],
             }
