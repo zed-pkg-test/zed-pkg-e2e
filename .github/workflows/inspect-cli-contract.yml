@@ -1,0 +1,179 @@
+name: zed inspect contract
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/inspect-cli-contract.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: inspect-cli-contract-${{ github.event.pull_request.number || github.ref || github.run_id }}
+  cancel-in-progress: true
+
+env:
+  ZED_CLI_REF: b9bb6e9cf48da3d9b82d1c24b38e576e661a7e4a
+
+jobs:
+  contract:
+    name: inspect / ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-15, windows-2025]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 35
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Validate exact product pin
+        run: |
+          set -euo pipefail
+          [[ "$ZED_CLI_REF" =~ ^[0-9a-f]{40}$ ]]
+
+      - name: Check out exact zed-cli candidate
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: zed-pkg/zed-cli
+          ref: ${{ env.ZED_CLI_REF }}
+          path: zed-cli
+          fetch-depth: 1
+          persist-credentials: false
+          show-progress: false
+
+      - name: Install declared Rust toolchain
+        run: |
+          set -euo pipefail
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+          rustc --version --verbose
+          cargo --version --verbose
+
+      - name: Build exact candidate
+        run: |
+          set -euo pipefail
+          test "$(git -C zed-cli rev-parse HEAD)" = "$ZED_CLI_REF"
+          cargo build --locked --release --manifest-path zed-cli/Cargo.toml --bin zed
+
+      - name: Prove offline JSON inspection never mutates project or loads credentials
+        env:
+          RUNNER_OS_NAME: ${{ runner.os }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import hashlib
+          import json
+          import os
+          import pathlib
+          import subprocess
+          import tempfile
+
+          repo = pathlib.Path.cwd()
+          binary = repo / "zed-cli" / "target" / "release" / ("zed.exe" if os.name == "nt" else "zed")
+          if not binary.is_file():
+              raise SystemExit(f"missing candidate binary: {binary}")
+
+          runner_temp = pathlib.Path(os.environ.get("RUNNER_TEMP") or tempfile.gettempdir())
+          root = pathlib.Path(tempfile.mkdtemp(prefix="zed-inspect-", dir=runner_temp))
+          home = pathlib.Path(tempfile.mkdtemp(prefix="zed-home-", dir=runner_temp))
+          manifest = root / ".zpkg.toml"
+          lock = root / ".zpkg.lock"
+          staging = root / ".zpkg-staging"
+          staging.mkdir()
+          sentinel = staging / "sentinel"
+          sentinel.write_text("must-survive", encoding="utf-8")
+          manifest.write_text(
+              """[package]\norg = \"acme\"\nname = \"inspect-fixture\"\nversion = \"1.0.0\"\n\n[package.repository]\nvcs = \"git\"\nurl = \"https://example.invalid/acme/inspect-fixture\"\n""",
+              encoding="utf-8",
+          )
+          lock.write_text("version = 1\n", encoding="utf-8")
+          (home / "credentials.toml").write_text("malformed = [credential", encoding="utf-8")
+
+          def snapshot(path):
+              rows = {}
+              for candidate in sorted(path.rglob("*")):
+                  relative = candidate.relative_to(path).as_posix()
+                  if candidate.is_symlink():
+                      rows[relative] = ["symlink", os.readlink(candidate)]
+                  elif candidate.is_file():
+                      rows[relative] = ["file", hashlib.sha256(candidate.read_bytes()).hexdigest()]
+                  elif candidate.is_dir():
+                      rows[relative] = ["dir"]
+              return rows
+
+          env = os.environ.copy()
+          env.update(
+              {
+                  "ZED_PKG_HOME": str(home),
+                  "ZED_PKG_TOKEN": "fake-env-token-that-must-not-escape",
+                  "ZED_PKG_REGISTRY": "http://127.0.0.1:9",
+              }
+          )
+
+          def inspect():
+              return subprocess.run(
+                  [
+                      str(binary),
+                      "--token",
+                      "fake-arg-token-that-must-not-escape",
+                      "inspect",
+                      "--format",
+                      "json",
+                      "--root",
+                      str(root.resolve()),
+                  ],
+                  cwd=root,
+                  env=env,
+                  text=True,
+                  capture_output=True,
+                  timeout=10,
+                  check=False,
+              )
+
+          before = snapshot(root)
+          result = inspect()
+          after = snapshot(root)
+          assert result.returncode == 0, result.stderr
+          assert result.stderr == "", result.stderr
+          assert result.stdout.count("\n") == 1, result.stdout
+          report = json.loads(result.stdout)
+          assert report["schema_version"].startswith("1."), report
+          assert report["cli"] == {
+              "implementation": "zed-pkg",
+              "command": "inspect",
+              "offline": True,
+              "mutates_project": False,
+              "loads_credentials": False,
+          }, report
+          assert report["summary"]["recovery_pending"] is True, report
+          assert report["summary"]["frozen_ready"] is False, report
+          assert any(d["code"] == "RECOVERY_PENDING" for d in report["diagnostics"]), report
+          assert before == after, (before, after)
+          assert sentinel.read_text(encoding="utf-8") == "must-survive"
+          assert "fake-env-token-that-must-not-escape" not in result.stdout + result.stderr
+          assert "fake-arg-token-that-must-not-escape" not in result.stdout + result.stderr
+
+          secret = "ghp_fake_manifest_secret_that_must_not_escape"
+          manifest.write_text(f"[package\nsecret = \"{secret}\"\n", encoding="utf-8")
+          malformed_before = snapshot(root)
+          malformed = inspect()
+          malformed_after = snapshot(root)
+          assert malformed.returncode == 0, malformed.stderr
+          assert malformed.stderr == "", malformed.stderr
+          malformed_report = json.loads(malformed.stdout)
+          assert malformed_report["summary"]["health"] == "error", malformed_report
+          assert any(d["code"] == "MANIFEST_INVALID" for d in malformed_report["diagnostics"]), malformed_report
+          assert secret not in malformed.stdout + malformed.stderr
+          assert malformed_before == malformed_after, (malformed_before, malformed_after)
+          assert sentinel.read_text(encoding="utf-8") == "must-survive"
+
+          print(
+              "certified",
+              os.environ.get("RUNNER_OS_NAME"),
+              os.environ["ZED_CLI_REF"],
+              "offline=true mutates_project=false loads_credentials=false",
+          )
+          PY
