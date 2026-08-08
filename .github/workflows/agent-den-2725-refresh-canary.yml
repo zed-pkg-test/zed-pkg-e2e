@@ -28,32 +28,16 @@ jobs:
 
           script = Path('scripts/gitops_dispatch_canary.py')
           text = script.read_text(encoding='utf-8')
-          marker = '''def executable_name(stem: str) -> str:
-              return f"{stem}.exe" if os.name == "nt" else stem
-
-
-          '''.replace('          ', '')
-          replacement = '''def executable_name(stem: str) -> str:
-              return f"{stem}.exe" if os.name == "nt" else stem
-
-
-def gitops_usage(suffix: str = "") -> str:
-              return f"Usage: {executable_name('zed-gitops')}{suffix}"
-
-
-          '''.replace('          ', '')
-          if text.count(marker) != 1:
-              raise SystemExit(f'expected one executable helper marker, found {text.count(marker)}')
-          text = text.replace(marker, replacement, 1)
+          old_helper = 'def executable_name(stem: str) -> str:\n    return f"{stem}.exe" if os.name == "nt" else stem\n\n\n'
+          new_helper = old_helper + 'def gitops_usage(suffix: str = "") -> str:\n    return f"Usage: {executable_name(\'zed-gitops\')}{suffix}"\n\n\n'
+          if text.count(old_helper) != 1:
+              raise SystemExit(f'expected one executable helper marker, found {text.count(old_helper)}')
+          text = text.replace(old_helper, new_helper, 1)
           replacements = {
-              'require("Usage: zed-gitops validate" in combined(direct_help), combined(direct_help))':
-                  'require(gitops_usage(" validate") in combined(direct_help), combined(direct_help))',
-              'require("Usage: zed-gitops validate" in routed_help_text, routed_help_text)':
-                  'require(gitops_usage(" validate") in routed_help_text, routed_help_text)',
-              'require("Usage: zed-gitops" in combined(alias_help), combined(alias_help))':
-                  'require(gitops_usage() in combined(alias_help), combined(alias_help))',
-              'require("Usage: zed-gitops validate" in combined(precedence), combined(precedence))':
-                  'require(gitops_usage(" validate") in combined(precedence), combined(precedence))',
+              'require("Usage: zed-gitops validate" in combined(direct_help), combined(direct_help))': 'require(gitops_usage(" validate") in combined(direct_help), combined(direct_help))',
+              'require("Usage: zed-gitops validate" in routed_help_text, routed_help_text)': 'require(gitops_usage(" validate") in routed_help_text, routed_help_text)',
+              'require("Usage: zed-gitops" in combined(alias_help), combined(alias_help))': 'require(gitops_usage() in combined(alias_help), combined(alias_help))',
+              'require("Usage: zed-gitops validate" in combined(precedence), combined(precedence))': 'require(gitops_usage(" validate") in combined(precedence), combined(precedence))',
           }
           for old, new in replacements.items():
               if text.count(old) != 1:
