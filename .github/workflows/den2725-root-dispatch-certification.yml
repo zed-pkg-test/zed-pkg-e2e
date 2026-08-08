@@ -8,6 +8,7 @@ on:
     paths:
       - ".github/workflows/den2725-root-dispatch-certification.yml"
       - "scripts/den2725_root_dispatch_hardening.py"
+      - "scripts/den2725_root_dispatch_lint_fix.py"
       - "docs/den2725-root-dispatch-certification.md"
 
 permissions:
@@ -81,6 +82,7 @@ jobs:
         run: |
           set -euo pipefail
           ${{ matrix.python }} ../harness/scripts/den2725_root_dispatch_hardening.py
+          ${{ matrix.python }} ../harness/scripts/den2725_root_dispatch_lint_fix.py
           cargo fmt --all
           ${{ matrix.python }} - <<'PY'
           import subprocess
