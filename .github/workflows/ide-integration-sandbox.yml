@@ -82,7 +82,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: zed-pkg/zed-vscode
-          ref: 96c0789a446891d5cb502be799ed121930aee9d1
+          ref: c1d3318a2cf8cd717f9b0af67117ddbac3e28d2e
           persist-credentials: false
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
         with: {node-version: "22"}
