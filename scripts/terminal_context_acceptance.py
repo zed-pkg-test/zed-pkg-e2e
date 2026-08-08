@@ -2,8 +2,8 @@
 """Independent black-box acceptance for Zed terminal-context prompt behavior.
 
 This script intentionally lives in zed-pkg-test rather than zed-cli. It consumes
-an exact built candidate and exact test-org fixtures, then proves that prompt
-safety remains fail-closed unless the documented context contract is satisfied.
+an exact built candidate and drives a minimal real mutation (`zed init`) so prompt
+safety is certified without depending on registry, network, or package transport.
 """
 
 from __future__ import annotations
@@ -62,7 +62,11 @@ def run(
     if completed.stdout:
         print(completed.stdout, end="" if completed.stdout.endswith("\n") else "\n")
     if completed.stderr:
-        print(completed.stderr, end="" if completed.stderr.endswith("\n") else "\n", file=sys.stderr)
+        print(
+            completed.stderr,
+            end="" if completed.stderr.endswith("\n") else "\n",
+            file=sys.stderr,
+        )
 
     succeeded = completed.returncode == 0
     if succeeded != should_succeed:
@@ -81,47 +85,45 @@ def assert_contains_prompt_failure(completed: subprocess.CompletedProcess[str]) 
         )
 
 
-def assert_installed(app: Path) -> None:
-    package = app / ".vendor" / ".zed" / "zed-pkg-test" / "rust-lib"
-    if not package.is_dir():
-        raise SystemExit(f"expected installed package directory: {package}")
+def reset_project(project: Path) -> None:
+    for name in (".zpkg.toml", ".gitignore"):
+        path = project / name
+        if path.exists():
+            path.unlink()
 
 
-def assert_uninstalled(app: Path) -> None:
-    package = app / ".vendor" / ".zed" / "zed-pkg-test" / "rust-lib"
-    if package.exists():
-        raise SystemExit(f"package still materialized after uninstall: {package}")
+def assert_not_initialized(project: Path) -> None:
+    if (project / ".zpkg.toml").exists():
+        raise SystemExit("rejected confirmation unexpectedly created .zpkg.toml")
 
 
-def install(zed: Path, app: Path, registry_uri: str, home: Path) -> None:
-    run(
-        [
-            str(zed),
-            "install",
-            "--registry",
-            registry_uri,
-            "--home",
-            str(home),
-            "--install-mode",
-            "copy",
-        ],
-        cwd=app,
-        env=clean_env(),
-    )
-    assert_installed(app)
+def assert_initialized(project: Path) -> None:
+    manifest = project / ".zpkg.toml"
+    if not manifest.is_file():
+        raise SystemExit("accepted confirmation did not create .zpkg.toml")
+    text = manifest.read_text(encoding="utf-8")
+    if 'org = "terminal-cert"' not in text or 'name = "prompt-fixture"' not in text:
+        raise SystemExit("generated manifest did not contain the requested package identity")
 
 
-def interactive_uninstall(
+def interactive_init(
     zed: Path,
-    app: Path,
-    home: Path,
+    project: Path,
     *,
     env: dict[str, str],
     should_succeed: bool,
 ) -> subprocess.CompletedProcess[str]:
     return run(
-        [str(zed), "--interactive", "--home", str(home), "uninstall"],
-        cwd=app,
+        [
+            str(zed),
+            "--interactive",
+            "init",
+            "--org",
+            "terminal-cert",
+            "--name",
+            "prompt-fixture",
+        ],
+        cwd=project,
         env=env,
         input_text="yes\n",
         should_succeed=should_succeed,
@@ -131,13 +133,9 @@ def interactive_uninstall(
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--zed-cli-root", required=True)
-    parser.add_argument("--fixture-lib", required=True)
-    parser.add_argument("--fixture-app", required=True)
     args = parser.parse_args()
 
     zed_cli_root = Path(args.zed_cli_root).resolve()
-    fixture_lib = Path(args.fixture_lib).resolve()
-    fixture_app = Path(args.fixture_app).resolve()
     zed = zed_cli_root / "target" / "debug" / ("zed.exe" if os.name == "nt" else "zed")
     if not zed.is_file():
         raise SystemExit(f"built zed candidate not found: {zed}")
@@ -146,38 +144,19 @@ def main() -> int:
     work = runner_temp / "zed-terminal-context-acceptance"
     if work.exists():
         shutil.rmtree(work)
-    work.mkdir(parents=True)
-
-    lib = work / "rust-lib"
-    app = work / "rust-app"
-    registry = work / "registry"
-    home = work / "home"
-    shutil.copytree(fixture_lib, lib, ignore=shutil.ignore_patterns(".git"))
-    shutil.copytree(fixture_app, app, ignore=shutil.ignore_patterns(".git"))
-    registry.mkdir()
-    home.mkdir()
-    registry_uri = registry.as_uri()
-
-    # Publish the exact test-org fixture into a local file registry. The fixture
-    # has no build hook, so this is portable across Linux, macOS, and Windows.
-    run(
-        [str(zed), "publish", "--registry", registry_uri, "--skip-vcs-checks"],
-        cwd=lib,
-        env=clean_env(),
-    )
-    install(zed, app, registry_uri, home)
+    project = work / "prompt-fixture"
+    project.mkdir(parents=True)
 
     # A pipe must never masquerade as human consent. GitHub Actions is also CI,
     # so this independently confirms the ordinary fail-closed path.
-    ordinary = interactive_uninstall(
+    ordinary = interactive_init(
         zed,
-        app,
-        home,
+        project,
         env=clean_env(),
         should_succeed=False,
     )
     assert_contains_prompt_failure(ordinary)
-    assert_installed(app)
+    assert_not_initialized(project)
 
     # Even when terminal state is forced true, CI remains authoritative.
     forced_ci = clean_env()
@@ -190,15 +169,14 @@ def main() -> int:
             "TERM": "xterm-256color",
         }
     )
-    ci_failure = interactive_uninstall(
+    ci_failure = interactive_init(
         zed,
-        app,
-        home,
+        project,
         env=forced_ci,
         should_succeed=False,
     )
     assert_contains_prompt_failure(ci_failure)
-    assert_installed(app)
+    assert_not_initialized(project)
 
     # TERM=dumb also remains fail-closed even after CI is explicitly cleared.
     dumb = clean_env()
@@ -211,18 +189,17 @@ def main() -> int:
             "TERM": "dumb",
         }
     )
-    dumb_failure = interactive_uninstall(
+    dumb_failure = interactive_init(
         zed,
-        app,
-        home,
+        project,
         env=dumb,
         should_succeed=False,
     )
     assert_contains_prompt_failure(dumb_failure)
-    assert_installed(app)
+    assert_not_initialized(project)
 
-    # The documented ZED_PKG_FORCE_* test controls may explicitly simulate a
-    # safe human terminal. stdout remains redirected/captured here, proving it
+    # The documented ZED_PKG_FORCE_* controls may explicitly simulate a safe
+    # human terminal. stdout remains redirected/captured here, proving stdout
     # is not part of the prompt gate.
     zed_override = clean_env()
     zed_override.update(
@@ -234,20 +211,19 @@ def main() -> int:
             "TERM": "xterm-256color",
         }
     )
-    accepted = interactive_uninstall(
+    accepted = interactive_init(
         zed,
-        app,
-        home,
+        project,
         env=zed_override,
         should_succeed=True,
     )
     if "[y/N]" not in accepted.stderr:
         raise SystemExit("accepted interactive mutation did not emit its checkpoint on stderr")
-    assert_uninstalled(app)
+    assert_initialized(project)
 
-    # Reinstall, then prove the shared F2E_FORCE_* spellings drive the same
-    # behavior without any Zed-specific force variables present.
-    install(zed, app, registry_uri, home)
+    # Reset only test-created files, then prove the shared F2E_FORCE_* spellings
+    # drive the same behavior without any Zed-specific force variables present.
+    reset_project(project)
     f2e_override = clean_env()
     f2e_override.update(
         {
@@ -258,22 +234,21 @@ def main() -> int:
             "TERM": "xterm-256color",
         }
     )
-    accepted_f2e = interactive_uninstall(
+    accepted_f2e = interactive_init(
         zed,
-        app,
-        home,
+        project,
         env=f2e_override,
         should_succeed=True,
     )
     if "[y/N]" not in accepted_f2e.stderr:
         raise SystemExit("F2E override path did not emit its checkpoint on stderr")
-    assert_uninstalled(app)
+    assert_initialized(project)
 
     # Unix runners additionally exercise a real PTY through the production
     # harness. Windows uses the deterministic override path above because the
     # upstream helper relies on forkpty().
     if os.name != "nt":
-        install(zed, app, registry_uri, home)
+        reset_project(project)
         helper = zed_cli_root / "tests" / "interactive_pty.py"
         run(
             [
@@ -283,14 +258,16 @@ def main() -> int:
                 "--",
                 str(zed),
                 "--interactive",
-                "--home",
-                str(home),
-                "uninstall",
+                "init",
+                "--org",
+                "terminal-cert",
+                "--name",
+                "prompt-fixture",
             ],
-            cwd=app,
+            cwd=project,
             env=clean_env(),
         )
-        assert_uninstalled(app)
+        assert_initialized(project)
 
     print("terminal-context acceptance passed", flush=True)
     return 0
