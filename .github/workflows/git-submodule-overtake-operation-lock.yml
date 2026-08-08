@@ -79,12 +79,25 @@ jobs:
           persist-credentials: false
           show-progress: false
 
-      - name: Verify exact candidate dependency graph
+      - name: Verify exact candidate dependency graph and authority root
         run: |
           set -euo pipefail
           test "$(git -C zed-cli rev-parse HEAD)" = "$ZED_CLI_REF"
           grep -F "rev = \"$ZED_INTERFACES_REF\"" zed-cli/Cargo.toml
           grep -F "rev = \"$ZED_LOCK_REF\"" zed-cli/Cargo.toml
+          python3 - <<'PY'
+          from pathlib import Path
+
+          source = Path("zed-cli/src/main.rs").read_text(encoding="utf-8")
+          selected = """submodules::sync(&project)?;
+                          managed_install::install(
+                              &project,"""
+          nested = """submodules::sync(&project)?;
+                          managed_install::install(
+                              &cwd,"""
+          assert source.count(selected) == 1, "cooperative install must use the selected superproject"
+          assert nested not in source, "cooperative install regressed to the nested invocation cwd"
+          PY
 
       - name: Install stable Rust
         run: |
@@ -173,7 +186,7 @@ jobs:
           assert evidence["public_registry_mutation"] is False
           PY
 
-      - name: Certify cooperative install spans Git synchronization
+      - name: Certify nested cooperative install spans one superproject boundary
         env:
           WORK_ROOT: ${{ runner.temp }}/zed-submodule-install-lock
         run: |
