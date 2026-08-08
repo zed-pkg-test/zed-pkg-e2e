@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "linear_issue": "DEN-2788",
+  "source_repository": "zed-pkg/zed-orm-core",
+  "source_pull_request": 2,
+  "source_commit": "8d01cdc86ab655d6e82f25773d10dda86604da4b",
+  "expected_package": "zed-pkg/zed-orm-core",
+  "expected_schema": "zed_pkg",
+  "expected_shared_defs_revision": "c8bdc06d74746acc6439f9527ebd02697fdf028b",
+  "release_policy": "private-git-zed-only"
+}
