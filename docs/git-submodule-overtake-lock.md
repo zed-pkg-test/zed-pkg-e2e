@@ -1,19 +1,20 @@
 # Git-submodule takeover operation-lock certification
 
 This test-org lane certifies `zed-pkg/zed-cli#243` at its current-main-integrated,
-nested-invocation-hardened, thread-affine, and shared-ownership exact candidate
-commit:
+nested-invocation-hardened, thread-affine, shared-ownership, and lint-clean exact
+candidate commit:
 
 ```text
-2c5787f1c3c4f43cc2535415d2fad11b681c2f15
+c1435af21d15a359853df3c51687df67d72af24a
 ```
 
 The candidate was merged with current product `main` through integration PR
 `zed-pkg/zed-cli#245` before the final locking review. That preserves the
 independent external GitOps dispatcher and its tests; the reviewed file sets do
-not overlap. The only commit after the shared-ownership implementation was the
-rustfmt-normalized layout of one weak-reference insertion statement; no lock,
-API, or ownership semantics changed.
+not overlap. The commits after the shared-ownership implementation are limited
+to rustfmt layout and converting a cache description from rustdoc syntax to an
+ordinary comment because rustdoc does not attach documentation to a
+`thread_local!` macro invocation. No lock, API, or ownership semantics changed.
 
 The product change routes `zed overtake --git-submodules` through the same
 checkout-local `.zed/operation.lock` boundary used by install, add, remove, and
