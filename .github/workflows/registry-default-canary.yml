@@ -13,7 +13,7 @@ on:
       zed_cli_ref:
         description: Immutable zed-cli commit to certify
         required: false
-        default: 25983a9100dca97988f90132c961d314d0a8810f
+        default: d0678568fbcff75697512cc36ae84a356548f26c
 
 permissions:
   contents: read
@@ -29,7 +29,7 @@ defaults:
 env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: '1'
-  ZED_CLI_REF: ${{ github.event.inputs.zed_cli_ref || '25983a9100dca97988f90132c961d314d0a8810f' }}
+  ZED_CLI_REF: ${{ github.event.inputs.zed_cli_ref || 'd0678568fbcff75697512cc36ae84a356548f26c' }}
   ZED_INTERFACES_SHA: d1bf8ef7c88a75292cbe8d697bfd269f30d62e2b
   EXPECTED_REGISTRY: https://registry.zpkg.net
   FORBIDDEN_REGISTRY: https://registry.zpkg.tech
@@ -73,6 +73,8 @@ jobs:
             zed-cli/.github/workflows/frozen-lock-integrity.yml
           grep -F "ZED_INTERFACES_SHA: $ZED_INTERFACES_SHA" \
             zed-cli/.github/workflows/nix-bundle-write.yml
+          grep -F "ZED_INTERFACES_SHA: $ZED_INTERFACES_SHA" \
+            zed-cli/.github/workflows/nix-export-bundle.yml
 
       - name: Install pinned Rust toolchain action
         uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30
@@ -95,7 +97,6 @@ jobs:
               echo "forbidden registry remains in $surface" >&2
               exit 1
             fi
-
           done
           if git -C zed-cli grep -nF "$FORBIDDEN_REGISTRY" -- .; then
             echo 'forbidden public registry remains in tracked product content' >&2
