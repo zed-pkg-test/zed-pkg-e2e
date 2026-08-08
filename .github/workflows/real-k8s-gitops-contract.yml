@@ -1,0 +1,138 @@
+name: real k8s-cluster GitOps contract
+
+on:
+  pull_request:
+    paths:
+      - .github/workflows/real-k8s-gitops-contract.yml
+      - scripts/real_k8s_gitops_contract.py
+      - docs/real-k8s-gitops-contract.md
+  workflow_dispatch:
+    inputs:
+      product_commit:
+        description: Exact zed-pkg/zed-cli commit
+        required: false
+        default: ace157406d04f338698b6dc93a77021b07560e72
+        type: string
+      cluster_commit:
+        description: Exact ORESoftware/k8s-cluster commit
+        required: false
+        default: cfe39128e309936a4bcaeca4aaa35e4b9bec8888
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: real-k8s-gitops-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  ZED_CLI_COMMIT: ${{ inputs.product_commit || 'ace157406d04f338698b6dc93a77021b07560e72' }}
+  K8S_CLUSTER_COMMIT: ${{ inputs.cluster_commit || 'cfe39128e309936a4bcaeca4aaa35e4b9bec8888' }}
+
+jobs:
+  certify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - name: Check out independent test-org harness
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+          show-progress: false
+
+      - name: Check out exact Zed product candidate
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: zed-pkg/zed-cli
+          ref: ${{ env.ZED_CLI_COMMIT }}
+          path: product/zed-cli
+          fetch-depth: 1
+          persist-credentials: false
+          show-progress: false
+
+      - name: Check out exact merged k8s-cluster contract
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ORESoftware/k8s-cluster
+          ref: ${{ env.K8S_CLUSTER_COMMIT }}
+          path: product/k8s-cluster
+          fetch-depth: 1
+          submodules: false
+          persist-credentials: false
+          show-progress: false
+
+      - name: Verify immutable checkout identities
+        run: |
+          set -euo pipefail
+          [[ "$ZED_CLI_COMMIT" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$K8S_CLUSTER_COMMIT" =~ ^[0-9a-f]{40}$ ]]
+          test "$(git -C product/zed-cli rev-parse HEAD)" = "$ZED_CLI_COMMIT"
+          test "$(git -C product/k8s-cluster rev-parse HEAD)" = "$K8S_CLUSTER_COMMIT"
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30
+        with:
+          toolchain: stable
+          components: rustfmt, clippy
+
+      - name: Install Python 3.12
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: '3.12'
+
+      - name: Run focused source contracts
+        run: |
+          set -euo pipefail
+          cargo fmt --manifest-path product/zed-cli/Cargo.toml --all --check
+          cargo test --manifest-path product/zed-cli/Cargo.toml --locked --test external_gitops_dispatch
+          python product/k8s-cluster/tools/test_gitops_composition.py -v
+
+      - name: Build exact Zed sibling binaries
+        run: |
+          set -euo pipefail
+          cargo build \
+            --manifest-path product/zed-cli/Cargo.toml \
+            --locked \
+            --release \
+            --bin zed \
+            --bin zed-gitops
+
+      - name: Certify the real merged contract
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts
+          python -m py_compile scripts/real_k8s_gitops_contract.py
+          rm -rf scripts/__pycache__
+          python scripts/real_k8s_gitops_contract.py \
+            --zed "$GITHUB_WORKSPACE/product/zed-cli/target/release/zed" \
+            --zed-gitops "$GITHUB_WORKSPACE/product/zed-cli/target/release/zed-gitops" \
+            --product product/zed-cli \
+            --cluster product/k8s-cluster \
+            --product-commit "$ZED_CLI_COMMIT" \
+            --cluster-commit "$K8S_CLUSTER_COMMIT" \
+            --evidence artifacts/real-k8s-gitops-contract.json
+          rm -rf scripts/__pycache__
+
+      - name: Require clean source checkouts
+        run: |
+          set -euo pipefail
+          harness_status="$(git status --porcelain --untracked-files=all | grep -vE '^\?\? artifacts/' || true)"
+          test -z "$harness_status"
+          test -z "$(git -C product/zed-cli status --porcelain)"
+          test -z "$(git -C product/k8s-cluster status --porcelain)"
+
+      - name: Upload exact-contract evidence
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: real-k8s-gitops-${{ env.ZED_CLI_COMMIT }}-${{ env.K8S_CLUSTER_COMMIT }}
+          path: artifacts/real-k8s-gitops-contract.json
+          if-no-files-found: error
+          retention-days: 14
+          include-hidden-files: false
