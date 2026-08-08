@@ -103,6 +103,32 @@ class StaticRegistryGeneratorSafetyTests(unittest.TestCase):
             self.assertFalse((output / "checkpoint.json").exists())
 
     @unittest.skipUnless(hasattr(os, "symlink"), "platform has no symlink support")
+    def test_later_invalid_package_leaves_no_partial_output_tree(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            fixtures = root / "fixtures"
+            self.package(fixtures, name="a-valid-package")
+            invalid = self.package(fixtures, name="z-invalid-package")
+            outside = root / "outside-secret.txt"
+            outside.write_text("must not be archived\n", encoding="utf-8")
+            os.symlink(outside, invalid / "escape.txt")
+            output = root / "output"
+
+            result = self.run_builder(fixtures, output)
+
+            self.assertEqual(result.returncode, 2)
+            self.assertIn("symbolic link", result.stderr)
+            self.assertFalse(
+                output.exists(),
+                "validation failure after an earlier valid package must not expose a partial registry",
+            )
+            self.assertEqual(
+                list(root.glob(".output.zpkg-static-*")),
+                [],
+                "validation failure must not leave staging directories",
+            )
+
+    @unittest.skipUnless(hasattr(os, "symlink"), "platform has no symlink support")
     def test_rejects_a_symlinked_output_directory(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
