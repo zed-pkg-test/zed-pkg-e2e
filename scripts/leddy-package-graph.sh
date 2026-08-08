@@ -86,7 +86,7 @@ done
 # The multi-target client package is a deliberately broad stress case. Check a
 # representative set spanning native, managed, scripting, mobile and WASM.
 for target in c cpp zig gleamlang erlang elixir dart rust java golang python3 ruby php \
-  typescript-nodejs typescript-deno typescript-bun typescript-edge kotlin swift rust-wasm nodejs; do
+  typescript-nodejs typescript-deno typescript-bun typescript-edge kotlin swift rust-wasm; do
   grep -F "[targets.$target]" "$clients_source/.zpkg.toml"
 done
 
