@@ -1,11 +1,10 @@
-# One-time encrypted credential handoff. Remove after the fleet apply run is dispatched.
+# One-time encrypted credential handoff. Remove the START file after the selected apply run is dispatched.
 name: secure fleet token handoff
 
 on:
   push:
     branches: [main]
     paths:
-      - ".github/workflows/secure-fleet-token-handoff.yml"
       - ".github/fleet-handoff/START"
 
 permissions:
@@ -17,11 +16,14 @@ concurrency:
 
 jobs:
   handoff:
-    if: github.repository == 'zed-pkg-test/zed-pkg-e2e' && github.ref == 'refs/heads/main'
+    if: >-
+      github.repository == 'zed-pkg-test/zed-pkg-e2e' &&
+      github.ref == 'refs/heads/main' &&
+      !contains(github.event.head_commit.removed, '.github/fleet-handoff/START')
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
-      - name: Publish an ephemeral encryption key
+      - name: Publish an ephemeral encryption key for the selected organization
         id: publish
         shell: bash
         env:
@@ -30,6 +32,49 @@ jobs:
         run: |
           set -euo pipefail
           umask 077
+
+          start_response="$(gh api "repos/$GITHUB_REPOSITORY/contents/.github/fleet-handoff/START?ref=$GITHUB_SHA")"
+          handoff_organization="$(
+            jq -r '.content' <<< "$start_response" \
+              | tr -d '\n' \
+              | base64 -d \
+              | tr -d '\r' \
+              | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//'
+          )"
+
+          allowed_organizations=(
+            all
+            zed-pkg-test
+            3fa-app-test
+            declarative-migrations-test
+            cliptown-test
+            claritas-viz-test
+            embedded-alerts-test
+            evento-globolo-test
+            fiducia-cloud-test
+            memebank-test
+            opto-sync-test
+            quaestor-ledger-test
+            sonus-auris-test
+            messaging-intel-test
+            scintilla-run-test
+            file-tunnel-test
+            shared-auth-test
+            hypesiege-test
+            hacker-house-medellin-test
+            streempilot-test
+          )
+          allowed=false
+          for candidate in "${allowed_organizations[@]}"; do
+            if [[ "$candidate" == "$handoff_organization" ]]; then
+              allowed=true
+              break
+            fi
+          done
+          if [[ "$allowed" != true ]]; then
+            echo "::error::START must contain exactly one approved test organization or all"
+            exit 1
+          fi
 
           handoff_branch="agent/fleet-token-handoff-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
           nonce="$(openssl rand -hex 32)"
@@ -46,6 +91,7 @@ jobs:
 
           jq -n \
             --arg repository "$GITHUB_REPOSITORY" \
+            --arg organization "$handoff_organization" \
             --arg branch "$handoff_branch" \
             --arg run_id "$GITHUB_RUN_ID" \
             --arg run_attempt "$GITHUB_RUN_ATTEMPT" \
@@ -56,6 +102,7 @@ jobs:
             --arg expires_at "$expires_at" \
             '{
               repository: $repository,
+              organization: $organization,
               branch: $branch,
               run_id: $run_id,
               run_attempt: $run_attempt,
@@ -93,12 +140,15 @@ jobs:
 
           printf 'HANDOFF_BRANCH=%s\n' "$handoff_branch" >> "$GITHUB_ENV"
           printf 'HANDOFF_NONCE=%s\n' "$nonce" >> "$GITHUB_ENV"
+          printf 'HANDOFF_ORGANIZATION=%s\n' "$handoff_organization" >> "$GITHUB_ENV"
           printf 'HANDOFF_PRIVATE_KEY=%s\n' "$private_key" >> "$GITHUB_ENV"
           printf 'HANDOFF_EXPIRES_AT=%s\n' "$expires_at" >> "$GITHUB_ENV"
           printf 'branch=%s\n' "$handoff_branch" >> "$GITHUB_OUTPUT"
 
           {
             echo "## Encrypted token handoff ready"
+            echo
+            echo "Selected organization: \`$handoff_organization\`"
             echo
             echo "Temporary branch: \`$handoff_branch\`"
             echo
@@ -107,7 +157,7 @@ jobs:
             echo "Expires at: \`$expires_at\`"
           } >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Receive ciphertext, store the secret, and dispatch the fleet
+      - name: Receive ciphertext, store the secret, and dispatch the selected fleet
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
@@ -168,27 +218,31 @@ jobs:
             exit 1
           fi
 
-          organizations=(
-            zed-pkg-test
-            3fa-app-test
-            declarative-migrations-test
-            cliptown-test
-            claritas-viz-test
-            embedded-alerts-test
-            evento-globolo-test
-            fiducia-cloud-test
-            memebank-test
-            opto-sync-test
-            quaestor-ledger-test
-            sonus-auris-test
-            messaging-intel-test
-            scintilla-run-test
-            file-tunnel-test
-            shared-auth-test
-            hypesiege-test
-            hacker-house-medellin-test
-            streempilot-test
-          )
+          if [[ "$HANDOFF_ORGANIZATION" == all ]]; then
+            organizations=(
+              zed-pkg-test
+              3fa-app-test
+              declarative-migrations-test
+              cliptown-test
+              claritas-viz-test
+              embedded-alerts-test
+              evento-globolo-test
+              fiducia-cloud-test
+              memebank-test
+              opto-sync-test
+              quaestor-ledger-test
+              sonus-auris-test
+              messaging-intel-test
+              scintilla-run-test
+              file-tunnel-test
+              shared-auth-test
+              hypesiege-test
+              hacker-house-medellin-test
+              streempilot-test
+            )
+          else
+            organizations=("$HANDOFF_ORGANIZATION")
+          fi
           for organization in "${organizations[@]}"; do
             GH_TOKEN="$fleet_token" gh api "orgs/$organization" --silent
           done
@@ -206,7 +260,7 @@ jobs:
           GH_TOKEN="$fleet_token" gh workflow run apply-test-org-fleet.yml \
             --repo "$GITHUB_REPOSITORY" \
             --ref main \
-            -f organization=all \
+            -f organization="$HANDOFF_ORGANIZATION" \
             -f authentication=pat \
             -f repository= \
             -f confirm=APPLY_TEST_FLEET
@@ -218,7 +272,7 @@ jobs:
             echo
             echo "The encrypted \`FLEET_GH_TOKEN\` repository secret was stored successfully."
             echo
-            echo "The full test-fleet apply workflow was dispatched on \`main\`."
+            echo "The \`$HANDOFF_ORGANIZATION\` apply workflow was dispatched on \`main\`."
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Remove the temporary handoff branch and key material
