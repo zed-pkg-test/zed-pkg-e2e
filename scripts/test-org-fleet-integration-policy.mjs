@@ -45,9 +45,9 @@ export function hardenGeneratedIntegrationPolicy(input) {
   );
 
   const readmeBefore =
-    'The pull-request workflow validates the generated contract without cross-organization credentials. Full integration is intentionally release-gated until required source repositories and organization read credentials are present. Run the profile-specific checks recorded in `test-plan.json` after materializing the submodule, Zed, or native-package lane.';
+    'Full integration is intentionally release-gated until required source repositories and organization read credentials are present.';
   const readmeAfter =
-    'The pull-request workflow validates the generated contract without cross-organization credentials. Product-specific files outside the generated file set are preserved and must add executable assertions without weakening the base contract. Full integration is intentionally release-gated until required source repositories and organization read credentials are present. A skipped integration job is not source certification; inspect the source-integration status artifact. Run the profile-specific checks recorded in `test-plan.json` after materializing the submodule, Zed, or native-package lane.';
+    'Product-specific files outside the generated file set are preserved and must add executable assertions without weakening the base contract. Full integration is intentionally release-gated until required source repositories and organization read credentials are present. A skipped integration job is not source certification; inspect the source-integration status artifact.';
   source = replaceOnce(
     source,
     readmeBefore,
