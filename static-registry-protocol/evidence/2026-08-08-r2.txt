@@ -1,4 +1,14 @@
-# live r2.dev run 2026-08-08T04:11Z
+# historical live r2.dev read evidence 2026-08-08T04:11Z
+#
+# This transcript predates the stricter failure-atomic generator, exact local
+# file-set checker, checkpoint-path validation, v0 replacement refusal, and
+# permanent credential-free CI added later on this branch. It records only a
+# read against a dedicated non-production test bucket. The current PR does not
+# replay, replace, or mutate this live fixture.
+#
+# No reusable credential, signed URL, account ID, access key, or secret key is
+# present in this file.
+
 base: https://pub-9b365e012501426c9de90d2746deac9d.r2.dev
 
 == response headers (pkg vs index) ==
@@ -28,3 +38,8 @@ Python-urllib/3.9 UA -> 403
 [5] absent package => missing/404
   ok: absent index is a hard miss
 == PASS
+
+This historical transcript supports the RFC observations about static hosting,
+cache metadata, identifying User-Agents, and managed-domain propagation. It is
+not promotion evidence for the final hardened exact head; the permanent local
+Ubuntu/macOS workflow is the promotion authority.
