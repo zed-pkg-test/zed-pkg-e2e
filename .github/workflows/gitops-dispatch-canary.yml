@@ -4,6 +4,7 @@ on:
   pull_request:
     paths:
       - .github/workflows/gitops-dispatch-canary.yml
+      - scripts/apply_den2725_help_delimiter_fix.py
       - scripts/gitops_dispatch_canary.py
       - scripts/gitops_dispatch_canary_entry.py
       - scripts/gitops_dispatch_trailing_options.py
@@ -12,7 +13,7 @@ on:
   workflow_dispatch:
     inputs:
       candidate:
-        description: Full immutable zed-pkg/zed-cli commit to certify
+        description: Full immutable zed-pkg/zed-cli commit to certify before the reviewed two-file patch
         required: false
         default: 1c94813c6b59c7621c1256d7c55246e7f06f44b7
         type: string
@@ -33,7 +34,7 @@ env:
 
 jobs:
   certify:
-    name: gitops dispatch / ${{ matrix.os }}
+    name: patched gitops dispatch / ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 40
     strategy:
@@ -64,6 +65,17 @@ jobs:
           [[ "$ZED_CLI_COMMIT" =~ ^[0-9a-f]{40}$ ]]
           test "$(git -C product/zed-cli rev-parse HEAD)" = "$ZED_CLI_COMMIT"
 
+      - name: Apply the reviewed two-file correction in the disposable checkout
+        run: |
+          set -euo pipefail
+          python -m py_compile scripts/apply_den2725_help_delimiter_fix.py
+          rm -rf scripts/__pycache__
+          python scripts/apply_den2725_help_delimiter_fix.py --root product/zed-cli
+          changed="$(git -C product/zed-cli diff --name-only)"
+          expected=$'src/external_subcommands.rs\ntests/external_gitops_dispatch.rs'
+          test "$changed" = "$expected"
+          git -C product/zed-cli diff --check
+
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30
         with:
@@ -75,7 +87,7 @@ jobs:
         with:
           python-version: '3.12'
 
-      - name: Run exact-source quality gates
+      - name: Run patched-source quality gates
         working-directory: product/zed-cli
         run: |
           set -euo pipefail
@@ -84,7 +96,7 @@ jobs:
           cargo test --locked --test external_gitops_dispatch
           cargo clippy --locked --lib --bin zed --bin zed-gitops --test external_gitops_dispatch -- -D warnings
 
-      - name: Build exact release binaries
+      - name: Build exact patched release binaries
         working-directory: product/zed-cli
         run: |
           set -euo pipefail
@@ -131,29 +143,43 @@ jobs:
             --evidence "artifacts/gitops-dispatch-trailing-${RUNNER_OS}-${RUNNER_ARCH}.json"
           rm -rf scripts/__pycache__
 
-      - name: Require clean harness and product checkouts
+      - name: Export the verified corrected files
         run: |
           set -euo pipefail
-          harness_status="$(git status --porcelain --untracked-files=all | grep -vE '^\?\? (artifacts|product)/' || true)"
+          mkdir -p corrected/src corrected/tests
+          cp product/zed-cli/src/external_subcommands.rs corrected/src/
+          cp product/zed-cli/tests/external_gitops_dispatch.rs corrected/tests/
+          git -C product/zed-cli diff --binary > corrected/den-2725-help-delimiter-fix.patch
+          if [[ "$RUNNER_OS" == "macOS" ]]; then
+            shasum -a 256 corrected/src/external_subcommands.rs corrected/tests/external_gitops_dispatch.rs corrected/den-2725-help-delimiter-fix.patch > corrected/SHA256SUMS
+          else
+            sha256sum corrected/src/external_subcommands.rs corrected/tests/external_gitops_dispatch.rs corrected/den-2725-help-delimiter-fix.patch > corrected/SHA256SUMS
+          fi
+
+      - name: Require clean harness and exact product delta
+        run: |
+          set -euo pipefail
+          harness_status="$(git status --porcelain --untracked-files=all | grep -vE '^\?\? (artifacts|corrected|product)/' || true)"
           if [[ -n "$harness_status" ]]; then
             printf 'unexpected harness drift:\n%s\n' "$harness_status" >&2
             exit 1
           fi
-          git -C product/zed-cli diff --exit-code
-          product_status="$(git -C product/zed-cli status --porcelain)"
-          if [[ -n "$product_status" ]]; then
-            printf 'unexpected product checkout drift:\n%s\n' "$product_status" >&2
+          changed="$(git -C product/zed-cli diff --name-only)"
+          expected=$'src/external_subcommands.rs\ntests/external_gitops_dispatch.rs'
+          if [[ "$changed" != "$expected" ]]; then
+            printf 'unexpected product delta:\n%s\n' "$changed" >&2
             exit 1
           fi
 
-      - name: Upload exact-head evidence
+      - name: Upload patched exact-head evidence
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: gitops-dispatch-${{ runner.os }}-${{ runner.arch }}-${{ env.ZED_CLI_COMMIT }}
+          name: gitops-dispatch-patched-${{ runner.os }}-${{ runner.arch }}-${{ env.ZED_CLI_COMMIT }}
           path: |
             artifacts/gitops-dispatch-${{ runner.os }}-${{ runner.arch }}.json
             artifacts/gitops-dispatch-trailing-${{ runner.os }}-${{ runner.arch }}.json
+            corrected
           if-no-files-found: error
           retention-days: 14
           include-hidden-files: false
