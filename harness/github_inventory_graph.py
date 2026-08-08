@@ -8,6 +8,7 @@ import github_inventory_core as _core
 
 _fsync_directory = _core._fsync_directory
 
+
 def analyze_graph(
     nodes: Mapping[str, Mapping[str, Any]],
     edges: Iterable[Mapping[str, Any]],
@@ -15,7 +16,8 @@ def analyze_graph(
     """Return deterministic SCCs and dependency-first condensation waves.
 
     Kosaraju's algorithm is implemented iteratively so adversarial chains up to
-    the configured graph limit cannot exhaust Python's call stack.
+    the configured graph limit cannot exhaust Python's call stack. Callers pass
+    only proven topology; lock-pin evidence is deliberately excluded.
     """
 
     adjacency: dict[str, set[str]] = {node_id: set() for node_id in nodes}
@@ -128,6 +130,24 @@ def render_inventory(inventory: Mapping[str, Any], output_format: str) -> str:
     raise InputError(f"unsupported output format {output_format!r}")
 
 
+def _pin_render_id(pin: Mapping[str, Any]) -> str:
+    identity = json.dumps(pin, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    return render_node_id("lock-pin-evidence:" + identity)
+
+
+def _pin_label(pin: Mapping[str, Any]) -> str:
+    package = str(pin.get("package", "unknown"))
+    version = str(pin.get("selected_version", "unknown"))
+    parts = ["lock pin (evidence only)", f"{package}@{version}"]
+    artifact_sha256 = pin.get("artifact_sha256")
+    if artifact_sha256 is not None:
+        parts.append("sha256:" + str(artifact_sha256)[:12])
+    vcs_commit = pin.get("vcs_commit")
+    if vcs_commit is not None:
+        parts.append("commit:" + str(vcs_commit)[:12])
+    return " | ".join(parts)
+
+
 def render_dot(inventory: Mapping[str, Any]) -> str:
     lines = [
         "digraph zpkg_github_dependency_inventory {",
@@ -139,6 +159,13 @@ def render_dot(inventory: Mapping[str, Any]) -> str:
         label = dot_escape(str(node.get("label", node["id"])))
         kind = dot_escape(str(node.get("kind", "node")))
         lines.append(f'  {identifier} [label="{label}", tooltip="{kind}"];')
+    for pin in inventory.get("pins", []):
+        identifier = _pin_render_id(pin)
+        label = dot_escape(_pin_label(pin))
+        lines.append(
+            f'  {identifier} [shape="note", style="dashed", label="{label}", '
+            'tooltip="non-topological lock evidence"];'
+        )
     for edge in inventory.get("edges", []):
         source = render_node_id(str(edge["source"]))
         target = render_node_id(str(edge["target"]))
@@ -158,6 +185,12 @@ def render_mermaid(inventory: Mapping[str, Any]) -> str:
         identifier = render_node_id(str(node["id"]))
         label = mermaid_escape(str(node.get("label", node["id"])))
         lines.append(f'  {identifier}["{label}"]')
+    pin_ids: list[str] = []
+    for pin in inventory.get("pins", []):
+        identifier = _pin_render_id(pin)
+        pin_ids.append(identifier)
+        label = mermaid_escape(_pin_label(pin))
+        lines.append(f'  {identifier}["{label}"]')
     for edge in inventory.get("edges", []):
         source = render_node_id(str(edge["source"]))
         target = render_node_id(str(edge["target"]))
@@ -167,6 +200,9 @@ def render_mermaid(inventory: Mapping[str, Any]) -> str:
                 label_parts.append(str(edge[key]))
         label = mermaid_escape(" | ".join(label_parts))
         lines.append(f'  {source} -->|"{label}"| {target}')
+    if pin_ids:
+        lines.append("  classDef lockEvidence stroke-dasharray: 5 5")
+        lines.append(f"  class {','.join(pin_ids)} lockEvidence")
     return "\n".join(lines) + "\n"
 
 

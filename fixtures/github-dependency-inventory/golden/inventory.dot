@@ -12,11 +12,11 @@ digraph zpkg_github_dependency_inventory {
   n_1b2839d86de0d19b88d1 [label="acme/cycle-a", tooltip="package"];
   n_15a9926fb052dc7358a8 [label="acme/cycle-b", tooltip="package"];
   n_04944cea1bb2592e6626 [label="acme/lib-a", tooltip="package"];
-  n_9b937e7128272d4436a0 [label="acme/lib-a@1.0.0", tooltip="package"];
   n_dced539eaf368baa2f03 [label="acme/lib-b", tooltip="package"];
-  n_b2833731c494f54caedc [label="acme/lib-b@1.0.0", tooltip="package"];
   n_d361611f054f0a6e62a3 [label="acme/shared", tooltip="package"];
-  n_6441e0446976246f397f [label="acme/shared@2.0.0", tooltip="package"];
+  n_3b00ca6717e90cc5942f [shape="note", style="dashed", label="lock pin (evidence only) | acme/lib-a@1.0.0 | sha256:aaaaaaaaaaaa", tooltip="non-topological lock evidence"];
+  n_f88134d82fe5095ced40 [shape="note", style="dashed", label="lock pin (evidence only) | acme/lib-b@1.0.0 | sha256:bbbbbbbbbbbb", tooltip="non-topological lock evidence"];
+  n_c466c1b288ce01b88d02 [shape="note", style="dashed", label="lock pin (evidence only) | acme/shared@2.0.0 | sha256:cccccccccccc", tooltip="non-topological lock evidence"];
   n_7c974afcce1aea9376ae -> n_fb7cd9a2d983b4042332 [label="nix-flake-lock | 5555555555555555555555555555555555555555"];
   n_7c974afcce1aea9376ae -> n_118763adadfdd7ab90b3 [label="nix-flake-declared | release-1"];
   n_7c974afcce1aea9376ae -> n_3248a465db81578fdcb9 [label="git-submodule | 4444444444444444444444444444444444444444"];
@@ -27,11 +27,8 @@ digraph zpkg_github_dependency_inventory {
   n_118763adadfdd7ab90b3 -> n_04944cea1bb2592e6626 [label="contains-zed-package"];
   n_09ea16b5257c3f10ad4f -> n_dced539eaf368baa2f03 [label="contains-zed-package"];
   n_3248a465db81578fdcb9 -> n_d361611f054f0a6e62a3 [label="contains-zed-package"];
-  n_623011f81f79be3f23b8 -> n_04944cea1bb2592e6626 [label="zed-declared | ^1.0\" ]\nmalicious"];
-  n_623011f81f79be3f23b8 -> n_9b937e7128272d4436a0 [label="zed-lock-pin | 1.0.0"];
-  n_623011f81f79be3f23b8 -> n_dced539eaf368baa2f03 [label="zed-declared | ^1.0"];
-  n_623011f81f79be3f23b8 -> n_b2833731c494f54caedc [label="zed-lock-pin | 1.0.0"];
-  n_623011f81f79be3f23b8 -> n_6441e0446976246f397f [label="zed-lock-pin | 2.0.0"];
+  n_623011f81f79be3f23b8 -> n_04944cea1bb2592e6626 [label="zed-declared | ^1.0\" ]\nmalicious | 1.0.0"];
+  n_623011f81f79be3f23b8 -> n_dced539eaf368baa2f03 [label="zed-declared | ^1.0 | 1.0.0"];
   n_1b2839d86de0d19b88d1 -> n_15a9926fb052dc7358a8 [label="zed-declared | ^0.1"];
   n_15a9926fb052dc7358a8 -> n_1b2839d86de0d19b88d1 [label="zed-declared | ^0.1"];
   n_04944cea1bb2592e6626 -> n_d361611f054f0a6e62a3 [label="zed-declared | ^2.0"];
