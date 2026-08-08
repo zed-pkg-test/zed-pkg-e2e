@@ -6,7 +6,7 @@ thread-affine, shared-ownership, recovery-ordered, and cooperative-install-locke
 exact candidate commit:
 
 ```text
-2b5897f6a5b5cf33fee7a5934a60d7aa3e70e0a0
+28c68124e87301f562a8d423410943cf2de61064
 ```
 
 The candidate was first merged with current product `main` through integration
@@ -14,7 +14,9 @@ PR `zed-pkg/zed-cli#245`, preserving the independent external GitOps dispatcher
 and its tests. When `main` later advanced with DEN-3018 publish-ignore
 diagnostics, the branch was reconciled through a true two-parent merge. The
 locking/recovery files and DEN-3018 files are disjoint, and both complete feature
-sets remain present.
+sets remain present. The final nested-install root correction is committed
+directly in `src/main.rs`; its temporary branch-writing finalizer removed itself,
+leaving exactly the three reviewed implementation files in the product PR.
 
 The product now routes all of these operations through the same canonical
 checkout-local `.zed/operation.lock` boundary:
