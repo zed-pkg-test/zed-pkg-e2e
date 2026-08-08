@@ -124,10 +124,17 @@ jobs:
       - name: Require clean harness and product checkouts
         run: |
           set -euo pipefail
-          harness_status="$(git status --porcelain --untracked-files=all | grep -vE '^\?\? artifacts/' || true)"
-          test -z "$harness_status"
+          harness_status="$(git status --porcelain --untracked-files=all | grep -vE '^\?\? (artifacts|product)/' || true)"
+          if [[ -n "$harness_status" ]]; then
+            printf 'unexpected harness drift:\n%s\n' "$harness_status" >&2
+            exit 1
+          fi
           git -C product/zed-cli diff --exit-code
-          test -z "$(git -C product/zed-cli status --porcelain)"
+          product_status="$(git -C product/zed-cli status --porcelain)"
+          if [[ -n "$product_status" ]]; then
+            printf 'unexpected product checkout drift:\n%s\n' "$product_status" >&2
+            exit 1
+          fi
 
       - name: Upload exact-head evidence
         if: ${{ !cancelled() }}
