@@ -33,7 +33,9 @@ def ok(msg: str) -> None:
 def safe_relative_path(relative: str) -> bool:
     if not isinstance(relative, str) or not relative or relative.startswith("/"):
         return False
-    if "\\" in relative or any(character.is_control() for character in relative):
+    if "\\" in relative or any(
+        ord(character) < 32 or ord(character) == 127 for character in relative
+    ):
         return False
     return all(part not in {"", ".", ".."} for part in relative.split("/"))
 
@@ -77,8 +79,8 @@ class Base:
 
     def fetch(self, rel: str) -> bytes:
         if self.http:
-            req = urllib.request.Request(f"{self.base}/{rel}", headers=self.UA)
-            with urllib.request.urlopen(req, timeout=30) as response:
+            request = urllib.request.Request(f"{self.base}/{rel}", headers=self.UA)
+            with urllib.request.urlopen(request, timeout=30) as response:
                 return response.read()
         return self.local_path(rel).read_bytes()
 
@@ -103,6 +105,16 @@ def semver_key(version: str):
     return tuple(int(component) for component in components)
 
 
+def canonical_sha256(value) -> bool:
+    if not isinstance(value, str) or len(value) != 64 or value != value.lower():
+        return False
+    try:
+        int(value, 16)
+    except ValueError:
+        return False
+    return True
+
+
 def fetch_json(base: Base, relative: str, label: str):
     try:
         return json.loads(base.fetch(relative))
@@ -121,6 +133,8 @@ def validated_checkpoint_entries(checkpoint: dict) -> list[dict] | None:
         )
     if checkpoint.get("signature") is not None:
         fail("v0 checkpoint signature slot must be null")
+    if not canonical_sha256(checkpoint.get("tree_sha256")):
+        fail("checkpoint tree_sha256 must be canonical lowercase SHA-256")
     files = checkpoint.get("files")
     if not isinstance(files, list) or not files:
         fail("checkpoint files must be a non-empty array")
@@ -138,13 +152,8 @@ def validated_checkpoint_entries(checkpoint: dict) -> list[dict] | None:
         if not checkpoint_path_allowed(relative):
             fail(f"checkpoint contains unsafe or unsupported object path: {relative!r}")
             continue
-        if not isinstance(digest, str) or len(digest) != 64:
-            fail(f"checkpoint has invalid SHA-256 for `{relative}`")
-            continue
-        try:
-            int(digest, 16)
-        except ValueError:
-            fail(f"checkpoint has non-hex SHA-256 for `{relative}`")
+        if not canonical_sha256(digest):
+            fail(f"checkpoint has invalid canonical SHA-256 for `{relative}`")
             continue
         if not isinstance(size, int) or isinstance(size, bool) or size < 0:
             fail(f"checkpoint has invalid size for `{relative}`")
@@ -198,6 +207,10 @@ def run_checks(base: Base) -> int:
     discovery = fetch_json(base, ".well-known/zpkg-registry.json", "discovery document")
     if discovery is None:
         print("== FAIL (discovery unavailable)")
+        return 1
+    if not isinstance(discovery, dict):
+        fail("discovery document must be a JSON object")
+        print(f"== FAIL ({len(FAILURES)})")
         return 1
     if discovery.get("schema_version") != SCHEMA_VERSION:
         fail(
@@ -274,6 +287,9 @@ def run_checks(base: Base) -> int:
         except (OSError, ValueError, UnicodeDecodeError, json.JSONDecodeError, urllib.error.URLError) as error:
             fail(f"cannot parse index `{index_path}`: {error}")
             continue
+        if not lines or any(not isinstance(line, dict) for line in lines):
+            fail(f"{index_path}: every NDJSON line must be an object")
+            continue
         versions = [line.get("version") for line in lines]
         try:
             ordered = sorted(versions, key=semver_key)
@@ -291,7 +307,7 @@ def run_checks(base: Base) -> int:
                 fail(f"{index_path}: invalid checksum for version {version!r}")
                 continue
             algo, digest = checksum.split(":", 1)
-            if algo != "sha256" or len(digest) != 64:
+            if algo != "sha256" or not canonical_sha256(digest):
                 fail(f"{index_path}: unsupported or malformed checksum `{checksum}`")
                 continue
             if not isinstance(size, int) or isinstance(size, bool) or size < 0:
