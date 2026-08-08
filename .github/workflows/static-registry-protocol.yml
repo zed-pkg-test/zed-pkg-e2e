@@ -1,0 +1,163 @@
+name: static registry protocol
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/static-registry-protocol.yml"
+      - "static-registry-protocol/**"
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/static-registry-protocol.yml"
+      - "static-registry-protocol/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: static-registry-protocol-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  local-conformance:
+    name: deterministic static registry / ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-15]
+
+    steps:
+      - name: Check out exact candidate
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          show-progress: false
+
+      - name: Install pinned Python runtime
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+          cache: ""
+
+      - name: Verify fixed tool boundary
+        run: |
+          set -euo pipefail
+          python --version
+          command -v zstd
+          zstd --version
+          python - <<'PY'
+          from pathlib import Path
+
+          for path in (
+              Path("static-registry-protocol/build_static_registry.py"),
+              Path("static-registry-protocol/check_static_registry.py"),
+          ):
+              compile(path.read_text(encoding="utf-8"), str(path), "exec")
+          PY
+
+      - name: Build twice and require byte-identical trees
+        id: build
+        env:
+          SOURCE_DATE_EPOCH: "0"
+        run: |
+          set -euo pipefail
+          evidence="$RUNNER_TEMP/static-registry-evidence"
+          tree_a="$RUNNER_TEMP/static-registry-a"
+          tree_b="$RUNNER_TEMP/static-registry-b"
+          rm -rf "$evidence" "$tree_a" "$tree_b"
+          mkdir -p "$evidence"
+
+          python static-registry-protocol/build_static_registry.py \
+            --fixtures static-registry-protocol/fixtures \
+            --out "$tree_a" \
+            2>&1 | tee "$evidence/build-a.log"
+          python static-registry-protocol/build_static_registry.py \
+            --fixtures static-registry-protocol/fixtures \
+            --out "$tree_b" \
+            2>&1 | tee "$evidence/build-b.log"
+
+          python - "$tree_a" "$tree_b" "$evidence/inventory.json" <<'PY'
+          import hashlib
+          import json
+          import sys
+          from pathlib import Path
+
+          first, second, output = map(Path, sys.argv[1:])
+
+          def inventory(root: Path):
+              rows = []
+              for path in sorted(p for p in root.rglob("*") if p.is_file()):
+                  data = path.read_bytes()
+                  rows.append({
+                      "path": path.relative_to(root).as_posix(),
+                      "size": len(data),
+                      "sha256": hashlib.sha256(data).hexdigest(),
+                  })
+              return rows
+
+          left = inventory(first)
+          right = inventory(second)
+          if left != right:
+              raise SystemExit(
+                  "independent static-registry builds are not byte-identical\n"
+                  + json.dumps({"first": left, "second": right}, indent=2)
+              )
+          checkpoint = json.loads((first / "checkpoint.json").read_text())
+          result = {
+              "schema": "zed-pkg-test/static-registry-local-evidence/v1",
+              "source_date_epoch": 0,
+              "tree_sha256": checkpoint["tree_sha256"],
+              "checkpoint_sequence": checkpoint["seq"],
+              "object_count": len(checkpoint["files"]),
+              "files": left,
+          }
+          output.write_text(
+              json.dumps(result, sort_keys=True, separators=(",", ":")) + "\n",
+              encoding="utf-8",
+          )
+          print(
+              f"byte-identical trees: {len(left)} files, "
+              f"tree_sha256={checkpoint['tree_sha256']}"
+          )
+          PY
+
+          printf 'tree=%s\n' "$tree_a" >> "$GITHUB_OUTPUT"
+          printf 'evidence=%s\n' "$evidence" >> "$GITHUB_OUTPUT"
+
+      - name: Run green conformance and five red mutations
+        run: |
+          set -euo pipefail
+          tree="${{ steps.build.outputs.tree }}"
+          evidence="${{ steps.build.outputs.evidence }}"
+          python static-registry-protocol/check_static_registry.py \
+            --base "$tree" \
+            2>&1 | tee "$evidence/conformance.log"
+          python static-registry-protocol/check_static_registry.py \
+            --base "$tree" self-test \
+            2>&1 | tee "$evidence/red-tests.log"
+
+          grep -F '== PASS' "$evidence/conformance.log"
+          grep -F '== self-test PASS' "$evidence/red-tests.log"
+          test "$(grep -c 'red as required' "$evidence/red-tests.log")" -eq 5
+
+      - name: Prove source checkout stayed immutable
+        run: |
+          set -euo pipefail
+          git diff --exit-code
+          test -z "$(git status --porcelain=v1 --untracked-files=all)"
+
+      - name: Upload bounded local evidence
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: static-registry-protocol-${{ runner.os }}-${{ github.sha }}
+          path: ${{ steps.build.outputs.evidence }}
+          if-no-files-found: error
+          retention-days: 7
+          include-hidden-files: false
