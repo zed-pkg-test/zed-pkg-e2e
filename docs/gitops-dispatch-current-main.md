@@ -1,16 +1,16 @@
 # Current-main root `zed gitops` certification
 
-This canary independently certifies the current-main DEN-2725 candidate after the placeholder-only SOPS environment store landed:
+This canary independently certifies the current-main DEN-2725 candidate after the frozen offline tool-profile slice landed:
 
 ```text
 product PR: zed-pkg/zed-cli#242
-candidate: 17fe649a364a341745b7c98b8a67a4599ef9fd6f
-exact parent: 4d598520bc5cd24b739b4571bf2fb7f46b0ec5ee
+candidate: 8eb8e31fe719ca598961a98bd139ef99ac905e8e
+exact parent: de774cc9fc5b786d85e9b5ff19251675f0e9391b
 ```
 
-The previous immutable product candidate and parent were independently certified and merged into this test repository by PR #130. Because product `main` advanced before the feature itself merged, this revision changes only the candidate/parent pins and re-runs the complete matrix.
+The earlier immutable candidates and parents were independently certified and merged into this test repository by PRs #130 and #131. Product `main` then advanced through the separately certified offline tool-profile feature, which legitimately overlapped the GitOps branch at `src/lib.rs`. The current product candidate preserves `pub mod tool_profile;` and adds only the reviewed `external_subcommands` export.
 
-The workflow does not merge another branch, apply a correction script, or rewrite product source. It checks out the immutable product commit with its parent and fails before compilation unless:
+This pin update changes no certification logic. The workflow does not merge another branch, apply a correction script, or rewrite product source. It checks out the immutable product commit with its parent and fails before compilation unless:
 
 1. the candidate SHA is exact;
 2. its direct parent is exact; and
@@ -45,6 +45,6 @@ The black-box checks cover sibling-command selection, no working-directory or re
 
 The canary strips inherited token, secret, password, private-key, access-key, API-key, authorization, cookie, and Zed credential variables from subprocesses. It uses only disposable local directories and a local Git index fixture.
 
-It performs no package publication, registry write, GitHub mutation, Kubernetes/Argo operation, Cloudflare request, external agent task, SOPS decryption, or persistent namespace write. Product source must remain byte-for-byte unchanged throughout the run.
+It performs no package publication, registry write, GitHub mutation, Kubernetes/Argo operation, Cloudflare request, external agent task, SOPS decryption, tool download, or persistent namespace write. Product source must remain byte-for-byte unchanged throughout the run.
 
 Evidence is commit-addressed and records only the immutable candidate/parent, runner OS/architecture, binary SHA-256 values, and passed check names. A green result certifies this exact product commit only; any successor requires another immutable pin.
