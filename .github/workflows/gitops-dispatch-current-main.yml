@@ -23,8 +23,8 @@ defaults:
     shell: bash
 
 env:
-  ZED_CLI_COMMIT: 173bab46355ef715783d2734288ccc023c7f486b
-  ZED_CLI_PARENT: f226c2e57c8c830b21aedd4fb2eb505c584dc7fd
+  ZED_CLI_COMMIT: 17fe649a364a341745b7c98b8a67a4599ef9fd6f
+  ZED_CLI_PARENT: 4d598520bc5cd24b739b4571bf2fb7f46b0ec5ee
 
 jobs:
   certify:
