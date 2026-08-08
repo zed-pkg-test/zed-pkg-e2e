@@ -53,7 +53,7 @@ jobs:
 
           report = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
           assert report["schema"] == "zed-pkg-test/public-fleet-inventory-v3", report
-          assert report["package_organizations"] == ["zed-pkg-test", "zedtest"], report
+          assert report["package_organizations"] == ["zed-pkg-test", "zedtest", "zed-pkg"], report
           assert report["core_repository_count"] == 22, report
           assert report["core_package_count"] == 21, report
           assert report["live_repository_count"] >= report["core_repository_count"], report
