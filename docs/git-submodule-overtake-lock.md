@@ -1,28 +1,28 @@
 # Git-submodule takeover operation-lock certification
 
-This test-org lane certifies `zed-pkg/zed-cli#243` at its current-main-integrated,
-nested-invocation-hardened, thread-affine, shared-ownership, and lint-clean exact
-candidate commit:
+This test-org lane certifies the complete remaining DEN-2038 surface in
+`zed-pkg/zed-cli#243` at its current-main-integrated, nested-invocation-hardened,
+thread-affine, shared-ownership, lint-clean, and recovery-locked exact candidate
+commit:
 
 ```text
-c1435af21d15a359853df3c51687df67d72af24a
+d163e98b9151340b368301b022c3a45bdf5bd70e
 ```
 
 The candidate was merged with current product `main` through integration PR
 `zed-pkg/zed-cli#245` before the final locking review. That preserves the
-independent external GitOps dispatcher and its tests; the reviewed file sets do
-not overlap. The commits after the shared-ownership implementation are limited
-to rustfmt layout and converting a cache description from rustdoc syntax to an
-ordinary comment because rustdoc does not attach documentation to a
-`thread_local!` macro invocation. No lock, API, or ownership semantics changed.
+independent external GitOps dispatcher and its tests. Later commits normalize
+formatting, keep macro-adjacent comments lint-clean, and move eager transaction
+recovery from the shared-home Store lock to the canonical checkout operation
+lock.
 
-The product change routes `zed overtake --git-submodules` through the same
-checkout-local `.zed/operation.lock` boundary used by install, add, remove, and
-uninstall. It exposes an RAII guard for multi-call library operations while
-preserving same-thread reentrancy. It also resolves the owning `.gitmodules`
-superproject before acquiring the lock, so an invocation from a nested source
-directory cannot create a second operation-lock identity below the checkout
-root.
+The product change routes `zed overtake --git-submodules` and eager
+`.zpkg-staging` recovery through the same checkout-local `.zed/operation.lock`
+boundary used by install, add, remove, and uninstall. It exposes an RAII guard
+for multi-call library operations while preserving same-thread reentrancy. It
+also resolves the owning `.gitmodules` superproject before acquiring the lock,
+so an invocation from a nested source directory cannot create a second
+operation-lock identity below the checkout root.
 
 ## Reentrant ownership invariants
 
@@ -50,16 +50,17 @@ order.
 Product unit tests prove nested facade reuse, thread affinity, shared descriptor
 lifetime, and superproject path selection. They do not by themselves prove that
 independent operating system processes contend on the same checkout identity,
-that symlink or nested-path aliases cannot escape ownership, or that kernel
-ownership is released when the owner is terminated.
+that symlink or nested-path aliases cannot escape ownership, that recovery uses
+the same ownership boundary across different Zed homes, or that kernel ownership
+is released when the owner is terminated.
 
-The two test-org scripts exercise those boundaries using the real release
+The three test-org scripts exercise those boundaries using the real release
 executable and disposable local Git repositories. A temporary `git` shim pauses
 takeover after the CLI has acquired project ownership but before Git submodule
 synchronization can proceed. The shim never replaces Git semantics; after
 release it `exec`s the exact host Git binary with the original arguments.
 
-## Nine certified process checks
+## Thirteen certified process checks
 
 ### Normal completion
 
@@ -94,8 +95,24 @@ blocking interval demonstrates serialization rather than coincidental ordering.
 9. A root-level frozen install remains blocked and then succeeds behind that
    nested takeover.
 
-This third scenario would fail against the earlier implementation that locked
-the raw current directory and only later discovered the superproject.
+This scenario would fail against the earlier implementation that locked the raw
+current directory and only later discovered the superproject.
+
+### Transaction recovery
+
+10. A process using a different Zed home cannot eagerly recover an active
+    `.zpkg-staging` journal while takeover owns the checkout.
+11. The pending destination and backup bytes remain exact throughout the
+    observed blocking interval.
+12. After ownership release, recovery restores the exact backup bytes and
+    removes the staging journal.
+13. The recovered process then completes frozen installation against the
+    adopted manifest and lock state.
+
+The recovery fixture is created only after takeover has reached the blocked Git
+synchronization point. Against the old Store-home guard, the second process would
+restore it concurrently; against the project lock, the journal remains untouched
+until checkout ownership is released.
 
 ## Matrix and promotion boundary
 
@@ -104,17 +121,17 @@ The workflow runs on Ubuntu 24.04 and macOS 15. It:
 - pins the CLI, `zed-interfaces`, and `zed-lock` to full commit IDs;
 - uses read-only repository permissions and commit-pinned Actions;
 - disables persisted checkout credentials;
-- compiles both Python harnesses outside the source tree;
+- compiles all three Python harnesses outside the source tree;
 - runs source diff checks and Rust formatting;
 - runs focused `project_lock` and `git_submodules` library tests;
 - runs both thread-affinity `compile_fail` rustdoc contracts;
 - runs strict Clippy on Linux;
 - builds the exact release executable;
-- executes all three process-contention scenarios; and
+- executes four process-contention scenarios; and
 - requires clean product and harness checkouts afterward.
 
 Evidence contains the binary SHA-256, process IDs, observed blocking intervals,
-CLI version, and all nine named process checks. No account, public registry,
+CLI version, and all thirteen named process checks. No account, public registry,
 Cloudflare resource, credential, Docker daemon, or persistent namespace
 participates.
 
