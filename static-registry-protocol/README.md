@@ -29,28 +29,33 @@ checkpoint.json                  {seq, files:[{path,sha256,size}], tree_sha256,
 
 Org segments must already be lowercase canonical form. The generator also
 requires a new or empty real output directory and rejects fixture/output
-symlinks and special files. These rules prevent stale objects and filesystem
-escape from entering an export before protocol trust is evaluated.
+symlinks and special files. It validates and renders the complete tree before
+publishing through a same-parent staging directory, so a bad later package
+cannot expose earlier package blobs or leave a staging tree.
 
 ## Tools
 
-- `build_static_registry.py --fixtures fixtures --out tree` — deterministic
-  build: ustar, sorted entries, `SOURCE_DATE_EPOCH` (default 0), uid/gid 0,
-  `zstd -19`. Two builds of the same fixtures are byte-identical.
-- `check_static_registry.py --base <dir|https://host>` — conformance: discovery
-  sanity, checkpoint↔object integrity, NDJSON/semver/cksum verification, yank
-  semantics (unresolvable but bytes retained), absent-package hard miss. Local
-  trees must contain exactly the checkpointed objects plus `checkpoint.json`;
-  uncheckpointed files, symlinks, and special files are rejected.
-- `check_static_registry.py --base <dir> self-test` — **red tests**: six
-  mutations (tarball tamper, index tamper, checkpoint drop, yank resurrection,
-  wrong schema, uncheckpointed object) must each turn the checker red. A green
-  run is meaningful only because these prove red is reachable.
-- `sync_to_r2.sh <tree> <bucket>` — verifies the local tree, uploads immutable
-  `pkgs/**` with one-year immutable caching, uploads mutable v0 discovery/index
-  objects with `no-cache`, and publishes `checkpoint.json` last. Replacing an
-  existing v0 checkpoint fails closed unless an operator explicitly sets
-  `ZPKG_ALLOW_V0_REPLACE=true` for a disposable non-production experiment.
+- `build_static_registry.py --fixtures fixtures --out tree` — deterministic,
+  failure-atomic build: ustar, sorted entries, `SOURCE_DATE_EPOCH` (default 0),
+  uid/gid 0, `zstd -19`, same-parent staging, final directory rename. Two
+  builds of the same fixtures are byte-identical.
+- `check_static_registry.py --base <dir|https://host>` — conformance: discovery,
+  checkpoint schema and sorted unique safe paths, checkpoint↔object integrity,
+  exact local file set, NDJSON/semver/checksum verification, yank semantics,
+  and absent-package hard miss. Local trees reject path traversal, duplicate
+  paths, missing or uncheckpointed objects, symlinks, and special files before
+  unsafe content is fetched.
+- `check_static_registry.py --base <dir> self-test` — **red tests**: every
+  declared mutation must turn the checker red. The current nine cases cover
+  tarball tampering, index tampering, checkpoint-entry removal, yank
+  resurrection, schema drift, an uncheckpointed object, a removed checkpointed
+  object, an unsafe `../` checkpoint path, and a duplicate checkpoint path.
+- `sync_to_r2.sh <tree> <bucket>` — verifies the complete local tree, uploads
+  immutable `pkgs/**` with one-year immutable caching, uploads mutable v0
+  discovery/index objects with `no-cache`, and publishes `checkpoint.json`
+  last. Replacing an existing v0 checkpoint fails closed unless an operator
+  explicitly sets `ZPKG_ALLOW_V0_REPLACE=true` for a disposable
+  non-production experiment.
 
 Version 0 cannot make a rolling update collection-atomic because index paths are
 mutable. Checkpoint-last ordering reduces exposure for an initial publication,
@@ -63,18 +68,20 @@ stable checkpoint.
 Ubuntu 24.04 and macOS 15 with read-only repository permissions and immutable
 Action pins. Each job:
 
-1. verifies the pinned Python and runner-provided `zstd` boundary;
-2. runs generator safety tests for empty outputs, stale outputs, symlinked
-   fixtures/outputs, uppercase orgs, and empty fixture sets;
-3. runs fake-AWS synchronization tests against the real generated fixture,
-   including exact object order/cache policy, checkpoint-last publication,
+1. verifies pinned Python, runner-provided `zstd`, Bash syntax, and Python
+   syntax;
+2. runs seven generator tests for fresh/empty output, stale-output refusal,
+   fixture/output symlink refusal, failure-atomic multi-package validation,
+   uppercase-org refusal, and empty-fixture refusal;
+3. runs six fake-AWS synchronization tests against the real generated fixture,
+   covering exact upload order/cache policy, checkpoint-last publication,
    replacement refusal/override, and pre-AWS rejection of missing, tampered, or
    uncheckpointed state;
 4. builds the registry twice in unrelated temporary directories with
    `SOURCE_DATE_EPOCH=0`;
 5. compares the complete sorted path/size/SHA-256 inventory byte-for-byte;
 6. runs the green conformance check;
-7. runs all six red mutations and requires every one to fail;
+7. dynamically discovers and requires every adversarial mutation to fail;
 8. proves the source checkout remained unchanged; and
 9. uploads bounded commit-addressed local evidence for seven days.
 
