@@ -122,10 +122,18 @@ jobs:
       - name: Require clean source checkouts
         run: |
           set -euo pipefail
-          harness_status="$(git status --porcelain --untracked-files=all | grep -vE '^\?\? artifacts/' || true)"
-          test -z "$harness_status"
-          test -z "$(git -C product/zed-cli status --porcelain)"
-          test -z "$(git -C product/k8s-cluster status --porcelain)"
+          harness_status="$(git status --porcelain --untracked-files=all | grep -vE '^\?\? (artifacts|product)/' || true)"
+          if [[ -n "$harness_status" ]]; then
+            printf 'unexpected harness drift:\n%s\n' "$harness_status" >&2
+            exit 1
+          fi
+          for checkout in product/zed-cli product/k8s-cluster; do
+            checkout_status="$(git -C "$checkout" status --porcelain)"
+            if [[ -n "$checkout_status" ]]; then
+              printf 'unexpected drift in %s:\n%s\n' "$checkout" "$checkout_status" >&2
+              exit 1
+            fi
+          done
 
       - name: Upload exact-contract evidence
         if: ${{ !cancelled() }}
