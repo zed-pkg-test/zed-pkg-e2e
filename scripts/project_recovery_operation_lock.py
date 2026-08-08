@@ -44,21 +44,12 @@ def create_pending_recovery(project: Path) -> tuple[Path, Path, Path]:
     return staging, backup, marker
 
 
-def parse_args(argv: Sequence[str]) -> argparse.Namespace:
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--zed", type=Path, required=True)
-    parser.add_argument("--work-root", type=Path, required=True)
-    return parser.parse_args(argv)
-
-
-def main(argv: Sequence[str]) -> int:
-    args = parse_args(argv)
-    contract = Contract(args.zed, args.work_root)
+def certify_different_home_waiter(contract: Contract) -> tuple[list[str], dict[str, float | int]]:
     _, root = contract.fixture("recovery")
 
     # The holder reaches Git synchronization only after acquiring the canonical
     # checkout-local operation lock. Create the interrupted journal afterward so
-    # its own startup cannot eagerly recover the fixture.
+    # its own pre-Git recovery cannot consume this fixture.
     holder, _, release = contract.blocked_holder(root, "recovery")
     staging, backup, marker = create_pending_recovery(root)
 
@@ -103,12 +94,62 @@ def main(argv: Sequence[str]) -> int:
         "recovery restores exact bytes and removes staging after release",
         "recovered process completes frozen install against adopted state",
     ]
-    evidence = {
-        "schema": "zed.project-recovery-operation-lock/v1",
-        "checks": checks,
+    process = {
         "holder_pid": holder.pid,
         "waiter_pid": waiter.pid,
         "observed_block_seconds": round(blocked_for, 3),
+    }
+    return checks, process
+
+
+def certify_overtake_recovers_before_git(contract: Contract) -> tuple[list[str], int]:
+    _, root = contract.fixture("preflight-recovery")
+    staging, _, marker = create_pending_recovery(root)
+
+    # Modular takeover dispatch bypasses main's ordinary run() entrypoint. By
+    # the time the Git shim announces `submodule sync`, recovery must already
+    # have completed under the same project operation lock.
+    holder, _, release = contract.blocked_holder(root, "preflight-recovery")
+    if staging.exists():
+        raise ContractError("takeover reached Git sync before recovering pending state")
+    if marker.read_bytes() != ORIGINAL:
+        raise ContractError("takeover did not restore exact bytes before Git sync")
+
+    release.write_text("release\n", encoding="utf-8")
+    output = contract.finish(holder, expected=0)
+    if "overtook 1 Git submodule package(s)" not in output:
+        raise ContractError("recovered takeover did not complete adoption")
+    if not (root / ".zpkg.lock").is_file():
+        raise ContractError("recovered takeover did not publish a lockfile")
+
+    checks = [
+        "modular takeover recovers pending transaction before Git transport",
+        "pre-Git recovery restores exact bytes before adoption begins",
+    ]
+    return checks, holder.pid
+
+
+def parse_args(argv: Sequence[str]) -> argparse.Namespace:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--zed", type=Path, required=True)
+    parser.add_argument("--work-root", type=Path, required=True)
+    return parser.parse_args(argv)
+
+
+def main(argv: Sequence[str]) -> int:
+    args = parse_args(argv)
+    contract = Contract(args.zed, args.work_root)
+    blocked_checks, blocked_process = certify_different_home_waiter(contract)
+    pre_git_checks, pre_git_holder_pid = certify_overtake_recovers_before_git(contract)
+    checks = [*blocked_checks, *pre_git_checks]
+    if len(checks) != 6:
+        raise ContractError(f"unexpected recovery check count: {checks}")
+
+    evidence = {
+        "schema": "zed.project-recovery-operation-lock/v1",
+        "checks": checks,
+        "different_home_waiter": blocked_process,
+        "pre_git_holder_pid": pre_git_holder_pid,
         "network_credentials": False,
         "public_registry_mutation": False,
     }
@@ -116,7 +157,7 @@ def main(argv: Sequence[str]) -> int:
         json.dumps(evidence, indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
     )
-    contract.log("\ncertified 4 project-recovery ownership checks")
+    contract.log("\ncertified 6 project-recovery ownership checks")
     return 0
 
 
