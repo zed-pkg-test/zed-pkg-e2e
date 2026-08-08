@@ -14,7 +14,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  ZED_CLI_REF: b9bb6e9cf48da3d9b82d1c24b38e576e661a7e4a
+  ZED_CLI_REF: 3c584065dce292442e1ca5e5c45c4728f2796b47
 
 jobs:
   quality:
