@@ -268,7 +268,7 @@ const hhmPair = {
         'short-lived access grants',
         'revocation and checkout',
         'replay and expiry refusal',
-        'no real door credentials',
+        'synthetic access-grant fixtures only',
       ],
       services: ['postgres'],
       topic: 'security',
