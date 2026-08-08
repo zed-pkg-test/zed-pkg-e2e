@@ -13,7 +13,7 @@ on:
       zed_cli_ref:
         description: Immutable zed-cli commit to certify
         required: false
-        default: baecc728f71ee66982fcbe0ee8544f31be448c58
+        default: 25983a9100dca97988f90132c961d314d0a8810f
 
 permissions:
   contents: read
@@ -29,7 +29,7 @@ defaults:
 env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: '1'
-  ZED_CLI_REF: ${{ github.event.inputs.zed_cli_ref || 'baecc728f71ee66982fcbe0ee8544f31be448c58' }}
+  ZED_CLI_REF: ${{ github.event.inputs.zed_cli_ref || '25983a9100dca97988f90132c961d314d0a8810f' }}
   ZED_INTERFACES_SHA: d1bf8ef7c88a75292cbe8d697bfd269f30d62e2b
   EXPECTED_REGISTRY: https://registry.zpkg.net
   FORBIDDEN_REGISTRY: https://registry.zpkg.tech
@@ -95,6 +95,7 @@ jobs:
               echo "forbidden registry remains in $surface" >&2
               exit 1
             fi
+
           done
           if git -C zed-cli grep -nF "$FORBIDDEN_REGISTRY" -- .; then
             echo 'forbidden public registry remains in tracked product content' >&2
