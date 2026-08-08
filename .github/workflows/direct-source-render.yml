@@ -1,0 +1,146 @@
+name: exact direct-source Kustomize render
+
+on:
+  pull_request:
+    paths:
+      - .github/workflows/direct-source-render.yml
+      - scripts/install_pinned_kustomize.py
+      - scripts/direct_source_render_canary.py
+      - docs/direct-source-render.md
+  workflow_dispatch:
+    inputs:
+      cluster_commit:
+        description: Exact ORESoftware/k8s-cluster catalog candidate
+        required: false
+        default: 4bc664a651cd912e8c16a15dd8f0dfcb1e1870b5
+        type: string
+      child_commit:
+        description: Exact daedalus-fab/fabrication-server.rs source commit
+        required: false
+        default: 5e305b9bf40d28139bdabf9342c304f759cbfee5
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: direct-source-render-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  K8S_CLUSTER_COMMIT: ${{ inputs.cluster_commit || '4bc664a651cd912e8c16a15dd8f0dfcb1e1870b5' }}
+  FABRICATION_SERVER_COMMIT: ${{ inputs.child_commit || '5e305b9bf40d28139bdabf9342c304f759cbfee5' }}
+
+jobs:
+  render:
+    name: direct source render / ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-15, windows-2025]
+
+    steps:
+      - name: Check out independent test harness
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+          show-progress: false
+
+      - name: Check out exact cluster catalog without child worktrees
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ORESoftware/k8s-cluster
+          ref: ${{ env.K8S_CLUSTER_COMMIT }}
+          path: product/k8s-cluster
+          fetch-depth: 1
+          submodules: false
+          persist-credentials: false
+          show-progress: false
+
+      - name: Check out exact direct child source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: daedalus-fab/fabrication-server.rs
+          ref: ${{ env.FABRICATION_SERVER_COMMIT }}
+          path: product/fabrication-server
+          fetch-depth: 1
+          submodules: false
+          persist-credentials: false
+          show-progress: false
+
+      - name: Install Python 3.12
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.12'
+
+      - name: Verify immutable checkouts and harness syntax
+        run: |
+          set -euo pipefail
+          [[ "$K8S_CLUSTER_COMMIT" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$FABRICATION_SERVER_COMMIT" =~ ^[0-9a-f]{40}$ ]]
+          test "$(git -C product/k8s-cluster rev-parse HEAD)" = "$K8S_CLUSTER_COMMIT"
+          test "$(git -C product/fabrication-server rev-parse HEAD)" = "$FABRICATION_SERVER_COMMIT"
+          python -m py_compile scripts/install_pinned_kustomize.py scripts/direct_source_render_canary.py
+          rm -rf scripts/__pycache__
+
+      - name: Install checksum-pinned Kustomize v5.8.1
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts
+          kustomize="$(python scripts/install_pinned_kustomize.py \
+            --destination "$RUNNER_TEMP/pinned-kustomize" \
+            --metadata "artifacts/kustomize-install-${RUNNER_OS}-${RUNNER_ARCH}.json")"
+          test -f "$kustomize"
+          echo "KUSTOMIZE_BINARY=$kustomize" >> "$GITHUB_ENV"
+
+      - name: Verify catalog provenance and render exact direct source twice
+        run: |
+          set -euo pipefail
+          python scripts/direct_source_render_canary.py \
+            --cluster product/k8s-cluster \
+            --child product/fabrication-server \
+            --cluster-commit "$K8S_CLUSTER_COMMIT" \
+            --child-commit "$FABRICATION_SERVER_COMMIT" \
+            --kustomize "$KUSTOMIZE_BINARY" \
+            --kustomize-metadata "artifacts/kustomize-install-${RUNNER_OS}-${RUNNER_ARCH}.json" \
+            --rendered "artifacts/fabrication-render-${RUNNER_OS}-${RUNNER_ARCH}.yaml" \
+            --evidence "artifacts/direct-source-render-${RUNNER_OS}-${RUNNER_ARCH}.json"
+          rm -rf scripts/__pycache__
+
+      - name: Require pristine source and harness checkouts
+        run: |
+          set -euo pipefail
+          for checkout in product/k8s-cluster product/fabrication-server; do
+            git -C "$checkout" diff --exit-code
+            git -C "$checkout" diff --cached --exit-code
+            status="$(git -C "$checkout" status --porcelain --untracked-files=all)"
+            if [[ -n "$status" ]]; then
+              printf 'unexpected source drift in %s:\n%s\n' "$checkout" "$status" >&2
+              exit 1
+            fi
+          done
+          harness_status="$(git status --porcelain --untracked-files=all | grep -vE '^\?\? (artifacts|product)/' || true)"
+          if [[ -n "$harness_status" ]]; then
+            printf 'unexpected harness drift:\n%s\n' "$harness_status" >&2
+            exit 1
+          fi
+
+      - name: Upload exact-source render evidence
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: direct-source-render-${{ runner.os }}-${{ runner.arch }}-${{ env.K8S_CLUSTER_COMMIT }}-${{ env.FABRICATION_SERVER_COMMIT }}
+          path: |
+            artifacts/kustomize-install-${{ runner.os }}-${{ runner.arch }}.json
+            artifacts/direct-source-render-${{ runner.os }}-${{ runner.arch }}.json
+            artifacts/fabrication-render-${{ runner.os }}-${{ runner.arch }}.yaml
+          if-no-files-found: error
+          retention-days: 14
+          include-hidden-files: false
