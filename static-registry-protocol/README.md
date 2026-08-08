@@ -70,9 +70,10 @@ Action pins. Each job:
 
 1. verifies pinned Python, runner-provided `zstd`, Bash syntax, and Python
    syntax;
-2. runs seven generator tests for fresh/empty output, stale-output refusal,
-   fixture/output symlink refusal, failure-atomic multi-package validation,
-   uppercase-org refusal, and empty-fixture refusal;
+2. runs twelve generator tests covering fresh/empty output, stale-output and
+   parent-traversal refusal, fixture/output/metadata symlink refusal,
+   failure-atomic multi-package validation, metadata object/field shape,
+   semantic-version shape, uppercase-org refusal, and empty-fixture refusal;
 3. runs six fake-AWS synchronization tests against the real generated fixture,
    covering exact upload order/cache policy, checkpoint-last publication,
    replacement refusal/override, and pre-AWS rejection of missing, tampered, or
