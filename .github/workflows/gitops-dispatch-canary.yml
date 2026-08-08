@@ -5,6 +5,7 @@ on:
     paths:
       - .github/workflows/gitops-dispatch-canary.yml
       - scripts/gitops_dispatch_canary.py
+      - scripts/gitops_dispatch_canary_entry.py
       - fixtures/external_dispatch_probe.rs
       - docs/gitops-dispatch-canary.md
   workflow_dispatch:
@@ -12,7 +13,7 @@ on:
       candidate:
         description: Full immutable zed-pkg/zed-cli commit to certify
         required: false
-        default: 78557641aebf313652886a03d04d8b8c73a748f6
+        default: ace157406d04f338698b6dc93a77021b07560e72
         type: string
 
 permissions:
@@ -27,7 +28,7 @@ defaults:
     shell: bash
 
 env:
-  ZED_CLI_COMMIT: ${{ inputs.candidate || '78557641aebf313652886a03d04d8b8c73a748f6' }}
+  ZED_CLI_COMMIT: ${{ inputs.candidate || 'ace157406d04f338698b6dc93a77021b07560e72' }}
 
 jobs:
   certify:
@@ -108,9 +109,9 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p artifacts
-          python -m py_compile scripts/gitops_dispatch_canary.py
+          python -m py_compile scripts/gitops_dispatch_canary.py scripts/gitops_dispatch_canary_entry.py
           rm -rf scripts/__pycache__
-          python scripts/gitops_dispatch_canary.py \
+          python scripts/gitops_dispatch_canary_entry.py \
             --zed "$ZED_BINARY" \
             --zed-gitops "$ZED_GITOPS_BINARY" \
             --probe "$DISPATCH_PROBE_BINARY" \
