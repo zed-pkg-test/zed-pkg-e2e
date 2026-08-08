@@ -7,8 +7,15 @@ const file = path.join(root, 'scripts', 'add-hhm-test-fleet.mjs');
 const before = fs.readFileSync(file, 'utf8');
 const needle = "        'no real door credentials',";
 const replacement = "        'synthetic access-grant fixtures only',";
-const occurrences = before.split(needle).length - 1;
-if (occurrences !== 1) {
-  throw new Error(`expected one privacy wording occurrence, found ${occurrences}`);
+const oldOccurrences = before.split(needle).length - 1;
+const newOccurrences = before.split(replacement).length - 1;
+
+if (oldOccurrences === 1 && newOccurrences === 0) {
+  fs.writeFileSync(file, before.replace(needle, replacement));
+} else if (oldOccurrences === 0 && newOccurrences === 1) {
+  console.log('privacy wording is already corrected');
+} else {
+  throw new Error(
+    `unexpected privacy wording state: old=${oldOccurrences}, new=${newOccurrences}`,
+  );
 }
-fs.writeFileSync(file, before.replace(needle, replacement));
