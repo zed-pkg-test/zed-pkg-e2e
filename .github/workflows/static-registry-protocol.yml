@@ -51,6 +51,7 @@ jobs:
           python --version
           command -v zstd
           zstd --version
+          bash -n static-registry-protocol/sync_to_r2.sh
           python - <<'PY'
           from pathlib import Path
 
@@ -140,7 +141,7 @@ jobs:
           printf 'tree=%s\n' "$tree_a" >> "$GITHUB_OUTPUT"
           printf 'evidence=%s\n' "$evidence" >> "$GITHUB_OUTPUT"
 
-      - name: Run green conformance and five red mutations
+      - name: Run green conformance and six red mutations
         run: |
           set -euo pipefail
           tree="${{ steps.build.outputs.tree }}"
@@ -154,7 +155,7 @@ jobs:
 
           grep -F '== PASS' "$evidence/conformance.log"
           grep -F '== self-test PASS' "$evidence/red-tests.log"
-          test "$(grep -c 'red as required' "$evidence/red-tests.log")" -eq 5
+          test "$(grep -c 'red as required' "$evidence/red-tests.log")" -eq 6
 
       - name: Prove source checkout stayed immutable
         run: |
