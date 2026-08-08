@@ -288,3 +288,7 @@ class RepositoryAcquisitionMixin:
             record["failure_message"] = redact_text(str(error), self.token)
             self.repo_records.append(record)
             self._failure(full_name, "repository-scan", error)
+
+
+# Preserve the public builder contract while keeping the narrower implementation name.
+InventoryAcquisitionMixin = RepositoryAcquisitionMixin
