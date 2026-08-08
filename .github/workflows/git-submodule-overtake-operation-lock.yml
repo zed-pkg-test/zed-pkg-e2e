@@ -5,6 +5,7 @@ on:
     paths:
       - scripts/git_submodule_overtake_lock.py
       - scripts/git_submodule_overtake_nested_lock.py
+      - scripts/git_submodule_install_operation_lock.py
       - scripts/project_recovery_operation_lock.py
       - docs/git-submodule-overtake-lock.md
       - .github/workflows/git-submodule-overtake-operation-lock.yml
@@ -13,6 +14,7 @@ on:
     paths:
       - scripts/git_submodule_overtake_lock.py
       - scripts/git_submodule_overtake_nested_lock.py
+      - scripts/git_submodule_install_operation_lock.py
       - scripts/project_recovery_operation_lock.py
       - docs/git-submodule-overtake-lock.md
       - .github/workflows/git-submodule-overtake-operation-lock.yml
@@ -21,7 +23,7 @@ on:
       zed_cli_ref:
         description: Immutable zed-cli commit to certify
         required: false
-        default: 1c74efd0bc137ef9905428a85aabe1fb1a0d2d05
+        default: 2b5897f6a5b5cf33fee7a5934a60d7aa3e70e0a0
 
 permissions:
   contents: read
@@ -38,7 +40,7 @@ env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: "1"
   PYTHONDONTWRITEBYTECODE: "1"
-  ZED_CLI_REF: ${{ github.event.inputs.zed_cli_ref || '1c74efd0bc137ef9905428a85aabe1fb1a0d2d05' }}
+  ZED_CLI_REF: ${{ github.event.inputs.zed_cli_ref || '2b5897f6a5b5cf33fee7a5934a60d7aa3e70e0a0' }}
   ZED_INTERFACES_REF: d1bf8ef7c88a75292cbe8d697bfd269f30d62e2b
   ZED_LOCK_REF: a0dc78d385bc3ab553d3027b427f5f1428239c9c
 
@@ -46,7 +48,7 @@ jobs:
   contract:
     name: Process contention / ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 55
+    timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
@@ -101,6 +103,7 @@ jobs:
             python3 -m py_compile \
               harness/scripts/git_submodule_overtake_lock.py \
               harness/scripts/git_submodule_overtake_nested_lock.py \
+              harness/scripts/git_submodule_install_operation_lock.py \
               harness/scripts/project_recovery_operation_lock.py
           git -C harness diff --check
           git -C zed-cli diff --check
@@ -170,6 +173,28 @@ jobs:
           assert evidence["public_registry_mutation"] is False
           PY
 
+      - name: Certify cooperative install spans Git synchronization
+        env:
+          WORK_ROOT: ${{ runner.temp }}/zed-submodule-install-lock
+        run: |
+          set -euo pipefail
+          test ! -e "$WORK_ROOT"
+          python3 harness/scripts/git_submodule_install_operation_lock.py \
+            --zed "$RUNNER_TEMP/zed-bin/zed" \
+            --work-root "$WORK_ROOT"
+          python3 - "$WORK_ROOT/evidence/install-evidence.json" <<'PY'
+          import json
+          import pathlib
+          import sys
+
+          evidence = json.loads(pathlib.Path(sys.argv[1]).read_text(encoding="utf-8"))
+          assert evidence["schema"] == "zed.git-submodule-install-operation-lock/v1"
+          assert len(evidence["checks"]) == 3
+          assert evidence["observed_block_seconds"] >= 0.7
+          assert evidence["network_credentials"] is False
+          assert evidence["public_registry_mutation"] is False
+          PY
+
       - name: Certify pending recovery shares checkout ownership
         env:
           WORK_ROOT: ${{ runner.temp }}/zed-project-recovery-lock
@@ -214,6 +239,7 @@ jobs:
           path: |
             ${{ runner.temp }}/zed-overtake-operation-lock/evidence
             ${{ runner.temp }}/zed-overtake-nested-lock/evidence
+            ${{ runner.temp }}/zed-submodule-install-lock/evidence
             ${{ runner.temp }}/zed-project-recovery-lock/evidence
           if-no-files-found: warn
           retention-days: 14
