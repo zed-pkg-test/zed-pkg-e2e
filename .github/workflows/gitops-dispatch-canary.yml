@@ -119,6 +119,7 @@ jobs:
             --candidate "$ZED_CLI_COMMIT" \
             --work "$RUNNER_TEMP/gitops-dispatch-canary" \
             --evidence "artifacts/gitops-dispatch-${RUNNER_OS}-${RUNNER_ARCH}.json"
+          rm -rf scripts/__pycache__
 
       - name: Require clean harness and product checkouts
         run: |
