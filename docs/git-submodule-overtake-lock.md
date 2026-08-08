@@ -60,7 +60,7 @@ at `git submodule sync` after the CLI must already own the checkout. After the
 test releases it, the shim `exec`s the exact host Git binary with the original
 arguments.
 
-## Eighteen certified process checks
+## Nineteen certified process checks
 
 ### Takeover normal completion
 
@@ -84,32 +84,35 @@ arguments.
 8. It never creates a nested `packages/client/src/.zed/operation.lock` identity.
 9. A root-level frozen install blocks and succeeds behind nested takeover.
 
-### Cooperative `install --git-submodules`
+### Nested cooperative `install --git-submodules`
 
-10. Cooperative install owns the superproject operation lock before
-    `git submodule sync` begins.
-11. A different-home frozen install remains blocked across synchronization,
+10. Cooperative install launched from `packages/client/src` owns the
+    superproject operation lock before `git submodule sync` begins.
+11. The nested invocation creates no second operation lock, manifest, lockfile,
+    or staging identity below the authority root.
+12. A different-home root frozen install remains blocked across synchronization,
     recursive checkout, and the full install/finalizer boundary.
-12. The frozen waiter succeeds only after the cooperative install publishes a
-    complete lockfile and the pinned child checkout.
+13. The frozen waiter succeeds only after the cooperative install publishes a
+    complete root lockfile and the pinned child checkout.
 
 The frozen waiter starts before `.zpkg.lock` exists. Against the previous CLI
 path it would race and fail because sync ran before the installer facade acquired
-ownership.
+ownership. The nested holder also proves that superproject discovery governs
+both Git synchronization and installation ownership.
 
 ### Transaction recovery versus another owner
 
-13. Different-home eager recovery remains blocked behind active checkout
+14. Different-home eager recovery remains blocked behind active checkout
     ownership.
-14. Pending destination and backup bytes stay exact while blocked.
-15. After release, recovery restores exact bytes and removes staging.
-16. The recovered process completes frozen installation against adopted state.
+15. Pending destination and backup bytes stay exact while blocked.
+16. After release, recovery restores exact bytes and removes staging.
+17. The recovered process completes frozen installation against adopted state.
 
 ### Recovery ordering inside modular takeover
 
-17. A pending transaction is recovered before takeover reaches
+18. A pending transaction is recovered before takeover reaches
     `git submodule sync`.
-18. Exact backup bytes are restored before `.gitmodules` verification,
+19. Exact backup bytes are restored before `.gitmodules` verification,
     synchronization, or adoption begins.
 
 ## Matrix and promotion boundary
@@ -131,7 +134,7 @@ The workflow runs on Ubuntu 24.04 and macOS 15. It:
   reset.
 
 Evidence contains binary identity, process IDs, measured blocking intervals, CLI
-version, and all eighteen named checks. No account, public registry, Cloudflare
+version, and all nineteen named checks. No account, public registry, Cloudflare
 resource, credential, Docker daemon, or persistent namespace participates.
 
 Merge this test-org PR only after both platform jobs pass on the exact head.
