@@ -15,8 +15,10 @@ Layout produced under --out:
 
 Determinism: tar entries sorted, mtime/uid/gid zeroed via SOURCE_DATE_EPOCH
 (default 0), zstd -19 with a pinned-version note recorded in the checkpoint.
-Same inputs => byte-identical tree (verified by check_static_registry.py
---rebuild-compare).
+Same inputs => byte-identical tree.
+
+Safety: output must be a new or empty real directory. Fixture symlinks and
+special files are rejected rather than followed into the package archive.
 """
 import argparse
 import hashlib
@@ -36,14 +38,36 @@ def sha256_bytes(b: bytes) -> str:
     return hashlib.sha256(b).hexdigest()
 
 
+def prepare_output(out: Path) -> None:
+    if out.is_symlink():
+        raise ValueError(f"output path is a symbolic link: {out}")
+    if out.exists():
+        if not out.is_dir():
+            raise ValueError(f"output path is not a directory: {out}")
+        if any(out.iterdir()):
+            raise ValueError(
+                f"output directory must be empty to prevent stale registry objects: {out}"
+            )
+        return
+    out.mkdir(parents=True, exist_ok=False)
+
+
 def deterministic_tar_zst(pkg_dir: Path) -> bytes:
     buf = io.BytesIO()
+    paths = sorted(pkg_dir.rglob("*"), key=lambda p: p.relative_to(pkg_dir).as_posix())
     with tarfile.open(fileobj=buf, mode="w", format=tarfile.USTAR_FORMAT) as tf:
-        for p in sorted(pkg_dir.rglob("*")):
-            if not p.is_file():
+        for p in paths:
+            rel = p.relative_to(pkg_dir)
+            if p.is_symlink():
+                raise ValueError(
+                    f"fixture contains a symbolic link, which static export will not follow: {rel}"
+                )
+            if p.is_dir():
                 continue
-            ti = tarfile.TarInfo(name=str(p.relative_to(pkg_dir)))
+            if not p.is_file():
+                raise ValueError(f"fixture contains an unsupported special file: {rel}")
             data = p.read_bytes()
+            ti = tarfile.TarInfo(name=rel.as_posix())
             ti.size = len(data)
             ti.mtime = EPOCH
             ti.uid = ti.gid = 0
@@ -71,8 +95,17 @@ def main() -> int:
     ap.add_argument("--seq", type=int, default=1, help="checkpoint sequence number")
     args = ap.parse_args()
 
+    if not args.fixtures.is_dir() or args.fixtures.is_symlink():
+        print(f"ERROR: fixtures path must be a real directory: {args.fixtures}", file=sys.stderr)
+        return 2
+
     out = args.out
-    out.mkdir(parents=True, exist_ok=True)
+    try:
+        prepare_output(out)
+    except (OSError, ValueError) as error:
+        print(f"ERROR: {error}", file=sys.stderr)
+        return 2
+
     written: list[tuple[str, bytes]] = []
 
     def emit(rel: str, data: bytes) -> None:
@@ -91,8 +124,12 @@ def main() -> int:
         if org != org.lower():
             print(f"ERROR: org segment must be lowercase canonical form: {org}", file=sys.stderr)
             return 2
-        meta = json.loads(meta_path.read_text())
-        blob = deterministic_tar_zst(version_dir)
+        try:
+            meta = json.loads(meta_path.read_text())
+            blob = deterministic_tar_zst(version_dir)
+        except (OSError, ValueError, json.JSONDecodeError, subprocess.CalledProcessError) as error:
+            print(f"ERROR: cannot export {org}/{name}@{version}: {error}", file=sys.stderr)
+            return 2
         emit(f"pkgs/{org}/{name}/{version}.tar.zst", blob)
         packages.setdefault((org, name), []).append(
             {
@@ -104,20 +141,34 @@ def main() -> int:
             }
         )
 
+    if not packages:
+        print("ERROR: fixture set contains no package versions", file=sys.stderr)
+        return 2
+
     for (org, name), lines in sorted(packages.items()):
         lines.sort(key=lambda l: semver_key(l["version"]))
-        ndjson = "".join(json.dumps(l, sort_keys=True, separators=(",", ":")) + "\n" for l in lines)
+        ndjson = "".join(
+            json.dumps(line, sort_keys=True, separators=(",", ":")) + "\n"
+            for line in lines
+        )
         emit(f"index/{org}/{name}", ndjson.encode())
 
     discovery = {
         "schema_version": SCHEMA_VERSION,
         "registry_kind": "static-export",
-        "endpoints": {"index": "/index", "pkgs": "/pkgs", "checkpoint": "/checkpoint.json"},
+        "endpoints": {
+            "index": "/index",
+            "pkgs": "/pkgs",
+            "checkpoint": "/checkpoint.json",
+        },
         "auth_modes": ["none"],
         "publish_supported": False,
         "notes": "protocol sketch v0 fixture; signed checkpoint + registry_id land with the DEN-2854 RFC",
     }
-    emit(".well-known/zpkg-registry.json", (json.dumps(discovery, indent=2, sort_keys=True) + "\n").encode())
+    emit(
+        ".well-known/zpkg-registry.json",
+        (json.dumps(discovery, indent=2, sort_keys=True) + "\n").encode(),
+    )
 
     files_entry = [
         {"path": rel, "sha256": sha256_bytes(data), "size": len(data)}
@@ -136,7 +187,10 @@ def main() -> int:
     (out / "checkpoint.json").write_bytes(
         (json.dumps(checkpoint, indent=2, sort_keys=True) + "\n").encode()
     )
-    print(f"built {len(files_entry)} objects + checkpoint (tree_sha256={checkpoint['tree_sha256'][:12]}…)")
+    print(
+        f"built {len(files_entry)} objects + checkpoint "
+        f"(tree_sha256={checkpoint['tree_sha256'][:12]}…)"
+    )
     return 0
 
 
