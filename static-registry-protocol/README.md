@@ -46,6 +46,26 @@ otherwise — the wrong-org-segment bug class dies at build time).
   semantics: `pkgs/**` → `public, max-age=31536000, immutable`;
   index/discovery/checkpoint → `public, max-age=60, stale-while-revalidate=600`.
 
+## Permanent credential-free CI
+
+`.github/workflows/static-registry-protocol.yml` runs the local contract on
+Ubuntu 24.04 and macOS 15 with read-only repository permissions and immutable
+Action pins. Each job:
+
+1. verifies the pinned Python and runner-provided `zstd` boundary;
+2. builds the registry twice in unrelated temporary directories with
+   `SOURCE_DATE_EPOCH=0`;
+3. compares the complete sorted path/size/SHA-256 inventory byte-for-byte;
+4. runs the green conformance check;
+5. runs all five red mutations and requires every one to fail;
+6. proves the source checkout remained unchanged; and
+7. uploads bounded commit-addressed local evidence for seven days.
+
+The permanent workflow reads no GitHub, Cloudflare, R2, registry, signing, or
+shared-auth secret. Live object-store synchronization remains a separate manual
+and environment-gated operation; a pull request can certify the protocol
+fixture without network access or infrastructure authority.
+
 ## Live fixture (2026-08-08)
 
 - Bucket: `zed-pkg-static-registry-e2e` (dedicated; do **not** reuse
