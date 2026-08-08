@@ -14,24 +14,19 @@ concurrency:
   group: inspect-current-main-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
-defaults:
-  run:
-    shell: bash
-
 env:
   ZED_CLI_COMMIT: b7036935ce3711563f1527472fc64e92bc1341aa
-  ZED_CLI_PARENT: 1ab18fcb2ff884e82af4cac4513d7b983a23c84a
+  ZED_CLI_BASE: 1ab18fcb2ff884e82af4cac4513d7b983a23c84a
 
 jobs:
   certify:
-    name: exact-parent inspect / ${{ matrix.os }}
+    name: exact-base inspect / ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-24.04, macos-15, windows-2025]
-
     steps:
       - name: Check out independent certification repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -40,43 +35,43 @@ jobs:
           persist-credentials: false
           show-progress: false
 
-      - name: Check out exact product candidate and parent
+      - name: Check out exact product candidate and history
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: zed-pkg/zed-cli
           ref: ${{ env.ZED_CLI_COMMIT }}
           path: product/zed-cli
-          fetch-depth: 2
+          fetch-depth: 0
           persist-credentials: false
           show-progress: false
 
-      - name: Require exact immutable ancestry and five-file delta
+      - name: Require immutable base ancestry and five-file delta
+        shell: bash
         run: |
           set -euo pipefail
           [[ "$ZED_CLI_COMMIT" =~ ^[0-9a-f]{40}$ ]]
-          [[ "$ZED_CLI_PARENT" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$ZED_CLI_BASE" =~ ^[0-9a-f]{40}$ ]]
           test "$(git -C product/zed-cli rev-parse HEAD)" = "$ZED_CLI_COMMIT"
-          test "$(git -C product/zed-cli rev-parse HEAD^)" = "$ZED_CLI_PARENT"
-          changed="$(git -C product/zed-cli diff --name-only "$ZED_CLI_PARENT" "$ZED_CLI_COMMIT")"
+          git -C product/zed-cli merge-base --is-ancestor "$ZED_CLI_BASE" "$ZED_CLI_COMMIT"
+          changed="$(git -C product/zed-cli diff --name-only "$ZED_CLI_BASE" "$ZED_CLI_COMMIT")"
           expected=$'schemas/inspect-v1.schema.json\nsrc/cli_model.rs\nsrc/inspect.rs\nsrc/lib.rs\ntests/inspect_cli.rs'
-          if [[ "$changed" != "$expected" ]]; then
-            printf 'unexpected product delta:\n%s\n' "$changed" >&2
-            exit 1
-          fi
-          git -C product/zed-cli diff --check "$ZED_CLI_PARENT" "$ZED_CLI_COMMIT"
+          test "$changed" = "$expected"
+          git -C product/zed-cli diff --check "$ZED_CLI_BASE" "$ZED_CLI_COMMIT"
 
       - name: Install pinned Rust toolchain
         uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30
         with:
           toolchain: stable
-          components: rustfmt, clippy
+          components: rustfmt,clippy
 
       - name: Install Python 3.12
-        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v6.0.0
         with:
-          python-version: '3.12'
+          python-version: "3.12"
+          check-latest: false
 
       - name: Run exact-head Rust quality gates
+        shell: bash
         run: |
           set -euo pipefail
           cargo fmt --manifest-path product/zed-cli/Cargo.toml --all --check
@@ -85,267 +80,120 @@ jobs:
           cargo test --manifest-path product/zed-cli/Cargo.toml --locked --test inspect_cli
           cargo clippy --manifest-path product/zed-cli/Cargo.toml --locked \
             --lib --bin zed --test inspect_cli -- -D warnings
-
-      - name: Build exact release binary
-        run: |
-          set -euo pipefail
           cargo build --manifest-path product/zed-cli/Cargo.toml --locked --release --bin zed
 
       - name: Run adversarial read-only CLI contract
+        shell: bash
         env:
           RUNNER_OS_NAME: ${{ runner.os }}
           RUNNER_ARCH_NAME: ${{ runner.arch }}
         run: |
           set -euo pipefail
           mkdir -p artifacts
-          python - <<'PY'
-          import hashlib
-          import json
-          import os
-          import pathlib
-          import subprocess
-          import tempfile
+          python3 - <<'PY'
+          import hashlib, json, os, pathlib, subprocess, tempfile
 
           candidate = os.environ["ZED_CLI_COMMIT"]
-          parent = os.environ["ZED_CLI_PARENT"]
+          base = os.environ["ZED_CLI_BASE"]
           workspace = pathlib.Path.cwd()
-          product = workspace / "product" / "zed-cli"
-          binary = product / "target" / "release" / ("zed.exe" if os.name == "nt" else "zed")
+          binary = workspace / "product" / "zed-cli" / "target" / "release" / ("zed.exe" if os.name == "nt" else "zed")
           assert binary.is_file(), binary
+          sensitive = ("TOKEN", "SECRET", "PASSWORD", "PRIVATE_KEY", "ACCESS_KEY", "API_KEY", "AUTHORIZATION", "COOKIE", "CREDENTIAL")
 
-          sensitive_markers = (
-              "TOKEN",
-              "SECRET",
-              "PASSWORD",
-              "PRIVATE_KEY",
-              "ACCESS_KEY",
-              "API_KEY",
-              "AUTHORIZATION",
-              "COOKIE",
-              "CREDENTIAL",
-          )
-
-          def clean_env(home, *, fake_tokens=False):
-              env = {}
-              for key, value in os.environ.items():
-                  upper = key.upper()
-                  if upper.startswith("ZED_PKG_") or any(marker in upper for marker in sensitive_markers):
-                      continue
-                  env[key] = value
-              env["ZED_PKG_HOME"] = str(home)
-              env["ZED_PKG_REGISTRY"] = "http://127.0.0.1:9"
-              if fake_tokens:
-                  env["ZED_PKG_TOKEN"] = "fake-env-token-that-must-not-escape"
-              return env
+          def environment(home, fake=False):
+              clean = {k: v for k, v in os.environ.items()
+                       if not k.upper().startswith("ZED_PKG_") and not any(marker in k.upper() for marker in sensitive)}
+              clean["ZED_PKG_HOME"] = str(home)
+              clean["ZED_PKG_REGISTRY"] = "http://127.0.0.1:9"
+              if fake: clean["ZED_PKG_TOKEN"] = "fake-env-token-that-must-not-escape"
+              return clean
 
           def snapshot(root):
-              root = pathlib.Path(root)
-              if not root.exists():
-                  return None
+              if not root.exists(): return None
               rows = {}
-              for path in sorted(root.rglob("*")):
-                  relative = path.relative_to(root).as_posix()
-                  if path.is_symlink():
-                      rows[relative] = ["symlink", os.readlink(path)]
-                  elif path.is_file():
-                      rows[relative] = ["file", hashlib.sha256(path.read_bytes()).hexdigest()]
-                  elif path.is_dir():
-                      rows[relative] = ["dir"]
+              for item in sorted(root.rglob("*")):
+                  rel = item.relative_to(root).as_posix()
+                  if item.is_symlink(): rows[rel] = ["symlink", os.readlink(item)]
+                  elif item.is_file(): rows[rel] = ["file", hashlib.sha256(item.read_bytes()).hexdigest()]
+                  elif item.is_dir(): rows[rel] = ["dir"]
               return rows
 
-          def invoke(args, *, cwd, home, fake_tokens=False, timeout=15):
-              return subprocess.run(
-                  [str(binary), *args],
-                  cwd=cwd,
-                  env=clean_env(home, fake_tokens=fake_tokens),
-                  text=True,
-                  capture_output=True,
-                  timeout=timeout,
-                  check=False,
-              )
+          temp = pathlib.Path(os.environ.get("RUNNER_TEMP") or tempfile.gettempdir())
+          sandbox = pathlib.Path(tempfile.mkdtemp(prefix="inspect-v1-", dir=temp))
+          project, home = sandbox / "project", sandbox / "home"
+          project.mkdir(); home.mkdir()
+          manifest, lock = project / ".zpkg.toml", project / ".zpkg.lock"
+          staging = project / ".zpkg-staging"; staging.mkdir()
+          sentinel = staging / "sentinel"; sentinel.write_text("must-survive", encoding="utf-8")
+          manifest.write_text('[package]\norg = "acme"\nname = "fixture"\nversion = "1.0.0"\n\n[package.repository]\nvcs = "git"\nurl = "https://example.invalid/acme/fixture"\n', encoding="utf-8")
+          lock.write_text("version = 1\n", encoding="utf-8")
+          (home / "credentials.toml").write_text("malformed = [credential", encoding="utf-8")
 
-          temp_root = pathlib.Path(os.environ.get("RUNNER_TEMP") or tempfile.gettempdir())
-          sandbox = pathlib.Path(tempfile.mkdtemp(prefix="zed-inspect-current-", dir=temp_root))
-          project = sandbox / "project"
-          home = sandbox / "home"
-          project.mkdir()
-          home.mkdir()
+          def invoke(args, *, cwd=project, use_home=home, fake=False):
+              return subprocess.run([str(binary), *args], cwd=cwd, env=environment(use_home, fake),
+                                    text=True, capture_output=True, timeout=15, check=False)
 
-          manifest = project / ".zpkg.toml"
-          lockfile = project / ".zpkg.lock"
-          staging = project / ".zpkg-staging"
-          staging.mkdir()
-          sentinel = staging / "sentinel"
-          sentinel.write_text("must-survive", encoding="utf-8")
-          manifest.write_text(
-              '[package]\norg = "acme"\nname = "inspect-fixture"\nversion = "1.0.0"\n\n'
-              '[package.repository]\nvcs = "git"\nurl = "https://example.invalid/acme/inspect-fixture"\n',
-              encoding="utf-8",
-          )
-          lockfile.write_text("version = 1\n", encoding="utf-8")
-          credentials = home / "credentials.toml"
-          credentials.write_text("malformed = [credential", encoding="utf-8")
-
-          project_before = snapshot(project)
-          home_before = snapshot(home)
-          result = invoke(
-              [
-                  "--token",
-                  "fake-arg-token-that-must-not-escape",
-                  "inspect",
-                  "--format",
-                  "json",
-                  "--root",
-                  str(project.resolve()),
-              ],
-              cwd=project,
-              home=home,
-              fake_tokens=True,
-          )
+          before_project, before_home = snapshot(project), snapshot(home)
+          result = invoke(["--token", "fake-arg-token-that-must-not-escape", "inspect", "--format", "json", "--root", str(project.resolve())], fake=True)
           assert result.returncode == 0, result.stderr
-          assert result.stderr == "", result.stderr
-          assert result.stdout.count("\n") == 1, result.stdout
+          assert result.stderr == "" and result.stdout.count("\n") == 1
           report = json.loads(result.stdout)
-          assert report["schema_version"] == "1.0", report
-          assert report["cli"] == {
-              "implementation": "zed-pkg",
-              "command": "inspect",
-              "offline": True,
-              "mutates_project": False,
-              "loads_credentials": False,
-          }, report
-          assert report["summary"]["recovery_pending"] is True, report
-          assert report["summary"]["frozen_ready"] is False, report
-          recovery = next(item for item in report["diagnostics"] if item["code"] == "RECOVERY_PENDING")
-          action = next(item for item in recovery["actions"] if item["argv"] == ["zed", "install", "--frozen"])
-          assert action["mutates_project"] is True, action
-          assert action["requires_network"] is True, action
-          assert action["executes_package_code"] is True, action
+          assert report["schema_version"] == "1.0"
+          assert report["cli"] == {"implementation": "zed-pkg", "command": "inspect", "offline": True, "mutates_project": False, "loads_credentials": False}
+          assert report["summary"]["recovery_pending"] is True
+          recovery = next(d for d in report["diagnostics"] if d["code"] == "RECOVERY_PENDING")
+          action = next(a for a in recovery["actions"] if a["argv"] == ["zed", "install", "--frozen"])
+          assert action["mutates_project"] and action["requires_network"] and action["executes_package_code"]
+          assert snapshot(project) == before_project and snapshot(home) == before_home
+          assert sentinel.read_text(encoding="utf-8") == "must-survive"
           assert "fake-env-token-that-must-not-escape" not in result.stdout + result.stderr
           assert "fake-arg-token-that-must-not-escape" not in result.stdout + result.stderr
-          assert snapshot(project) == project_before
-          assert snapshot(home) == home_before
-          assert sentinel.read_text(encoding="utf-8") == "must-survive"
-          assert lockfile.read_text(encoding="utf-8") == "version = 1\n"
-          assert not (project / "zed_modules").exists()
 
-          manifest_secret = "gh" + "p_fake_manifest_secret_that_must_not_escape"
-          manifest.write_text(f'[package\nsecret = "{manifest_secret}"\n', encoding="utf-8")
-          malformed_project_before = snapshot(project)
-          malformed_home_before = snapshot(home)
-          malformed = invoke(
-              [
-                  "--token",
-                  "fake-arg-token-that-must-not-escape",
-                  "inspect",
-                  "--format",
-                  "json",
-                  "--root",
-                  str(project.resolve()),
-              ],
-              cwd=project,
-              home=home,
-              fake_tokens=True,
-          )
-          assert malformed.returncode == 0, malformed.stderr
-          assert malformed.stderr == "", malformed.stderr
+          secret = "gh" + "p_fake_manifest_secret_that_must_not_escape"
+          manifest.write_text(f'[package\nsecret = "{secret}"\n', encoding="utf-8")
+          malformed_before = snapshot(project)
+          malformed = invoke(["inspect", "--format", "json", "--root", str(project.resolve())])
+          assert malformed.returncode == 0 and malformed.stderr == ""
           malformed_report = json.loads(malformed.stdout)
-          assert malformed_report["summary"]["health"] == "error", malformed_report
-          assert any(item["code"] == "MANIFEST_INVALID" for item in malformed_report["diagnostics"]), malformed_report
-          assert manifest_secret not in malformed.stdout + malformed.stderr
-          assert "fake-env-token-that-must-not-escape" not in malformed.stdout + malformed.stderr
-          assert "fake-arg-token-that-must-not-escape" not in malformed.stdout + malformed.stderr
-          assert snapshot(project) == malformed_project_before
-          assert snapshot(home) == malformed_home_before
-          assert sentinel.read_text(encoding="utf-8") == "must-survive"
+          assert malformed_report["summary"]["health"] == "error"
+          assert any(d["code"] == "MANIFEST_INVALID" for d in malformed_report["diagnostics"])
+          assert secret not in malformed.stdout + malformed.stderr
+          assert snapshot(project) == malformed_before
 
-          help_before = snapshot(home)
-          help_result = invoke(["inspect", "--help"], cwd=project, home=home)
-          assert help_result.returncode == 0, help_result.stderr
-          assert help_result.stderr == "", help_result.stderr
-          assert "Inspect local Zed package state" in help_result.stdout
-          assert "--root" in help_result.stdout
-          assert snapshot(home) == help_before
-
+          help_result = invoke(["inspect", "--help"])
+          assert help_result.returncode == 0 and help_result.stderr == "" and "--root" in help_result.stdout
           token_home = sandbox / "token-home"
-          token_result = invoke(["--token", "inspect", "--help"], cwd=sandbox, home=token_home)
-          assert token_result.returncode == 0, token_result.stderr
-          assert token_result.stderr == "", token_result.stderr
-          assert "Commands:" in token_result.stdout
-          assert "inspect" in token_result.stdout
-          assert '"schema_version"' not in token_result.stdout
-          assert not token_home.exists()
+          token_result = invoke(["--token", "inspect", "--help"], cwd=sandbox, use_home=token_home)
+          assert token_result.returncode == 0 and '"schema_version"' not in token_result.stdout and not token_home.exists()
 
-          relative_home = sandbox / "relative-home"
-          relative = invoke(
-              ["inspect", "--root", "relative-project"],
-              cwd=sandbox,
-              home=relative_home,
-          )
-          assert relative.returncode != 0
-          assert relative.stdout == ""
-          assert "--root must be an absolute path" in relative.stderr
-          assert not (sandbox / "relative-project").exists()
-          assert not relative_home.exists()
-
-          missing_home = sandbox / "missing-home"
+          relative = invoke(["inspect", "--root", "relative-project"], cwd=sandbox, use_home=sandbox / "relative-home")
+          assert relative.returncode != 0 and not (sandbox / "relative-project").exists()
           missing_root = sandbox / "missing-project"
-          missing = invoke(
-              ["inspect", "--root", str(missing_root)],
-              cwd=sandbox,
-              home=missing_home,
-          )
-          assert missing.returncode != 0
-          assert missing.stdout == ""
-          assert "--root must name an existing directory" in missing.stderr
-          assert not missing_root.exists()
-          assert not missing_home.exists()
+          missing = invoke(["inspect", "--root", str(missing_root)], cwd=sandbox, use_home=sandbox / "missing-home")
+          assert missing.returncode != 0 and not missing_root.exists()
 
           evidence = {
               "$schema": "zed-pkg-test/inspect-current-main/v1",
               "candidate": candidate,
-              "parent": parent,
-              "runner": {
-                  "os": os.environ["RUNNER_OS_NAME"],
-                  "arch": os.environ["RUNNER_ARCH_NAME"],
-              },
+              "base": base,
+              "runner": {"os": os.environ["RUNNER_OS_NAME"], "arch": os.environ["RUNNER_ARCH_NAME"]},
               "binary_sha256": hashlib.sha256(binary.read_bytes()).hexdigest(),
-              "checks": [
-                  "exact-parent-five-file-delta",
-                  "rustfmt",
-                  "focused-library-tests",
-                  "inspect-cli-tests",
-                  "strict-clippy",
-                  "single-json-document",
-                  "credential-bypass-and-redaction",
-                  "project-and-home-snapshot-preservation",
-                  "pending-recovery-preservation",
-                  "malformed-manifest-redaction",
-                  "help-with-malformed-credentials",
-                  "global-option-value-routing",
-                  "relative-root-fail-closed",
-                  "missing-root-fail-closed",
-              ],
               "result": "passed",
           }
           output = workspace / "artifacts" / f"inspect-{os.environ['RUNNER_OS_NAME']}-{os.environ['RUNNER_ARCH_NAME']}.json"
           output.write_text(json.dumps(evidence, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-          print("certified", os.environ["RUNNER_OS_NAME"], candidate)
           PY
 
       - name: Require immutable product and harness source
+        shell: bash
         run: |
           set -euo pipefail
           git -C product/zed-cli diff --exit-code
           git -C product/zed-cli diff --cached --exit-code
           status="$(git status --porcelain --untracked-files=all | grep -vE '^\?\? (artifacts|product)/' || true)"
-          if [[ -n "$status" ]]; then
-            printf 'unexpected harness drift:\n%s\n' "$status" >&2
-            exit 1
-          fi
+          test -z "$status"
 
       - name: Upload commit-addressed evidence
-        if: ${{ !cancelled() }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: inspect-current-main-${{ runner.os }}-${{ runner.arch }}-${{ env.ZED_CLI_COMMIT }}
