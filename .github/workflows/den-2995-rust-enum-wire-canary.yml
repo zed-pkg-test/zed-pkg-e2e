@@ -93,17 +93,21 @@ jobs:
           expect_fixed = os.environ['EXPECT_FIXED'] == 'true'
 
           has_lowercase_rule = '#[serde(rename_all = "lowercase")]' in block
-          emits_every_exact_label = (
-              'for (const value of column.enumValues)' in block
-              and 'lines.push(`    #[serde(rename = ${JSON.stringify(value)})]`);' in block
+          has_exact_rename_line = (
+              'lines.push(`    #[serde(rename = ${JSON.stringify(value)})]`);' in block
+          )
+          rename_is_conditional = (
+              'if (rustEnumVariant(value) !== pascal(value)) {' in block
           )
 
           if expect_fixed:
               assert not has_lowercase_rule, 'enum-level lowercase rule still present'
-              assert emits_every_exact_label, 'generator does not emit exact rename for every value'
+              assert has_exact_rename_line, 'generator does not emit exact rename attributes'
+              assert not rename_is_conditional, 'exact rename is still limited to leading-digit labels'
           else:
-              assert has_lowercase_rule, 'pre-fix pin no longer reproduces the generator defect'
-              assert not emits_every_exact_label, 'pre-fix pin unexpectedly emits exact names'
+              assert has_lowercase_rule, 'pre-fix pin no longer reproduces the lowercase rule'
+              assert has_exact_rename_line, 'pre-fix generator shape changed unexpectedly'
+              assert rename_is_conditional, 'pre-fix pin unexpectedly emits exact names for every value'
           PY
 
       - name: Add an external Rust consumer contract
@@ -162,7 +166,7 @@ jobs:
               echo '::error::The pre-fix source pin unexpectedly passed; update the evidence pin.'
               exit 1
             }
-            grep -E 'left:.*sshed25519|right:.*ssh-ed25519|ssh-ed25519' /tmp/den-2995-rust.log >/dev/null
+            grep -E 'sshed25519|ssh-ed25519' /tmp/den-2995-rust.log >/dev/null
             echo 'observation=defect-reproduced' >> "$GITHUB_OUTPUT"
           fi
 
