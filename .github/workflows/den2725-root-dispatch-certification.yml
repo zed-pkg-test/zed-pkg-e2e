@@ -92,7 +92,11 @@ jobs:
               ).splitlines()
               if line.strip()
           }
-          expected = {"src/external_subcommands.rs", "docs/gitops-validator.md"}
+          expected = {
+              "src/external_subcommands.rs",
+              "docs/gitops-validator.md",
+              "tests/external_gitops_dispatch.rs",
+          }
           if changed != expected:
               raise SystemExit(f"unexpected hardening delta: {sorted(changed)!r}")
           PY
@@ -120,6 +124,7 @@ jobs:
           ZED_EXE: ${{ matrix.exe }}
         run: |
           set -euo pipefail
+          unset ZED_PKG_TOKEN || true
           cat > "$RUNNER_TEMP/dispatch_probe.rs" <<'RS'
           use std::{env, fs};
 
@@ -178,6 +183,7 @@ jobs:
           for path in [
               Path("src/external_subcommands.rs"),
               Path("docs/gitops-validator.md"),
+              Path("tests/external_gitops_dispatch.rs"),
           ]:
               data = path.read_bytes()
               label = path.name.upper().replace(".", "_").replace("-", "_")
