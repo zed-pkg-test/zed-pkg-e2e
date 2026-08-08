@@ -85,14 +85,7 @@ fn root_help_alias_reaches_the_external_binary() {
         '''#[test]
 fn root_help_alias_keeps_help_before_literal_double_dash() {
     let output = Command::new(env!("CARGO_BIN_EXE_zed"))
-        .args([
-            "help",
-            "gitops",
-            "validate",
-            "--",
-            "--root",
-            "child-owned",
-        ])
+        .args(["help", "gitops", "validate", "--", "--root", "child-owned"])
         .output()
         .expect("run zed help gitops with literal delimiter");
     assert!(output.status.success(), "{}", text(&output));
