@@ -12,8 +12,8 @@ class InventorySemanticsTests(InventoryTestCase):
             ("mermaid", "inventory.mmd"),
         ):
             actual = inventory.render_inventory(result, output_format)
-            expected = (GOLDEN / filename).read_text(encoding="utf-8")
-            self.assertEqual(actual, expected, output_format)
+            expected = (GOLDEN / filename).read_bytes()
+            self.assertEqual(actual.encode("utf-8"), expected, output_format)
 
     def test_org_pagination_is_complete_deduplicated_and_archived_is_explicit(self) -> None:
         result, transport = self.build(repositories=[])
