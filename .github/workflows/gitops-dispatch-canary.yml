@@ -13,9 +13,14 @@ on:
   workflow_dispatch:
     inputs:
       candidate:
-        description: Full immutable zed-pkg/zed-cli commit to certify before the reviewed two-file patch
+        description: Full immutable zed-pkg/zed-cli root-dispatch commit
         required: false
         default: 1c94813c6b59c7621c1256d7c55246e7f06f44b7
+        type: string
+      main_commit:
+        description: Full immutable zed-pkg/zed-cli main commit to replay onto
+        required: false
+        default: 0246a3af901b65ca6724d936c7f3232c9f72fcd7
         type: string
 
 permissions:
@@ -31,12 +36,13 @@ defaults:
 
 env:
   ZED_CLI_COMMIT: ${{ inputs.candidate || '1c94813c6b59c7621c1256d7c55246e7f06f44b7' }}
+  ZED_MAIN_COMMIT: ${{ inputs.main_commit || '0246a3af901b65ca6724d936c7f3232c9f72fcd7' }}
 
 jobs:
   certify:
-    name: patched gitops dispatch / ${{ matrix.os }}
+    name: replayed gitops dispatch / ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 40
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
@@ -49,7 +55,7 @@ jobs:
           persist-credentials: false
           show-progress: false
 
-      - name: Check out exact product candidate
+      - name: Check out exact root-dispatch candidate
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: zed-pkg/zed-cli
@@ -59,22 +65,27 @@ jobs:
           persist-credentials: false
           show-progress: false
 
-      - name: Verify immutable product identity
+      - name: Verify immutable identities and replay current main
         run: |
           set -euo pipefail
           [[ "$ZED_CLI_COMMIT" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$ZED_MAIN_COMMIT" =~ ^[0-9a-f]{40}$ ]]
           test "$(git -C product/zed-cli rev-parse HEAD)" = "$ZED_CLI_COMMIT"
+          git -C product/zed-cli fetch --no-tags --depth=1 https://github.com/zed-pkg/zed-cli.git "$ZED_MAIN_COMMIT"
+          test "$(git -C product/zed-cli rev-parse FETCH_HEAD)" = "$ZED_MAIN_COMMIT"
+          git -C product/zed-cli -c user.name='zed-pkg-test' -c user.email='zed-pkg-test@users.noreply.github.com' merge --no-commit --no-ff "$ZED_MAIN_COMMIT"
+          test -z "$(git -C product/zed-cli diff --name-only --diff-filter=U)"
 
-      - name: Apply the reviewed two-file correction in the disposable checkout
+      - name: Apply the reviewed two-file correction in the replay tree
         run: |
           set -euo pipefail
           python -m py_compile scripts/apply_den2725_help_delimiter_fix.py
           rm -rf scripts/__pycache__
           python scripts/apply_den2725_help_delimiter_fix.py --root product/zed-cli
-          changed="$(git -C product/zed-cli diff --name-only)"
-          expected=$'src/external_subcommands.rs\ntests/external_gitops_dispatch.rs'
+          changed="$(git -C product/zed-cli diff "$ZED_MAIN_COMMIT" --name-only)"
+          expected=$'.zpkg.toml\ndocs/gitops-validator.md\nscripts/validate-zed-package-graph.sh\nsrc/completion.rs\nsrc/external_subcommands.rs\nsrc/lib.rs\nsrc/main.rs\ntests/external_gitops_dispatch.rs'
           test "$changed" = "$expected"
-          git -C product/zed-cli diff --check
+          git -C product/zed-cli diff "$ZED_MAIN_COMMIT" --check
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30
@@ -87,7 +98,7 @@ jobs:
         with:
           python-version: '3.12'
 
-      - name: Run patched-source quality gates
+      - name: Run replay-tree quality gates
         working-directory: product/zed-cli
         run: |
           set -euo pipefail
@@ -96,7 +107,7 @@ jobs:
           cargo test --locked --test external_gitops_dispatch
           cargo clippy --locked --lib --bin zed --bin zed-gitops --test external_gitops_dispatch -- -D warnings
 
-      - name: Build exact patched release binaries
+      - name: Build replay-tree release binaries
         working-directory: product/zed-cli
         run: |
           set -euo pipefail
@@ -143,20 +154,54 @@ jobs:
             --evidence "artifacts/gitops-dispatch-trailing-${RUNNER_OS}-${RUNNER_ARCH}.json"
           rm -rf scripts/__pycache__
 
-      - name: Export the verified corrected files
+      - name: Export the exact verified replay tree
         run: |
           set -euo pipefail
-          mkdir -p corrected/src corrected/tests
+          mkdir -p corrected/.github corrected/docs corrected/scripts corrected/src corrected/tests
+          cp product/zed-cli/.zpkg.toml corrected/
+          cp product/zed-cli/docs/gitops-validator.md corrected/docs/
+          cp product/zed-cli/scripts/validate-zed-package-graph.sh corrected/scripts/
+          cp product/zed-cli/src/completion.rs corrected/src/
           cp product/zed-cli/src/external_subcommands.rs corrected/src/
+          cp product/zed-cli/src/lib.rs corrected/src/
+          cp product/zed-cli/src/main.rs corrected/src/
           cp product/zed-cli/tests/external_gitops_dispatch.rs corrected/tests/
-          git -C product/zed-cli diff --binary > corrected/den-2725-help-delimiter-fix.patch
+          git -C product/zed-cli diff "$ZED_MAIN_COMMIT" --binary > corrected/den-2725-final-replay.patch
+          tree_sha="$(git -C product/zed-cli write-tree)"
+          python - <<'PY'
+          import json, os
+          from pathlib import Path
+          Path('corrected/replay-metadata.json').write_text(json.dumps({
+              '$schema': 'zed-pkg-test/den-2725-final-replay/v1',
+              'rootDispatchCommit': os.environ['ZED_CLI_COMMIT'],
+              'mainCommit': os.environ['ZED_MAIN_COMMIT'],
+              'treeSha': os.environ['TREE_SHA'],
+          }, indent=2, sort_keys=True) + '\n', encoding='utf-8')
+          PY
+        env:
+          TREE_SHA: ${{ env.TREE_SHA }}
+
+      - name: Record replay tree metadata and checksums
+        run: |
+          set -euo pipefail
+          tree_sha="$(git -C product/zed-cli write-tree)"
+          python - "$tree_sha" <<'PY'
+          import json, os, sys
+          from pathlib import Path
+          Path('corrected/replay-metadata.json').write_text(json.dumps({
+              '$schema': 'zed-pkg-test/den-2725-final-replay/v1',
+              'rootDispatchCommit': os.environ['ZED_CLI_COMMIT'],
+              'mainCommit': os.environ['ZED_MAIN_COMMIT'],
+              'treeSha': sys.argv[1],
+          }, indent=2, sort_keys=True) + '\n', encoding='utf-8')
+          PY
           if [[ "$RUNNER_OS" == "macOS" ]]; then
-            shasum -a 256 corrected/src/external_subcommands.rs corrected/tests/external_gitops_dispatch.rs corrected/den-2725-help-delimiter-fix.patch > corrected/SHA256SUMS
+            find corrected -type f ! -name SHA256SUMS -print0 | sort -z | xargs -0 shasum -a 256 > corrected/SHA256SUMS
           else
-            sha256sum corrected/src/external_subcommands.rs corrected/tests/external_gitops_dispatch.rs corrected/den-2725-help-delimiter-fix.patch > corrected/SHA256SUMS
+            find corrected -type f ! -name SHA256SUMS -print0 | sort -z | xargs -0 sha256sum > corrected/SHA256SUMS
           fi
 
-      - name: Require clean harness and exact product delta
+      - name: Require clean harness and exact replay delta
         run: |
           set -euo pipefail
           harness_status="$(git status --porcelain --untracked-files=all | grep -vE '^\?\? (artifacts|corrected|product)/' || true)"
@@ -164,18 +209,18 @@ jobs:
             printf 'unexpected harness drift:\n%s\n' "$harness_status" >&2
             exit 1
           fi
-          changed="$(git -C product/zed-cli diff --name-only)"
-          expected=$'src/external_subcommands.rs\ntests/external_gitops_dispatch.rs'
+          changed="$(git -C product/zed-cli diff "$ZED_MAIN_COMMIT" --name-only)"
+          expected=$'.zpkg.toml\ndocs/gitops-validator.md\nscripts/validate-zed-package-graph.sh\nsrc/completion.rs\nsrc/external_subcommands.rs\nsrc/lib.rs\nsrc/main.rs\ntests/external_gitops_dispatch.rs'
           if [[ "$changed" != "$expected" ]]; then
-            printf 'unexpected product delta:\n%s\n' "$changed" >&2
+            printf 'unexpected replay delta:\n%s\n' "$changed" >&2
             exit 1
           fi
 
-      - name: Upload patched exact-head evidence
+      - name: Upload final replay evidence
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: gitops-dispatch-patched-${{ runner.os }}-${{ runner.arch }}-${{ env.ZED_CLI_COMMIT }}
+          name: gitops-dispatch-replay-${{ runner.os }}-${{ runner.arch }}-${{ env.ZED_CLI_COMMIT }}-${{ env.ZED_MAIN_COMMIT }}
           path: |
             artifacts/gitops-dispatch-${{ runner.os }}-${{ runner.arch }}.json
             artifacts/gitops-dispatch-trailing-${{ runner.os }}-${{ runner.arch }}.json
