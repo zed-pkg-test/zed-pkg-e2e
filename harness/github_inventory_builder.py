@@ -25,6 +25,17 @@ from github_inventory_acquisition import InventoryAcquisitionMixin
 from github_inventory_mutation import InventoryMutationMixin
 
 
+def _pin_sort_key(pin: Mapping[str, Any]) -> tuple[Any, ...]:
+    return (
+        pin.get("repository", ""),
+        pin.get("package", ""),
+        pin.get("selected_version", ""),
+        pin.get("artifact_sha256", ""),
+        pin.get("vcs_commit", ""),
+        json.dumps(pin.get("provenance", []), sort_keys=True, separators=(",", ":")),
+    )
+
+
 class InventoryBuilder(
     InventoryAcquisitionMixin, InventoryParsingMixin, InventoryMutationMixin
 ):
@@ -46,6 +57,7 @@ class InventoryBuilder(
         self.repository_records: dict[str, dict[str, Any]] = {}
         self.nodes: dict[str, dict[str, Any]] = {}
         self.edges: dict[tuple[Any, ...], dict[str, Any]] = {}
+        self.pins: list[dict[str, Any]] = []
         self.failures: list[dict[str, Any]] = []
         self.contradictions: list[dict[str, Any]] = []
         self.package_roots: dict[str, str] = {}
@@ -82,6 +94,7 @@ class InventoryBuilder(
             ),
             "nodes": sorted(self.nodes.values(), key=lambda item: item["id"]),
             "edges": sorted(self.edges.values(), key=_edge_sort_key),
+            "pins": sorted(self.pins, key=_pin_sort_key),
             "strongly_connected_components": analysis["components"],
             "cycles": analysis["cycles"],
             "topological_waves": analysis["waves"],
