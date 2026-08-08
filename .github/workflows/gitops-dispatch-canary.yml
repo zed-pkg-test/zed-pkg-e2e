@@ -109,6 +109,7 @@ jobs:
           set -euo pipefail
           mkdir -p artifacts
           python -m py_compile scripts/gitops_dispatch_canary.py
+          rm -rf scripts/__pycache__
           python scripts/gitops_dispatch_canary.py \
             --zed "$ZED_BINARY" \
             --zed-gitops "$ZED_GITOPS_BINARY" \
@@ -121,7 +122,8 @@ jobs:
       - name: Require clean harness and product checkouts
         run: |
           set -euo pipefail
-          git diff --exit-code
+          harness_status="$(git status --porcelain --untracked-files=all | grep -vE '^\?\? artifacts/' || true)"
+          test -z "$harness_status"
           git -C product/zed-cli diff --exit-code
           test -z "$(git -C product/zed-cli status --porcelain)"
 
