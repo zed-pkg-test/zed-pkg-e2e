@@ -186,6 +186,7 @@ jobs:
             file-tunnel-test
             shared-auth-test
             hypesiege-test
+            hacker-house-medellin-test
             streempilot-test
           )
           for organization in "${organizations[@]}"; do
