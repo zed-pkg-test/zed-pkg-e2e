@@ -19,11 +19,17 @@
     },
     "k8s/service.yaml": {
       "gitBlobSha1": "1f4fd233b99ce2dd3260c9c7d76a96960bbe60d2"
+    },
+    "scripts/ci/check_k8s_network_contract.py": {
+      "gitBlobSha1": "ab99bb1eeec553fd119a4c68bcc13fc744491122"
+    },
+    "scripts/ci/test_check_k8s_network_contract.py": {
+      "gitBlobSha1": "2e6c605609c51b79125c187bfccc22ce6c9c974d"
     }
   },
   "sourcePullRequest": "daedalus-fab/fabrication-server.rs#11",
   "limitations": [
-    "This snapshot proves the exported manifest bytes and renderability.",
+    "This snapshot proves the exported manifest and regression-script bytes plus renderability.",
     "It does not prove that a test-org GitHub token can read the private source repository.",
     "Private repository reachability remains a separately provisioned GitHub App credential contract."
   ]
