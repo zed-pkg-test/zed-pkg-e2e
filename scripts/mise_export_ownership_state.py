@@ -23,6 +23,7 @@ def ensure(condition: bool, message: str) -> None:
 
 
 def write_plan(path: Path) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
         json.dumps(
             {
@@ -107,9 +108,25 @@ def certify(zed: Path, root: Path) -> None:
     root.mkdir(parents=True)
     home = root / "home"
     home.mkdir()
+
+    reserved_project = root / "reserved-source"
+    reserved_project.mkdir()
+    reserved_state = reserved_project / ".zed/mise-export-state.json"
+    write_plan(reserved_state)
+    reserved_before = reserved_state.read_bytes()
+    run(
+        zed,
+        reserved_project,
+        home,
+        export_args(".zed/mise-export-state.json"),
+        success=False,
+        contains="environment plan cannot target reserved export state",
+    )
+    ensure(reserved_state.read_bytes() == reserved_before, "reserved source plan was mutated")
+    ensure(not (reserved_project / ".mise.toml").exists(), "reserved source created output")
+
     project = root / "project"
     project.mkdir()
-
     write_plan(project / "plan-one.json")
     write_plan(project / "plan-two.json")
 
@@ -154,6 +171,7 @@ def certify(zed: Path, root: Path) -> None:
             {
                 "schema": "zed-pkg.mise-export-ownership-state.v1",
                 "certified": True,
+                "reserved_state_source_rejected": True,
                 "ownership_transfer_rejected": True,
                 "stale_digest_rejected": True,
                 "ambient_mise_required": False,
