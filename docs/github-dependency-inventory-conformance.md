@@ -19,7 +19,7 @@ A `.zpkg.lock` contributes exact package pins, while `.zpkg.toml`, `.gitmodules`
 
 ## Reference command
 
-The test-org reference command mirrors the intended production surface:
+The dependency-free test-org reference implementation is split by trust boundary under `harness/github_inventory_*.py`; the CLI facade mirrors the intended production surface:
 
 ```console
 python harness/github_dependency_inventory.py \
@@ -74,7 +74,7 @@ The JSON writer sorts keys and all semantically unordered collections. DOT and M
 
 ## Fixture coverage
 
-The checked-in fixture and local fake server cover:
+The checked-in fixture, split semantic/transport suites, and local fake server cover:
 
 - multi-page organization discovery and duplicate input normalization;
 - a private repository and bearer-authenticated requests;
