@@ -15,7 +15,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  ZED_CLI_COMMIT: 4b27a48976686e2fd309926fafd0a2411de9fb87
+  ZED_CLI_COMMIT: bc9d5336c1ccda55d9f98b3d9cabd5a25316c78a
   ZED_CLI_BASE: 1ab18fcb2ff884e82af4cac4513d7b983a23c84a
 
 jobs:
