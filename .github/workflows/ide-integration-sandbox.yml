@@ -81,11 +81,11 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: zed-pkg/zed-vscode
-          ref: 5171a9a7b38f8aca1a403894499bda8b79d46eb1
+          ref: 96c0789a446891d5cb502be799ed121930aee9d1
           persist-credentials: false
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
         with: {node-version: "22"}
-      - run: npm install --ignore-scripts --no-audit --no-fund
+      - run: npm ci --ignore-scripts --no-audit --no-fund
       - run: npm test
       - run: npm run verify
       - run: xvfb-run -a npm run test:extension
