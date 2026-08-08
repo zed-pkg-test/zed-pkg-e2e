@@ -120,7 +120,7 @@ def analyze_graph(
 
 def render_inventory(inventory: Mapping[str, Any], output_format: str) -> str:
     if output_format == "json":
-        return json.dumps(inventory, sort_keys=True, indent=2, ensure_ascii=False) + "\n"
+        return json.dumps(inventory, sort_keys=True, separators=(",", ":"), ensure_ascii=False) + "\n"
     if output_format == "dot":
         return render_dot(inventory)
     if output_format == "mermaid":
