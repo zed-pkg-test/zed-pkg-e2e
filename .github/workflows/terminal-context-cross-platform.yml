@@ -1,0 +1,105 @@
+name: terminal context cross-platform certification
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/terminal-context-cross-platform.yml"
+      - "scripts/terminal_context_acceptance.py"
+      - "docs/terminal-context-certification.md"
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/terminal-context-cross-platform.yml"
+      - "scripts/terminal_context_acceptance.py"
+      - "docs/terminal-context-certification.md"
+  workflow_dispatch:
+    inputs:
+      zed_cli_ref:
+        description: Exact 40-character zed-pkg/zed-cli commit to certify
+        required: false
+        default: ad6ff369a763f0fbdc3b677894655c73b23e062c
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: terminal-context-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref || github.run_id }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  ZED_CLI_REF: ${{ inputs.zed_cli_ref || 'ad6ff369a763f0fbdc3b677894655c73b23e062c' }}
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: "1"
+
+jobs:
+  certify:
+    name: Terminal context / ${{ matrix.label }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            label: Linux
+          - os: macos-15
+            label: macOS
+          - os: windows-2025
+            label: Windows
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    steps:
+      - name: Check out exact acceptance harness
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+          show-progress: false
+
+      - name: Check out exact Zed candidate
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: zed-pkg/zed-cli
+          ref: ${{ env.ZED_CLI_REF }}
+          path: zed-cli
+          fetch-depth: 1
+          persist-credentials: false
+          show-progress: false
+
+      - name: Validate immutable candidate ref
+        run: |
+          set -euo pipefail
+          [[ "$ZED_CLI_REF" =~ ^[0-9a-f]{40}$ ]]
+          test "$(git -C zed-cli rev-parse HEAD)" = "$ZED_CLI_REF"
+
+      - name: Install stable Rust
+        run: |
+          set -euo pipefail
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+          rustc --version --verbose
+          cargo --version --verbose
+
+      - name: Run native terminal and prompt contracts
+        run: |
+          set -euo pipefail
+          cargo test --locked --manifest-path zed-cli/Cargo.toml --lib terminal_context::tests -- --nocapture
+          cargo test --locked --manifest-path zed-cli/Cargo.toml --lib interactive::tests -- --nocapture
+          cargo build --locked --manifest-path zed-cli/Cargo.toml --bin zed
+
+      - name: Validate acceptance harness syntax
+        run: |
+          set -euo pipefail
+          py=python3
+          if [[ "$RUNNER_OS" == "Windows" ]]; then py=python; fi
+          "$py" -m py_compile scripts/terminal_context_acceptance.py
+
+      - name: Run black-box terminal-context acceptance
+        run: |
+          set -euo pipefail
+          py=python3
+          if [[ "$RUNNER_OS" == "Windows" ]]; then py=python; fi
+          "$py" scripts/terminal_context_acceptance.py --zed-cli-root zed-cli
