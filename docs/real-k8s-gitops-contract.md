@@ -6,10 +6,10 @@ This test-org lane validates the actual merged ORESoftware GitOps contract rathe
 
 The default certification pins both repositories by full commit:
 
-- `zed-pkg/zed-cli@ace157406d04f338698b6dc93a77021b07560e72`
+- `zed-pkg/zed-cli@1c94813c6b59c7621c1256d7c55246e7f06f44b7`
 - `ORESoftware/k8s-cluster@cfe39128e309936a4bcaeca4aaa35e4b9bec8888`
 
-The Zed commit contains the standalone validator plus the reviewed root `zed gitops ...` dispatch candidate. The cluster commit contains the merged v1alpha1 catalog, exact-pin validator, deterministic preview renderer, and inert ApplicationSet pilot from DEN-2724.
+The Zed commit is the coordinated product PR `zed-pkg/zed-cli#233` and contains the standalone validator plus reviewed root `zed gitops ...` dispatch. The earlier #230 candidate was intentionally closed as a duplicate. The cluster commit contains the merged v1alpha1 catalog, exact-pin validator, deterministic preview renderer, and inert ApplicationSet pilot from DEN-2724.
 
 ## What the workflow proves
 
@@ -42,7 +42,8 @@ It performs no submodule clone, private repository read, registry write, Kuberne
 ## Coordination
 
 - Cluster implementation: `ORESoftware/k8s-cluster#1109`
-- Root dispatch: `zed-pkg/zed-cli#230`
+- Root dispatch: `zed-pkg/zed-cli#233`
+- Closed superseded product lane: `zed-pkg/zed-cli#230`
 - Three-platform dispatch canary: `zed-pkg-test/zed-pkg-e2e#118`
 - GitOps roadmap: `ORESoftware/k8s-cluster#1097`
 - Linear: `DEN-2724`, `DEN-2725`, and `DEN-630`
