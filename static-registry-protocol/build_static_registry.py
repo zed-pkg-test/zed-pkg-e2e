@@ -43,6 +43,8 @@ def sha256_bytes(data: bytes) -> str:
 
 
 def validate_output_target(out: Path) -> tuple[Path, bool]:
+    if out.name in {"", ".", ".."} or ".." in out.parts:
+        raise ValueError(f"output path must name a child directory without `..`: {out}")
     if out.is_symlink():
         raise ValueError(f"output path is a symbolic link: {out}")
     existed_empty = False
@@ -126,7 +128,25 @@ def deterministic_tar_zst(pkg_dir: Path) -> bytes:
 
 def semver_key(version: str):
     core = version.split("-")[0].split("+")[0]
-    return tuple(int(component) for component in core.split("."))
+    components = core.split(".")
+    if len(components) != 3 or any(not component.isdigit() for component in components):
+        raise ValueError(f"invalid v0 semantic version: {version}")
+    return tuple(int(component) for component in components)
+
+
+def read_fixture_metadata(meta_path: Path) -> dict:
+    if meta_path.is_symlink():
+        raise ValueError(f"fixture metadata is a symbolic link: {meta_path}")
+    metadata = json.loads(meta_path.read_text())
+    if not isinstance(metadata, dict):
+        raise ValueError(f"fixture metadata must be a JSON object: {meta_path}")
+    dependencies = metadata.get("deps", [])
+    yanked = metadata.get("yanked", False)
+    if not isinstance(dependencies, list):
+        raise ValueError(f"fixture `deps` must be an array: {meta_path}")
+    if not isinstance(yanked, bool):
+        raise ValueError(f"fixture `yanked` must be boolean: {meta_path}")
+    return metadata
 
 
 def main() -> int:
@@ -166,7 +186,8 @@ def main() -> int:
             print(f"ERROR: org segment must be lowercase canonical form: {org}", file=sys.stderr)
             return 2
         try:
-            metadata = json.loads(meta_path.read_text())
+            semver_key(version)
+            metadata = read_fixture_metadata(meta_path)
             blob = deterministic_tar_zst(version_dir)
         except (OSError, ValueError, json.JSONDecodeError, subprocess.CalledProcessError) as error:
             print(f"ERROR: cannot export {org}/{name}@{version}: {error}", file=sys.stderr)
@@ -178,7 +199,7 @@ def main() -> int:
                 "deps": metadata.get("deps", []),
                 "cksum": f"sha256:{sha256_bytes(blob)}",
                 "size": len(blob),
-                "yanked": bool(metadata.get("yanked", False)),
+                "yanked": metadata.get("yanked", False),
             }
         )
 
