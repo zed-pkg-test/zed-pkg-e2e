@@ -9,7 +9,7 @@ on:
       zed_cli_ref:
         description: Immutable zed-cli commit to certify
         required: false
-        default: c21f26c2370a426f36445d13186f540980dd1362
+        default: 50edd5cf5c7ff0960e312d50c172a75529e390ea
   schedule:
     - cron: "17 5 * * 3"
 
@@ -27,7 +27,7 @@ defaults:
 env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: "1"
-  ZED_CLI_REF: ${{ github.event.inputs.zed_cli_ref || 'c21f26c2370a426f36445d13186f540980dd1362' }}
+  ZED_CLI_REF: ${{ github.event.inputs.zed_cli_ref || '50edd5cf5c7ff0960e312d50c172a75529e390ea' }}
 
 jobs:
   certify:
