@@ -28,6 +28,7 @@ on:
           - file-tunnel-test
           - shared-auth-test
           - hypesiege-test
+          - hacker-house-medellin-test
           - streempilot-test
       repository:
         description: Optional repository-name glob, for example clients-*-consumer
@@ -76,12 +77,12 @@ jobs:
             exit 1
           fi
 
-          all='["zed-pkg-test","3fa-app-test","declarative-migrations-test","cliptown-test","claritas-viz-test","embedded-alerts-test","evento-globolo-test","fiducia-cloud-test","memebank-test","opto-sync-test","quaestor-ledger-test","sonus-auris-test","messaging-intel-test","scintilla-run-test","file-tunnel-test","shared-auth-test","hypesiege-test","streempilot-test"]'
+          all='["zed-pkg-test","3fa-app-test","declarative-migrations-test","cliptown-test","claritas-viz-test","embedded-alerts-test","evento-globolo-test","fiducia-cloud-test","memebank-test","opto-sync-test","quaestor-ledger-test","sonus-auris-test","messaging-intel-test","scintilla-run-test","file-tunnel-test","shared-auth-test","hypesiege-test","hacker-house-medellin-test","streempilot-test"]'
           case "$SELECTED_ORGANIZATION" in
             all)
               selected="$all"
               ;;
-            zed-pkg-test|3fa-app-test|declarative-migrations-test|cliptown-test|claritas-viz-test|embedded-alerts-test|evento-globolo-test|fiducia-cloud-test|memebank-test|opto-sync-test|quaestor-ledger-test|sonus-auris-test|messaging-intel-test|scintilla-run-test|file-tunnel-test|shared-auth-test|hypesiege-test|streempilot-test)
+            zed-pkg-test|3fa-app-test|declarative-migrations-test|cliptown-test|claritas-viz-test|embedded-alerts-test|evento-globolo-test|fiducia-cloud-test|memebank-test|opto-sync-test|quaestor-ledger-test|sonus-auris-test|messaging-intel-test|scintilla-run-test|file-tunnel-test|shared-auth-test|hypesiege-test|hacker-house-medellin-test|streempilot-test)
               selected="[\"$SELECTED_ORGANIZATION\"]"
               ;;
             *)
