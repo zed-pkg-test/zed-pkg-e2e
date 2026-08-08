@@ -1,14 +1,16 @@
 # Current-main root `zed gitops` certification
 
-This canary independently certifies the clean current-main successor to DEN-2725:
+This canary independently certifies the current-main DEN-2725 candidate after the placeholder-only SOPS environment store landed:
 
 ```text
 product PR: zed-pkg/zed-cli#242
-candidate: 173bab46355ef715783d2734288ccc023c7f486b
-exact parent: f226c2e57c8c830b21aedd4fb2eb505c584dc7fd
+candidate: 17fe649a364a341745b7c98b8a67a4599ef9fd6f
+exact parent: 4d598520bc5cd24b739b4571bf2fb7f46b0ec5ee
 ```
 
-Unlike the superseded replay harness, this workflow does not merge another branch, apply a correction script, or rewrite product source. It checks out the immutable product commit with its parent and fails before compilation unless:
+The previous immutable product candidate and parent were independently certified and merged into this test repository by PR #130. Because product `main` advanced before the feature itself merged, this revision changes only the candidate/parent pins and re-runs the complete matrix.
+
+The workflow does not merge another branch, apply a correction script, or rewrite product source. It checks out the immutable product commit with its parent and fails before compilation unless:
 
 1. the candidate SHA is exact;
 2. its direct parent is exact; and
@@ -43,6 +45,6 @@ The black-box checks cover sibling-command selection, no working-directory or re
 
 The canary strips inherited token, secret, password, private-key, access-key, API-key, authorization, cookie, and Zed credential variables from subprocesses. It uses only disposable local directories and a local Git index fixture.
 
-It performs no package publication, registry write, GitHub mutation, Kubernetes/Argo operation, Cloudflare request, external agent task, or persistent namespace write. Product source must remain byte-for-byte unchanged throughout the run.
+It performs no package publication, registry write, GitHub mutation, Kubernetes/Argo operation, Cloudflare request, external agent task, SOPS decryption, or persistent namespace write. Product source must remain byte-for-byte unchanged throughout the run.
 
-Evidence is commit-addressed and records only the immutable candidate/parent, runner OS/architecture, binary SHA-256 values, and passed check names. A green result certifies this exact product commit only; any successor requires a new immutable pin.
+Evidence is commit-addressed and records only the immutable candidate/parent, runner OS/architecture, binary SHA-256 values, and passed check names. A green result certifies this exact product commit only; any successor requires another immutable pin.
