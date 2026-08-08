@@ -13,7 +13,7 @@ Canonical production ownership:
 
 ## Why this lives in the test organization
 
-The production repository already has unit, Docker, macOS, and Windows coverage. This test-org gate is deliberately independent: it checks out an immutable shipped candidate and immutable `zed-pkg-test` fixtures, builds that candidate on native GitHub runners, and drives the resulting executable as a consumer would.
+The production repository already has unit, Docker, macOS, and Windows coverage. This test-org gate is deliberately independent: it checks out an immutable shipped candidate, builds that candidate on native GitHub runners, and drives the resulting executable as an external consumer would.
 
 A failure here is not fixed by adding a second terminal detector to the test harness. The defect is filed against the owning production repository, fixed there, and then re-certified here.
 
@@ -25,11 +25,13 @@ The workflow runs on:
 - macOS 15;
 - Windows Server 2025.
 
-Every lane checks exact Git commit pins before testing.
+Every lane checks the exact product Git commit before testing.
 
 ## Acceptance contract
 
-The workflow runs the production `terminal_context` and `interactive` Rust unit contracts and then exercises the built CLI against exact `zed-pkg-test/rust-lib` and `zed-pkg-test/rust-app` fixtures through a temporary local file registry.
+The workflow runs the production `terminal_context` and `interactive` Rust unit contracts and then exercises the built CLI through the real `zed init` mutation checkpoint in a disposable test-org-owned working directory.
+
+`zed init` is intentionally used instead of registry installation: terminal-context certification should not depend on registry transport, artifact paths, network access, or package materialization. The first Windows run exposed an unrelated `file:///D:/...` registry-path defect before any prompt assertion ran; that transport defect is tracked separately rather than weakening or conflating this certification.
 
 The black-box assertions are:
 
@@ -39,12 +41,12 @@ The black-box assertions are:
 4. The documented `ZED_PKG_FORCE_*` controls can explicitly simulate a safe terminal for deterministic testing.
 5. The shared `F2E_FORCE_*` spellings produce the same accepted behavior without Zed-specific force variables present.
 6. stdout may remain redirected while stderr carries the interactive checkpoint.
-7. A rejected checkpoint leaves the installed package intact.
-8. An accepted checkpoint performs the uninstall.
+7. A rejected checkpoint leaves `.zpkg.toml` absent.
+8. An accepted checkpoint creates the requested manifest with the expected package identity.
 9. Linux and macOS additionally exercise the production `forkpty()` harness with a real pseudo-terminal; Windows uses the deterministic override path because that upstream helper is Unix-specific.
 
 ## Security and permissions
 
-The certification workflow uses only `contents: read`. It does not require GitHub PATs, Linear tokens, Cloudflare credentials, registry credentials, or any other secret. Local package publication uses a temporary `file://` registry owned by the runner.
+The certification workflow uses only `contents: read`. It does not require GitHub PATs, Linear tokens, Cloudflare credentials, registry credentials, or any other secret. The mutation target is a temporary runner directory and never a checked-out repository.
 
 The workflow must never copy user-supplied credentials into source, logs, artifacts, issue bodies, or environment variables.
