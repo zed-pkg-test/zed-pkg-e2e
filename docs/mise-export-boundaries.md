@@ -11,14 +11,14 @@ Canonical product PR: `zed-pkg/zed-cli#131`.
 Pinned product head:
 
 ```text
-e08910e86880fdc7f729daebec28b8f79c477508
+7c5445b2cd15a503c8004da98cac31451ea2f1d4
 ```
 
-The product branch was semantically reconstructed on current `main` and then merged with main head `0ecd5b00cdd4c5df66824bd9ffdeb079b592a651`. The intervening main-only changes were confined to `docs/publish-ignore.md` and `src/ops_entry.rs`; their exact reviewed blobs are preserved unchanged. The exporter remains a ten-file source, test, contract, and documentation delta with no materializer workflow.
+The product branch was semantically merged with current `main` head `5d1d13119be5784f545a7d812cdfaae3ca120693`. Current submodule CLI and project-lock behavior were adopted verbatim; `src/main.rs` was composed by extracting the already-tested exporter import and dispatch arms into the current main-line recovery and locking flow. The exporter remains a ten-file source, test, contract, and documentation delta with no materializer or synchronization workflow.
 
 The public Rust API enforces the reserved exporter-state source boundary before delegating to the implementation. This protects the CLI, external Rust callers, portable case aliases, and in-project symlink aliases through one shared guard.
 
-The certification workflow pins the full immutable product head above and never follows a mutable branch during a run. The previous candidate failed only the formatting gate in the new real-CLI regression; this head contains the exact rustfmt output and no semantic change.
+The certification workflow pins the full immutable product head above and never follows a mutable branch during a run.
 
 ## Certified behavior
 
@@ -71,7 +71,7 @@ The complete current manager-lock identity contract is separately merged and cer
 
 Promotion requires:
 
-1. the workflow pin matching final immutable head `e08910e86880fdc7f729daebec28b8f79c477508` of `zed-pkg/zed-cli#131`;
+1. the workflow pin matching final immutable head `7c5445b2cd15a503c8004da98cac31451ea2f1d4` of `zed-pkg/zed-cli#131`;
 2. Ubuntu 24.04, macOS 15, and Windows Server 2025 success;
 3. formatting, focused unit tests, the public API target, real CLI tests, a locked release build, and all-target Clippy with warnings denied;
 4. both black-box harnesses passing on all platforms, with symlink assertions skipped only where the host cannot create symlinks;
