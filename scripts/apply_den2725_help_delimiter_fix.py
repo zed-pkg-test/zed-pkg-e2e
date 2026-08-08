@@ -90,7 +90,8 @@ fn root_help_alias_keeps_help_before_literal_double_dash() {
         .expect("run zed help gitops with literal delimiter");
     assert!(output.status.success(), "{}", text(&output));
     let text = text(&output);
-    assert!(text.contains(&gitops_usage(" validate")), "{text}");
+    assert!(text.contains("Usage: zed-gitops"), "{text}");
+    assert!(text.contains("validate [OPTIONS]"), "{text}");
     assert!(text.contains("--offline"), "{text}");
 }
 
