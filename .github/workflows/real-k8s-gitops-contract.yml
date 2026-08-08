@@ -11,7 +11,7 @@ on:
       product_commit:
         description: Exact zed-pkg/zed-cli commit
         required: false
-        default: ace157406d04f338698b6dc93a77021b07560e72
+        default: 1c94813c6b59c7621c1256d7c55246e7f06f44b7
         type: string
       cluster_commit:
         description: Exact ORESoftware/k8s-cluster commit
@@ -31,7 +31,7 @@ defaults:
     shell: bash
 
 env:
-  ZED_CLI_COMMIT: ${{ inputs.product_commit || 'ace157406d04f338698b6dc93a77021b07560e72' }}
+  ZED_CLI_COMMIT: ${{ inputs.product_commit || '1c94813c6b59c7621c1256d7c55246e7f06f44b7' }}
   K8S_CLUSTER_COMMIT: ${{ inputs.cluster_commit || 'cfe39128e309936a4bcaeca4aaa35e4b9bec8888' }}
 
 jobs:
