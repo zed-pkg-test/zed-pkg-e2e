@@ -5,13 +5,15 @@ nested-invocation-hardened, thread-affine, and shared-ownership exact candidate
 commit:
 
 ```text
-6716bd10be51c0022700d59ad97ee2a48dd51228
+2c5787f1c3c4f43cc2535415d2fad11b681c2f15
 ```
 
 The candidate was merged with current product `main` through integration PR
 `zed-pkg/zed-cli#245` before the final locking review. That preserves the
 independent external GitOps dispatcher and its tests; the reviewed file sets do
-not overlap.
+not overlap. The only commit after the shared-ownership implementation was the
+rustfmt-normalized layout of one weak-reference insertion statement; no lock,
+API, or ownership semantics changed.
 
 The product change routes `zed overtake --git-submodules` through the same
 checkout-local `.zed/operation.lock` boundary used by install, add, remove, and
