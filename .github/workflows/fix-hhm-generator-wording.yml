@@ -1,4 +1,4 @@
-name: Fix HHM generator privacy wording
+name: Generate corrected HHM test fleet
 
 on:
   push:
@@ -10,29 +10,49 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: generate-corrected-hhm-test-fleet
+  cancel-in-progress: false
+
 jobs:
-  patch:
+  generate:
     runs-on: ubuntu-24.04
-    timeout-minutes: 5
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           ref: agent/add-hhm-test-fleet
           persist-credentials: true
           fetch-depth: 0
-      - name: Apply the one-line generator correction
+      - name: Apply the wording correction and generate the fleet
         run: |
           set -euo pipefail
           node scripts/patch-hhm-generator-wording.mjs
           node --check scripts/add-hhm-test-fleet.mjs
+          node scripts/add-hhm-test-fleet.mjs
+          node scripts/validate-test-org-fleet.mjs
+          node --test tests/test-org-fleet.test.mjs
+          node scripts/export-test-org-fleet-index.mjs > "$RUNNER_TEMP/test-org-fleet-index.json"
+          node -e "const x=require(process.argv[1]); if(x.pairCount!==19||x.specializedRepositoryCount!==319||x.managedRepositoryCount!==338||x.expectedRepositoryCount!==360) process.exit(1)" "$RUNNER_TEMP/test-org-fleet-index.json"
           git diff --check
-      - name: Commit the corrected generator
+      - name: Commit the deterministic expansion
         env:
           BRANCH_NAME: agent/add-hhm-test-fleet
         run: |
           set -euo pipefail
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add scripts/add-hhm-test-fleet.mjs
-          git commit -m "test: clarify synthetic access fixture policy"
+          git add \
+            bootstrap/test-org-fleet.json.gz.b64.parts \
+            scripts/add-hhm-test-fleet.mjs \
+            scripts/export-test-org-fleet-index.mjs \
+            docs/test-org-fleet-index.md \
+            tests/test-org-fleet.test.mjs \
+            .github/workflows/apply-test-org-fleet.yml \
+            .github/workflows/secure-fleet-token-handoff.yml
+          if git diff --cached --quiet; then
+            echo "No generated changes"
+            exit 0
+          fi
+          git commit -m "test: add Hacker House Medellín test fleet"
           git push origin "HEAD:refs/heads/$BRANCH_NAME"
