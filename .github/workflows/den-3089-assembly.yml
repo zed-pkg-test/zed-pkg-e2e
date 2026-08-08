@@ -16,7 +16,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  ZED_CLI_CARRIER: 20081786ab642f178e01a76dc9d5f9f527c51040
+  ZED_CLI_CARRIER: 307ebb70835ac69b695055f3fb8511b92e0c8278
   ZED_CLI_BASE: 0ada54a179835d2a64288887f8787d83a1eab1fe
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: "1"
@@ -54,7 +54,7 @@ jobs:
           test "$(git -C product/zed-cli rev-parse HEAD)" = "$ZED_CLI_CARRIER"
           git -C product/zed-cli merge-base --is-ancestor "$ZED_CLI_BASE" "$ZED_CLI_CARRIER"
           changed="$(git -C product/zed-cli diff --name-only "$ZED_CLI_BASE" "$ZED_CLI_CARRIER")"
-          expected=$'.github/workflows/den-3089-apply.yml\ntools/den-3089-apply.py.gz.b64.part00\ntools/den-3089-apply.py.gz.b64.part01\ntools/den-3089-apply.py.gz.b64.part02\ntools/den-3089-apply.py.gz.b64.part03\ntools/den-3089-apply.py.gz.b64.part04'
+          expected=$'.github/workflows/den-3089-apply.yml\ntools/den-3089-apply.py.gz.b64.part00\ntools/den-3089-apply.py.gz.b64.part01\ntools/den-3089-apply.py.gz.b64.part02\ntools/den-3089-apply.py.gz.b64.part03\ntools/den-3089-apply.py.gz.b64.part04.00\ntools/den-3089-apply.py.gz.b64.part04.01\ntools/den-3089-apply.py.gz.b64.part04.02\ntools/den-3089-apply.py.gz.b64.part04.03\ntools/den-3089-apply.py.gz.b64.part04.04\ntools/den-3089-apply.py.gz.b64.part04.05\ntools/den-3089-apply.py.gz.b64.part04.06\ntools/den-3089-apply.py.gz.b64.part04.07\ntools/den-3089-apply.py.gz.b64.part04.08'
           test "$changed" = "$expected"
 
       - name: Install stable Rust toolchain
@@ -71,9 +71,9 @@ jobs:
         run: |
           set -euo pipefail
           cat tools/den-3089-apply.py.gz.b64.part* > "$RUNNER_TEMP/den-3089-apply.py.gz.b64"
-          echo "ad40551e6eb6599af8fa56e06267a43c20ad196771da7a1e18fd0d4e0e880d5f  $RUNNER_TEMP/den-3089-apply.py.gz.b64" | sha256sum -c -
+          echo "fbbe3cd11ad22561d41cb175815c8852dd00a950a0cdb248ba269c772a067de8  $RUNNER_TEMP/den-3089-apply.py.gz.b64" | sha256sum -c -
           base64 --decode "$RUNNER_TEMP/den-3089-apply.py.gz.b64" | gzip --decompress > "$RUNNER_TEMP/den-3089-apply.py"
-          echo "3c454210240ce188e4b16c570f1df35eec7e3fe8dc64216020839918b0005899  $RUNNER_TEMP/den-3089-apply.py" | sha256sum -c -
+          echo "a1c840717609ec210cb80e703fe88ddd161b2738b8bd7cd1d9d506dcc71c4d47  $RUNNER_TEMP/den-3089-apply.py" | sha256sum -c -
           PYTHONDONTWRITEBYTECODE=1 python "$RUNNER_TEMP/den-3089-apply.py"
           rm -f .github/workflows/den-3089-apply.yml tools/den-3089-apply.py.gz.b64.part*
           git add -N src/publish_ignore.rs tests/polyglot_zedignore.rs
