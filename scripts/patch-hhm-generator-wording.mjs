@@ -2,6 +2,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
+// This idempotent marker retriggers generation after transport-policy changes.
 const root = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
 const file = path.join(root, 'scripts', 'add-hhm-test-fleet.mjs');
 const before = fs.readFileSync(file, 'utf8');
