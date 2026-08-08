@@ -1,0 +1,155 @@
+name: VS Code inspect v1 interop
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/vscode-inspect-v1-interop.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: vscode-inspect-v1-${{ github.event.pull_request.number || github.ref || github.run_id }}
+  cancel-in-progress: true
+
+env:
+  ZED_CLI_REF: 3c584065dce292442e1ca5e5c45c4728f2796b47
+  ZED_VSCODE_REF: 05835dbea0c081c7128d98a219d7731fbd20d941
+
+jobs:
+  interop:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Validate exact product pins
+        run: |
+          set -euo pipefail
+          [[ "$ZED_CLI_REF" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$ZED_VSCODE_REF" =~ ^[0-9a-f]{40}$ ]]
+
+      - name: Check out exact zed-cli candidate
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: zed-pkg/zed-cli
+          ref: ${{ env.ZED_CLI_REF }}
+          path: zed-cli
+          fetch-depth: 1
+          persist-credentials: false
+          show-progress: false
+
+      - name: Check out exact VS Code adapter candidate
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: zed-pkg/zed-vscode
+          ref: ${{ env.ZED_VSCODE_REF }}
+          path: zed-vscode
+          fetch-depth: 1
+          persist-credentials: false
+          show-progress: false
+
+      - name: Install declared Rust toolchain
+        run: |
+          set -euo pipefail
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+
+      - name: Build exact CLI candidate
+        run: |
+          set -euo pipefail
+          test "$(git -C zed-cli rev-parse HEAD)" = "$ZED_CLI_REF"
+          cargo build --locked --release --manifest-path zed-cli/Cargo.toml --bin zed
+
+      - name: Set up Node.js 22
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: zed-vscode/package-lock.json
+
+      - name: Run exact VS Code adapter unit tests
+        working-directory: zed-vscode
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$ZED_VSCODE_REF"
+          npm ci --ignore-scripts --no-audit --no-fund
+          npm test
+
+      - name: Exercise real CLI JSON through real VS Code adapter
+        env:
+          ZED_BINARY: ${{ github.workspace }}/zed-cli/target/release/zed
+        run: |
+          set -euo pipefail
+          node <<'NODE'
+          'use strict';
+          const assert = require('node:assert/strict');
+          const crypto = require('node:crypto');
+          const fs = require('node:fs');
+          const os = require('node:os');
+          const path = require('node:path');
+          const {inspectRoot} = require('./zed-vscode/src/inspector');
+
+          function snapshot(root) {
+            const rows = [];
+            function walk(directory) {
+              for (const name of fs.readdirSync(directory).sort()) {
+                const absolute = path.join(directory, name);
+                const relative = path.relative(root, absolute);
+                const stat = fs.lstatSync(absolute);
+                if (stat.isDirectory()) {
+                  rows.push([relative, 'dir']);
+                  walk(absolute);
+                } else if (stat.isSymbolicLink()) {
+                  rows.push([relative, 'symlink', fs.readlinkSync(absolute)]);
+                } else {
+                  rows.push([relative, 'file', crypto.createHash('sha256').update(fs.readFileSync(absolute)).digest('hex')]);
+                }
+              }
+            }
+            walk(root);
+            return rows;
+          }
+
+          (async () => {
+            const root = fs.mkdtempSync(path.join(os.tmpdir(), 'zed-vscode-inspect-v1-'));
+            fs.writeFileSync(path.join(root, '.zpkg.toml'), '[package]\norg = "acme"\nname = "widget"\nversion = "1.0.0"\n\n[package.repository]\nvcs = "git"\nurl = "https://example.invalid/acme/widget"\n');
+            fs.writeFileSync(path.join(root, '.zpkg.lock'), 'version = 1\n');
+            fs.mkdirSync(path.join(root, '.zpkg-staging'));
+            fs.writeFileSync(path.join(root, '.zpkg-staging', 'sentinel'), 'must-survive');
+            const before = snapshot(root);
+
+            const report = await inspectRoot(root, {
+              executable: process.env.ZED_BINARY,
+              timeoutMs: 10000,
+            });
+
+            assert.equal(report.source, 'cli', JSON.stringify(report));
+            assert.equal(path.resolve(report.workspaceRoot), path.resolve(root));
+            const recovery = report.issues.find((issue) => issue.id === 'RECOVERY_PENDING');
+            assert.ok(recovery, JSON.stringify(report));
+            assert.equal(recovery.severity, 'warning');
+            assert.equal(recovery.actions.length, 1);
+            assert.deepEqual(recovery.actions[0], {
+              id: 'recover-frozen',
+              title: 'Recover with the locked graph',
+              kind: 'command',
+              command: 'zed',
+              arguments: ['install', '--frozen'],
+              requiresConfirmation: true,
+              workingDirectory: fs.realpathSync.native(root),
+              mutatesProject: true,
+              requiresNetwork: true,
+              executesPackageCode: false,
+            });
+            assert.deepEqual(snapshot(root), before);
+            assert.equal(fs.readFileSync(path.join(root, '.zpkg-staging', 'sentinel'), 'utf8'), 'must-survive');
+            assert.equal(fs.existsSync(path.join(root, 'zed_modules')), false);
+            console.log(`certified cli=${process.env.ZED_CLI_REF} vscode=${process.env.ZED_VSCODE_REF}`);
+          })().catch((error) => {
+            console.error(error);
+            process.exitCode = 1;
+          });
+          NODE
