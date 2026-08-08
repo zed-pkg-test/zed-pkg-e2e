@@ -7,10 +7,12 @@ on:
       - "bootstrap/test-org-fleet.json.gz.b64.parts/**"
       - "scripts/bootstrap-test-org-fleet.mjs"
       - "scripts/bootstrap-test-org-fleet.parts/**"
+      - "scripts/test-org-fleet-integration-policy.mjs"
       - "scripts/export-test-org-fleet-index.mjs"
       - "scripts/read-fleet-manifest.mjs"
       - "scripts/validate-test-org-fleet.mjs"
       - "tests/test-org-fleet.test.mjs"
+      - "tests/test-org-fleet-source-certification.test.mjs"
       - "tests/generated-plan-validator-gitlinks.test.mjs"
       - "tests/export-test-org-fleet-index.test.mjs"
       - "tests/idempotent-fleet-pr-repair.test.mjs"
@@ -28,10 +30,12 @@ on:
       - "bootstrap/test-org-fleet.json.gz.b64.parts/**"
       - "scripts/bootstrap-test-org-fleet.mjs"
       - "scripts/bootstrap-test-org-fleet.parts/**"
+      - "scripts/test-org-fleet-integration-policy.mjs"
       - "scripts/export-test-org-fleet-index.mjs"
       - "scripts/read-fleet-manifest.mjs"
       - "scripts/validate-test-org-fleet.mjs"
       - "tests/test-org-fleet.test.mjs"
+      - "tests/test-org-fleet-source-certification.test.mjs"
       - "tests/generated-plan-validator-gitlinks.test.mjs"
       - "tests/export-test-org-fleet-index.test.mjs"
       - "tests/idempotent-fleet-pr-repair.test.mjs"
@@ -66,6 +70,7 @@ jobs:
       - name: Parse scripts
         run: |
           node --check scripts/bootstrap-test-org-fleet.mjs
+          node --check scripts/test-org-fleet-integration-policy.mjs
           node --check scripts/export-test-org-fleet-index.mjs
           node --check scripts/validate-test-org-fleet.mjs
 
@@ -76,6 +81,7 @@ jobs:
         run: |
           node --test \
             tests/test-org-fleet.test.mjs \
+            tests/test-org-fleet-source-certification.test.mjs \
             tests/generated-plan-validator-gitlinks.test.mjs \
             tests/export-test-org-fleet-index.test.mjs \
             tests/idempotent-fleet-pr-repair.test.mjs
