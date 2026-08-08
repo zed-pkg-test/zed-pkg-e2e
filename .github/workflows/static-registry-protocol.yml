@@ -58,14 +58,18 @@ jobs:
               Path("static-registry-protocol/build_static_registry.py"),
               Path("static-registry-protocol/check_static_registry.py"),
               Path("static-registry-protocol/test_static_registry.py"),
+              Path("static-registry-protocol/test_sync_to_r2.py"),
           ):
               compile(path.read_text(encoding="utf-8"), str(path), "exec")
           PY
 
-      - name: Run fail-closed generator safety tests
+      - name: Run fail-closed generator and R2 synchronization tests
         run: |
           set -euo pipefail
-          python static-registry-protocol/test_static_registry.py -v
+          python -m unittest discover \
+            -s static-registry-protocol \
+            -p 'test_*.py' \
+            -v
 
       - name: Build twice and require byte-identical trees
         id: build
