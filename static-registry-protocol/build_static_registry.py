@@ -18,29 +18,34 @@ Determinism: tar entries sorted, mtime/uid/gid zeroed via SOURCE_DATE_EPOCH
 Same inputs => byte-identical tree.
 
 Safety: output must be a new or empty real directory. Fixture symlinks and
-special files are rejected rather than followed into the package archive.
+special files are rejected rather than followed into the package archive. The
+complete tree is written to a same-parent staging directory and renamed into
+place only after all fixture validation and file writes succeed.
 """
 import argparse
 import hashlib
 import io
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tarfile
+import tempfile
 from pathlib import Path
 
 SCHEMA_VERSION = 0
 EPOCH = int(os.environ.get("SOURCE_DATE_EPOCH", "0"))
 
 
-def sha256_bytes(b: bytes) -> str:
-    return hashlib.sha256(b).hexdigest()
+def sha256_bytes(data: bytes) -> str:
+    return hashlib.sha256(data).hexdigest()
 
 
-def prepare_output(out: Path) -> None:
+def validate_output_target(out: Path) -> tuple[Path, bool]:
     if out.is_symlink():
         raise ValueError(f"output path is a symbolic link: {out}")
+    existed_empty = False
     if out.exists():
         if not out.is_dir():
             raise ValueError(f"output path is not a directory: {out}")
@@ -48,71 +53,107 @@ def prepare_output(out: Path) -> None:
             raise ValueError(
                 f"output directory must be empty to prevent stale registry objects: {out}"
             )
-        return
-    out.mkdir(parents=True, exist_ok=False)
+        existed_empty = True
+
+    parent = out.parent if out.parent != Path("") else Path(".")
+    parent.mkdir(parents=True, exist_ok=True)
+    if parent.is_symlink() or not parent.is_dir():
+        raise ValueError(f"output parent must be a real directory: {parent}")
+    return parent, existed_empty
+
+
+def publish_tree(out: Path, files: dict[str, bytes]) -> None:
+    parent, existed_empty = validate_output_target(out)
+    staging = Path(
+        tempfile.mkdtemp(
+            prefix=f".{out.name}.zpkg-static-",
+            dir=parent,
+        )
+    )
+    committed = False
+    removed_empty_output = False
+    try:
+        for relative, data in sorted(files.items()):
+            destination = staging / relative
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            destination.write_bytes(data)
+        if existed_empty:
+            out.rmdir()
+            removed_empty_output = True
+        os.replace(staging, out)
+        committed = True
+    finally:
+        if not committed and staging.exists():
+            shutil.rmtree(staging, ignore_errors=True)
+        if not committed and removed_empty_output and not out.exists():
+            out.mkdir()
 
 
 def deterministic_tar_zst(pkg_dir: Path) -> bytes:
-    buf = io.BytesIO()
-    paths = sorted(pkg_dir.rglob("*"), key=lambda p: p.relative_to(pkg_dir).as_posix())
-    with tarfile.open(fileobj=buf, mode="w", format=tarfile.USTAR_FORMAT) as tf:
-        for p in paths:
-            rel = p.relative_to(pkg_dir)
-            if p.is_symlink():
+    buffer = io.BytesIO()
+    paths = sorted(
+        pkg_dir.rglob("*"),
+        key=lambda path: path.relative_to(pkg_dir).as_posix(),
+    )
+    with tarfile.open(fileobj=buffer, mode="w", format=tarfile.USTAR_FORMAT) as archive:
+        for path in paths:
+            relative = path.relative_to(pkg_dir)
+            if path.is_symlink():
                 raise ValueError(
-                    f"fixture contains a symbolic link, which static export will not follow: {rel}"
+                    "fixture contains a symbolic link, which static export will not follow: "
+                    f"{relative}"
                 )
-            if p.is_dir():
+            if path.is_dir():
                 continue
-            if not p.is_file():
-                raise ValueError(f"fixture contains an unsupported special file: {rel}")
-            data = p.read_bytes()
-            ti = tarfile.TarInfo(name=rel.as_posix())
-            ti.size = len(data)
-            ti.mtime = EPOCH
-            ti.uid = ti.gid = 0
-            ti.uname = ti.gname = ""
-            ti.mode = 0o644
-            tf.addfile(ti, io.BytesIO(data))
-    proc = subprocess.run(
+            if not path.is_file():
+                raise ValueError(f"fixture contains an unsupported special file: {relative}")
+            data = path.read_bytes()
+            entry = tarfile.TarInfo(name=relative.as_posix())
+            entry.size = len(data)
+            entry.mtime = EPOCH
+            entry.uid = entry.gid = 0
+            entry.uname = entry.gname = ""
+            entry.mode = 0o644
+            archive.addfile(entry, io.BytesIO(data))
+    result = subprocess.run(
         ["zstd", "-19", "-q", "--no-progress", "-c"],
-        input=buf.getvalue(),
+        input=buffer.getvalue(),
         stdout=subprocess.PIPE,
         check=True,
     )
-    return proc.stdout
+    return result.stdout
 
 
-def semver_key(v: str):
-    core = v.split("-")[0].split("+")[0]
-    return tuple(int(x) for x in core.split("."))
+def semver_key(version: str):
+    core = version.split("-")[0].split("+")[0]
+    return tuple(int(component) for component in core.split("."))
 
 
 def main() -> int:
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--fixtures", required=True, type=Path)
-    ap.add_argument("--out", required=True, type=Path)
-    ap.add_argument("--seq", type=int, default=1, help="checkpoint sequence number")
-    args = ap.parse_args()
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--fixtures", required=True, type=Path)
+    parser.add_argument("--out", required=True, type=Path)
+    parser.add_argument("--seq", type=int, default=1, help="checkpoint sequence number")
+    args = parser.parse_args()
 
     if not args.fixtures.is_dir() or args.fixtures.is_symlink():
         print(f"ERROR: fixtures path must be a real directory: {args.fixtures}", file=sys.stderr)
         return 2
 
-    out = args.out
+    # Validate the caller-owned destination before spending compression work,
+    # but do not create or mutate it until the complete tree is ready.
     try:
-        prepare_output(out)
+        validate_output_target(args.out)
     except (OSError, ValueError) as error:
         print(f"ERROR: {error}", file=sys.stderr)
         return 2
 
-    written: list[tuple[str, bytes]] = []
+    objects: dict[str, bytes] = {}
 
-    def emit(rel: str, data: bytes) -> None:
-        path = out / rel
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_bytes(data)
-        written.append((rel, data))
+    def emit(relative: str, data: bytes) -> None:
+        if relative in objects:
+            raise ValueError(f"duplicate static registry object path: {relative}")
+        objects[relative] = data
 
     # Packages: fixtures/<org>/<name>/<version>/{zpkg.json, files...}
     packages: dict[tuple[str, str], list[dict]] = {}
@@ -125,7 +166,7 @@ def main() -> int:
             print(f"ERROR: org segment must be lowercase canonical form: {org}", file=sys.stderr)
             return 2
         try:
-            meta = json.loads(meta_path.read_text())
+            metadata = json.loads(meta_path.read_text())
             blob = deterministic_tar_zst(version_dir)
         except (OSError, ValueError, json.JSONDecodeError, subprocess.CalledProcessError) as error:
             print(f"ERROR: cannot export {org}/{name}@{version}: {error}", file=sys.stderr)
@@ -134,10 +175,10 @@ def main() -> int:
         packages.setdefault((org, name), []).append(
             {
                 "version": version,
-                "deps": meta.get("deps", []),
+                "deps": metadata.get("deps", []),
                 "cksum": f"sha256:{sha256_bytes(blob)}",
                 "size": len(blob),
-                "yanked": bool(meta.get("yanked", False)),
+                "yanked": bool(metadata.get("yanked", False)),
             }
         )
 
@@ -145,13 +186,17 @@ def main() -> int:
         print("ERROR: fixture set contains no package versions", file=sys.stderr)
         return 2
 
-    for (org, name), lines in sorted(packages.items()):
-        lines.sort(key=lambda l: semver_key(l["version"]))
-        ndjson = "".join(
-            json.dumps(line, sort_keys=True, separators=(",", ":")) + "\n"
-            for line in lines
-        )
-        emit(f"index/{org}/{name}", ndjson.encode())
+    try:
+        for (org, name), lines in sorted(packages.items()):
+            lines.sort(key=lambda line: semver_key(line["version"]))
+            ndjson = "".join(
+                json.dumps(line, sort_keys=True, separators=(",", ":")) + "\n"
+                for line in lines
+            )
+            emit(f"index/{org}/{name}", ndjson.encode())
+    except (ValueError, TypeError) as error:
+        print(f"ERROR: invalid package version metadata: {error}", file=sys.stderr)
+        return 2
 
     discovery = {
         "schema_version": SCHEMA_VERSION,
@@ -171,10 +216,12 @@ def main() -> int:
     )
 
     files_entry = [
-        {"path": rel, "sha256": sha256_bytes(data), "size": len(data)}
-        for rel, data in sorted(written)
+        {"path": relative, "sha256": sha256_bytes(data), "size": len(data)}
+        for relative, data in sorted(objects.items())
     ]
-    tree_material = "".join(f"{f['path']} {f['sha256']}\n" for f in files_entry)
+    tree_material = "".join(
+        f"{entry['path']} {entry['sha256']}\n" for entry in files_entry
+    )
     checkpoint = {
         "schema_version": SCHEMA_VERSION,
         "seq": args.seq,
@@ -184,9 +231,17 @@ def main() -> int:
         "files": files_entry,
         "tree_sha256": sha256_bytes(tree_material.encode()),
     }
-    (out / "checkpoint.json").write_bytes(
-        (json.dumps(checkpoint, indent=2, sort_keys=True) + "\n").encode()
+    emit(
+        "checkpoint.json",
+        (json.dumps(checkpoint, indent=2, sort_keys=True) + "\n").encode(),
     )
+
+    try:
+        publish_tree(args.out, objects)
+    except (OSError, ValueError) as error:
+        print(f"ERROR: cannot publish static registry tree: {error}", file=sys.stderr)
+        return 2
+
     print(
         f"built {len(files_entry)} objects + checkpoint "
         f"(tree_sha256={checkpoint['tree_sha256'][:12]}…)"
