@@ -16,8 +16,10 @@ on:
       - "tests/generated-plan-validator-gitlinks.test.mjs"
       - "tests/export-test-org-fleet-index.test.mjs"
       - "tests/idempotent-fleet-pr-repair.test.mjs"
+      - "tests/secure-fleet-handoff-scope.test.mjs"
       - "docs/test-org-fleet.md"
       - "docs/test-org-fleet-index.md"
+      - "docs/test-org-fleet-app-auth.md"
       - "docs/test-org-source-certification.md"
       - ".github/fleet-handoff/START"
       - ".github/fleet-resume/START"
@@ -40,8 +42,10 @@ on:
       - "tests/generated-plan-validator-gitlinks.test.mjs"
       - "tests/export-test-org-fleet-index.test.mjs"
       - "tests/idempotent-fleet-pr-repair.test.mjs"
+      - "tests/secure-fleet-handoff-scope.test.mjs"
       - "docs/test-org-fleet.md"
       - "docs/test-org-fleet-index.md"
+      - "docs/test-org-fleet-app-auth.md"
       - "docs/test-org-source-certification.md"
       - ".github/fleet-handoff/START"
       - ".github/fleet-resume/START"
@@ -86,12 +90,13 @@ jobs:
             tests/test-org-fleet-source-certification.test.mjs \
             tests/generated-plan-validator-gitlinks.test.mjs \
             tests/export-test-org-fleet-index.test.mjs \
-            tests/idempotent-fleet-pr-repair.test.mjs
+            tests/idempotent-fleet-pr-repair.test.mjs \
+            tests/secure-fleet-handoff-scope.test.mjs
 
       - name: Export canonical repository index
         run: |
           node scripts/export-test-org-fleet-index.mjs > /tmp/canonical-test-fleet-index.json
-          node -e 'const p=require("/tmp/canonical-test-fleet-index.json"); if(p.expectedRepositoryCount!==341||p.managedRepositoryCount!==319||p.retainedRepositoryCount!==22) process.exit(1)'
+          node -e 'const p=require("/tmp/canonical-test-fleet-index.json"); if(p.expectedRepositoryCount!==360||p.managedRepositoryCount!==338||p.retainedRepositoryCount!==22) process.exit(1)'
           {
             echo '### Canonical paired test-fleet index'
             echo
@@ -104,4 +109,4 @@ jobs:
         run: |
           env -u GH_TOKEN -u GITHUB_TOKEN \
             node scripts/bootstrap-test-org-fleet.mjs --dry-run --summary-json > /tmp/test-org-fleet-plan.json
-          node -e 'const p=require("/tmp/test-org-fleet-plan.json"); if(p.mode!=="dry-run"||p.planned!==319||p.created||p.committed||p.pullRequests) process.exit(1)'
+          node -e 'const p=require("/tmp/test-org-fleet-plan.json"); if(p.mode!=="dry-run"||p.planned!==338||p.created||p.committed||p.pullRequests) process.exit(1)'
