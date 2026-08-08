@@ -14,7 +14,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  ZED_CLI_REF: 70fd364c5cf592e2ba03aed3670b4c1601c0836c
+  ZED_CLI_REF: d6842bd1219a657bcfbabd8d2cd2361a1a57dfba
 
 jobs:
   quality:
@@ -216,7 +216,11 @@ jobs:
           }, report
           assert report["summary"]["recovery_pending"] is True, report
           assert report["summary"]["frozen_ready"] is False, report
-          assert any(d["code"] == "RECOVERY_PENDING" for d in report["diagnostics"]), report
+          recovery = next(d for d in report["diagnostics"] if d["code"] == "RECOVERY_PENDING")
+          assert recovery["actions"][0]["argv"] == ["zed", "install", "--frozen"], recovery
+          assert recovery["actions"][0]["mutates_project"] is True, recovery
+          assert recovery["actions"][0]["requires_network"] is True, recovery
+          assert recovery["actions"][0]["executes_package_code"] is True, recovery
           assert before == after, (before, after)
           assert sentinel.read_text(encoding="utf-8") == "must-survive"
           assert "fake-env-token-that-must-not-escape" not in result.stdout + result.stderr
