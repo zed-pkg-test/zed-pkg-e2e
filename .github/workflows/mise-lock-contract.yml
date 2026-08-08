@@ -1,0 +1,121 @@
+name: complete current mise lock contract
+
+on:
+  pull_request:
+    paths:
+      - .github/workflows/mise-lock-contract.yml
+      - docs/mise-lock-contract-certification.md
+  workflow_dispatch:
+    inputs:
+      zed_cli_ref:
+        description: Immutable zed-cli commit to certify
+        required: false
+        default: 7977b1d43231a68e1ac34903e0f18cef5135add6
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mise-lock-contract-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: "1"
+  ZED_CLI_REF: ${{ github.event.inputs.zed_cli_ref || '7977b1d43231a68e1ac34903e0f18cef5135add6' }}
+  ZED_INTERFACES_REF: a23cdd2ac509a39ca6fd6d21a3774fdd3a0f7660
+
+jobs:
+  certify:
+    name: lock contract / ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-24.04
+          - macos-15
+          - windows-2025
+
+    steps:
+      - name: Require immutable component pins
+        run: |
+          set -euo pipefail
+          [[ "$ZED_CLI_REF" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$ZED_INTERFACES_REF" =~ ^[0-9a-f]{40}$ ]]
+
+      - name: Check out certification harness
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: harness
+          fetch-depth: 1
+          persist-credentials: false
+          show-progress: false
+
+      - name: Check out immutable zed CLI
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: zed-pkg/zed-cli
+          ref: ${{ env.ZED_CLI_REF }}
+          path: zed-cli
+          fetch-depth: 1
+          persist-credentials: false
+          show-progress: false
+
+      - name: Verify canonical interface pin
+        run: |
+          set -euo pipefail
+          grep -F "$ZED_INTERFACES_REF" zed-cli/Cargo.toml
+          grep -F "$ZED_INTERFACES_REF" zed-cli/Cargo.lock
+
+      - name: Install validation toolchain
+        run: |
+          set -euo pipefail
+          rustup toolchain install stable --profile minimal --component rustfmt,clippy
+          rustup default stable
+          rustc --version --verbose
+          cargo --version --verbose
+
+      - name: Certify complete lock identity
+        run: |
+          set -euo pipefail
+          cargo fmt --all --check --manifest-path zed-cli/Cargo.toml
+          cargo test --locked --manifest-path zed-cli/Cargo.toml mise_lock
+          cargo test --locked --manifest-path zed-cli/Cargo.toml --test mise_lock_contract
+          cargo clippy --locked --manifest-path zed-cli/Cargo.toml --all-targets -- -D warnings
+
+      - name: Re-run deterministic round-trip canaries
+        run: |
+          set -euo pipefail
+          cargo test --locked --manifest-path zed-cli/Cargo.toml \
+            mise_lock::tests::complete_current_lock_round_trips_and_is_frozen_portable
+          cargo test --locked --manifest-path zed-cli/Cargo.toml \
+            mise_lock::tests::compact_checksum_and_table_forms_have_the_same_identity
+          cargo test --locked --manifest-path zed-cli/Cargo.toml \
+            mise_lock::tests::ordered_additional_artifacts_change_semantic_identity
+          cargo test --locked --manifest-path zed-cli/Cargo.toml \
+            --test mise_lock_contract \
+            pinned_current_mise_wire_fixture_round_trips_without_platform_key_loss
+          cargo test --locked --manifest-path zed-cli/Cargo.toml \
+            --test mise_lock_contract \
+            provenance_mutation_in_current_wire_changes_semantic_identity
+
+  gate:
+    name: All current mise lock platforms passed
+    if: always()
+    needs: certify
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Enforce aggregate result
+        env:
+          MATRIX_RESULT: ${{ needs.certify.result }}
+        run: |
+          set -euo pipefail
+          printf 'mise-lock-contract=%s\n' "$MATRIX_RESULT"
+          test "$MATRIX_RESULT" = success

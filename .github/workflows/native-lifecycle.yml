@@ -1,0 +1,54 @@
+name: native dependency lifecycle acceptance
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/native-lifecycle.yml"
+      - "scripts/native_lifecycle.py"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: native-lifecycle-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Immutable zed-cli PR #48 commit validated by its complete Rust suite.
+  ZED_CLI_REF: 9a3c849f4be3a4a5f7e1af0d180e748df73f0d9c
+
+jobs:
+  acceptance:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out acceptance harness
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+
+      - name: Check out immutable zed-cli candidate
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          repository: zed-pkg/zed-cli
+          ref: ${{ env.ZED_CLI_REF }}
+          path: candidate
+          persist-credentials: false
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30
+
+      - name: Build immutable candidate
+        shell: bash
+        run: cargo build --locked --release --manifest-path candidate/Cargo.toml
+
+      - name: Validate acceptance harness syntax
+        shell: bash
+        run: python3 -m py_compile scripts/native_lifecycle.py
+
+      - name: Exercise native dependencies and staged hooks
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/native_lifecycle.py \
+            --zed candidate/target/release/zed \
+            --work-root "$RUNNER_TEMP/native-lifecycle"

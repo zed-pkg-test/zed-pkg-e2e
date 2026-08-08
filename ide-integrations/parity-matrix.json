@@ -1,0 +1,15 @@
+{
+  "schema": "zed-pkg/ide-parity/v1",
+  "contract_version": 1,
+  "linear_issue": "DEN-2508",
+  "required_core_capabilities": ["multi_root_discovery", "manifest_diagnostics", "lock_diagnostics", "materialization_diagnostics", "staging_recovery", "cli_validation", "argv_execution", "bounded_execution", "output_redaction", "explicit_mutation_confirmation", "versioned_inspect_adapter", "deterministic_fallback", "native_unit_tests", "retained_artifact"],
+  "integrations": {
+    "sublimetext": {"repository": "zed-pkg/zed-sublimetext", "state": "live", "platforms": ["linux", "macos", "windows"], "native_language": "python", "artifact": ".sublime-package"},
+    "jetbrains": {"repository": "zed-pkg/zed-intellij", "state": "live", "platforms": ["linux", "macos", "windows"], "native_language": "kotlin", "artifact": "plugin-zip"},
+    "vscode": {"repository": "zed-pkg/zed-vscode", "state": "dedicated-repo-candidate", "candidate_sha": "c1d3318a2cf8cd717f9b0af67117ddbac3e28d2e", "pull_request": 1, "platforms": ["linux", "macos", "windows"], "native_language": "javascript", "artifact": "vsix"},
+    "qtcreator": {"repository": "zed-pkg/zed-qtcreator", "state": "dedicated-repo-candidate", "candidate_sha": "8e7958c7c85a305b59accfe82c28e7ff42bfecba", "pull_request": 1, "platforms": ["linux", "macos", "windows"], "native_language": "cpp", "artifact": "qtcreator-plugin"},
+    "xcode": {"repository": "zed-pkg/zed-xcode", "state": "dedicated-repo-candidate", "candidate_sha": "9b9304fee2ff236fc59407ddd97cc2c01225a69d", "pull_request": 1, "platforms": ["macos"], "native_language": "swift", "artifact": "appex"},
+    "eclipse": {"repository": "zed-pkg/zed-eclipse", "state": "dedicated-repo-candidate", "candidate_sha": "246b46048cced1d1072afd3bedc9849efe3a8a8f", "pull_request": 1, "platforms": ["linux", "macos", "windows"], "native_language": "java", "artifact": "p2-site"},
+    "visual-studio": {"repository": "zed-pkg/zed-visual-studio", "state": "dedicated-repo-candidate", "candidate_sha": "d85a9c827140426a8d9401b5c269ff36f591a299", "pull_request": 1, "platforms": ["windows"], "native_language": "csharp", "artifact": "vsix"}
+  }
+}

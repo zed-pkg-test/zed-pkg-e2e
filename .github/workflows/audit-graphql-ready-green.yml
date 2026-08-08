@@ -1,0 +1,37 @@
+name: audit isolated green ready PRs through GraphQL
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/pr-merge/AUDIT-GRAPHQL-READY-GREEN"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: audit-graphql-ready-green
+  cancel-in-progress: false
+
+jobs:
+  audit:
+    if: "${{ github.event.head_commit.message == 'chore: audit isolated green ready PRs' }}"
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      FLEET_GH_TOKEN: ${{ secrets.FLEET_GH_TOKEN }}
+    steps:
+      - name: Check out trusted GraphQL auditor
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: Audit exact heads without writes
+        shell: bash
+        run: node .github/scripts/audit-graphql-ready-green.mjs
+      - name: Upload machine-readable audit
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: graphql-ready-green-audit
+          path: ready-green-audit
+          if-no-files-found: error
+          retention-days: 1

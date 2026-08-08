@@ -1,0 +1,152 @@
+name: audit semantic merge conflicts
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/pr-merge/CONFLICT-AUDIT"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: audit-semantic-merge-conflicts
+  cancel-in-progress: false
+
+jobs:
+  audit:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      GH_TOKEN: ${{ secrets.FLEET_GH_TOKEN }}
+    steps:
+      - name: Validate stored credential
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test -n "$GH_TOKEN"
+          test "$(gh api user --jq '.login')" = "ORESoftware"
+
+      - name: Inventory ready pull requests with real merge conflicts
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          node <<'NODE'
+          const token = process.env.GH_TOKEN;
+          const headers = {
+            Accept: 'application/vnd.github+json',
+            Authorization: `Bearer ${token}`,
+            'X-GitHub-Api-Version': '2022-11-28',
+            'User-Agent': 'semantic-conflict-inventory',
+          };
+          const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+          async function request(url, attempts = 5) {
+            let last;
+            for (let attempt = 1; attempt <= attempts; attempt += 1) {
+              const response = await fetch(url, { headers });
+              const text = await response.text();
+              const value = text ? JSON.parse(text) : null;
+              if (response.ok) return value;
+              last = new Error(`${response.status} ${url}: ${text.slice(0, 500)}`);
+              if (![429, 500, 502, 503, 504].includes(response.status) || attempt === attempts) throw last;
+              await sleep(attempt * attempt * 1000);
+            }
+            throw last;
+          }
+
+          async function mapLimit(values, limit, fn) {
+            const results = new Array(values.length);
+            let next = 0;
+            async function worker() {
+              while (true) {
+                const index = next++;
+                if (index >= values.length) return;
+                try { results[index] = await fn(values[index], index); }
+                catch (error) { results[index] = { error: error.message, item: values[index] }; }
+              }
+            }
+            await Promise.all(Array.from({ length: Math.min(limit, values.length) }, worker));
+            return results;
+          }
+
+          const byUrl = new Map();
+          const query = encodeURIComponent('is:pr is:open author:ORESoftware draft:false created:<2026-08-05T12:45:00Z sort:updated-desc');
+          for (let page = 1; page <= 10; page += 1) {
+            const result = await request(`https://api.github.com/search/issues?q=${query}&per_page=100&page=${page}`);
+            for (const item of result.items || []) byUrl.set(item.html_url, item);
+            if ((result.items || []).length < 100) break;
+          }
+          console.log(`READY_SNAPSHOT count=${byUrl.size}`);
+
+          const inspected = await mapLimit([...byUrl.values()], 12, async (item) => {
+            const repo = item.repository_url.replace('https://api.github.com/repos/', '');
+            let pr = await request(`https://api.github.com/repos/${repo}/pulls/${item.number}`);
+            for (let attempt = 0; pr.mergeable == null && attempt < 3; attempt += 1) {
+              await sleep(1200 + attempt * 600);
+              pr = await request(`https://api.github.com/repos/${repo}/pulls/${item.number}`);
+            }
+            if (pr.mergeable !== false && pr.mergeable_state !== 'dirty') return null;
+            const files = await request(`https://api.github.com/repos/${repo}/pulls/${item.number}/files?per_page=100`);
+            return {
+              repo,
+              number: item.number,
+              title: item.title,
+              url: item.html_url,
+              base: pr.base?.ref,
+              base_sha: pr.base?.sha,
+              head: pr.head?.ref,
+              head_sha: pr.head?.sha,
+              mergeable: pr.mergeable,
+              mergeable_state: pr.mergeable_state,
+              additions: pr.additions,
+              deletions: pr.deletions,
+              changed_files: pr.changed_files,
+              comments: pr.comments,
+              review_comments: pr.review_comments,
+              created_at: pr.created_at,
+              updated_at: pr.updated_at,
+              test_org: repo.split('/')[0].toLowerCase().endsWith('-test'),
+              files: files.map((file) => ({
+                path: file.filename,
+                status: file.status,
+                additions: file.additions,
+                deletions: file.deletions,
+              })),
+            };
+          });
+
+          const conflicts = inspected
+            .filter((value) => value && !value.error)
+            .sort((a, b) =>
+              Number(a.test_org) - Number(b.test_org) ||
+              a.changed_files - b.changed_files ||
+              (a.additions + a.deletions) - (b.additions + b.deletions) ||
+              String(b.updated_at).localeCompare(String(a.updated_at))
+            );
+          const errors = inspected.filter((value) => value?.error);
+
+          console.log(`CONFLICT_SUMMARY ${JSON.stringify({ ready_observed: byUrl.size, conflicts: conflicts.length, inspection_errors: errors.length })}`);
+          for (const conflict of conflicts.slice(0, 100)) {
+            console.log(`CONFLICT ${JSON.stringify(conflict)}`);
+          }
+          for (const error of errors.slice(0, 20)) {
+            console.log(`INSPECTION_ERROR ${JSON.stringify(error)}`);
+          }
+
+          const rows = conflicts.slice(0, 50).map((conflict) =>
+            `| ${conflict.repo}#${conflict.number} | ${conflict.changed_files} | ${conflict.additions} | ${conflict.deletions} | ${conflict.files.slice(0, 6).map((file) => `\`${file.path}\``).join('<br>')} | ${conflict.title.replaceAll('|', '\\|')} |`
+          );
+          const summary = [
+            '## Semantic merge-conflict inventory',
+            '',
+            `- Ready original-backlog PRs observed: ${byUrl.size}`,
+            `- Real conflicts: ${conflicts.length}`,
+            `- Inspection errors: ${errors.length}`,
+            '',
+            '| PR | Files | + | - | First paths | Title |',
+            '|---|---:|---:|---:|---|---|',
+            ...rows,
+          ];
+          require('node:fs').appendFileSync(process.env.GITHUB_STEP_SUMMARY, summary.join('\n') + '\n');
+          NODE

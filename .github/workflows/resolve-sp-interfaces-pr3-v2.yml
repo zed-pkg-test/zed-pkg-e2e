@@ -1,0 +1,150 @@
+name: resolve sp-interfaces PR 3 semantically v2
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/pr-merge/RESOLVE-SP-INTERFACES-3-V2"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: resolve-sp-interfaces
+  cancel-in-progress: false
+
+jobs:
+  resolve:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      GH_TOKEN: ${{ secrets.FLEET_GH_TOKEN }}
+      REPOSITORY: StreemPilot/sp-interfaces
+      HEAD_BRANCH: agent/chat-concurrency-invariants
+      EXPECTED_HEAD: f3b4a7fbaf051e10c6b7af4f2f1238c54ee859ea
+      EXPECTED_MAIN: 26fe896bd30f6e35c0de6dbbf28e442d05a1a038
+    steps:
+      - name: Validate credential and exact branch heads
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test -n "$GH_TOKEN"
+          test "$(gh api user --jq '.login')" = "ORESoftware"
+          gh auth setup-git
+
+          workdir="$(mktemp -d)"
+          echo "WORKDIR=$workdir" >> "$GITHUB_ENV"
+          git clone --no-tags "https://github.com/${REPOSITORY}.git" "$workdir/repo"
+          cd "$workdir/repo"
+          git fetch origin \
+            "+refs/heads/main:refs/remotes/origin/main" \
+            "+refs/heads/${HEAD_BRANCH}:refs/remotes/origin/${HEAD_BRANCH}"
+          test "$(git rev-parse origin/main)" = "$EXPECTED_MAIN"
+          test "$(git rev-parse "origin/${HEAD_BRANCH}")" = "$EXPECTED_HEAD"
+          git checkout -B "$HEAD_BRANCH" "$EXPECTED_HEAD"
+          git config user.name "Alexander Mills"
+          git config user.email "alex@oresoftware.com"
+
+      - name: Construct the semantic two-parent tree
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          cd "$WORKDIR/repo"
+
+          # Keep the complete interfaces project and PR 3 invariant. Integrate
+          # current main's useful Zed package metadata and short canonical name,
+          # but do not propagate its destructive mass deletion of contracts.
+          git show "$EXPECTED_MAIN:.zpkg.toml" > .zpkg.toml
+          sed -i '1s/^# streempilot-interfaces$/# sp-interfaces/' README.md
+          grep -q '^# sp-interfaces$' README.md
+          if ! grep -q '^## Zed package$' README.md; then
+            cat >> README.md <<'README'
+
+          ## Zed package
+
+          This repository is the canonical `sp-interfaces` Zed package. Its
+          `.zpkg.toml` manifest lets consumers install a pinned dependency instead
+          of copying schemas or generated bindings into downstream repositories.
+          README
+          fi
+
+          git add .zpkg.toml README.md
+          git diff --cached --check
+          tree="$(git write-tree)"
+          message_file="$(mktemp)"
+          cat > "$message_file" <<'MSG'
+          merge: restore canonical interfaces and retain Zed packaging
+
+          Preserve the full StreemPilot contract source, generators, generated Rust/TypeScript/Dart bindings, SQL, tests, CI, and PR 3's one-featured-comment invariant. Retain current main's short sp-interfaces identity and .zpkg.toml package manifest. Do not propagate the mass deletion that erased the repository's canonical contract responsibilities.
+          MSG
+          new_head="$(git commit-tree "$tree" -p "$EXPECTED_HEAD" -p "$EXPECTED_MAIN" < "$message_file")"
+          git reset --hard "$new_head"
+          git merge-base --is-ancestor "$EXPECTED_HEAD" HEAD
+          git merge-base --is-ancestor "$EXPECTED_MAIN" HEAD
+          test "$(git rev-list --parents -n 1 HEAD | wc -w)" -eq 3
+          echo "SEMANTIC_HEAD=$new_head" >> "$GITHUB_ENV"
+
+      - name: Validate restored repository and PR invariant
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          cd "$WORKDIR/repo"
+          required=(
+            .zpkg.toml
+            .github/workflows/ci.yml
+            package.json
+            package-lock.json
+            scripts/generate.mjs
+            schema/domain.schema.json
+            schema/messaging.schema.json
+            schema/signaling.schema.json
+            sql/schema.sql
+            sql/migrations/20260803_chat_comment_invariants.sql
+            tests/contracts.test.mjs
+            tests/chat-sql-invariants.test.mjs
+            generated/rust/Cargo.toml
+            generated/typescript/index.ts
+            generated/dart/streempilot_interfaces.dart
+          )
+          for path in "${required[@]}"; do
+            test -s "$path" || { echo "::error file=$path::required restored file missing"; exit 1; }
+          done
+          grep -q 'chat_messages_one_on_stream_per_broadcast_idx' sql/schema.sql
+          grep -q 'ranked_visible_comments' sql/migrations/20260803_chat_comment_invariants.sql
+
+          npm ci
+          npm run check:generated
+          node --test tests/*.test.mjs
+          npx tsc --strict --noEmit --target es2022 generated/typescript/index.ts
+          cargo check --locked --manifest-path generated/rust/Cargo.toml
+          cargo test --locked --manifest-path generated/rust/Cargo.toml
+          git diff --check "$EXPECTED_MAIN"...HEAD
+
+          mapfile -t versus_pr < <(git diff --name-only "$EXPECTED_HEAD"...HEAD | sort)
+          expected=(.zpkg.toml README.md)
+          [[ "${versus_pr[*]}" == "${expected[*]}" ]] || {
+            printf '::error::unexpected additions over PR 3: %s\n' "${versus_pr[*]}"
+            exit 1
+          }
+
+      - name: Push exact semantic head
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          cd "$WORKDIR/repo"
+          test "$(git ls-remote origin "refs/heads/${HEAD_BRANCH}" | cut -f1)" = "$EXPECTED_HEAD"
+          git push origin "$SEMANTIC_HEAD:refs/heads/${HEAD_BRANCH}"
+          test "$(git ls-remote origin "refs/heads/${HEAD_BRANCH}" | cut -f1)" = "$SEMANTIC_HEAD"
+
+      - name: Record result
+        shell: bash
+        run: |
+          {
+            echo "## sp-interfaces PR 3 semantic restoration"
+            echo
+            echo "- Old PR head: \`$EXPECTED_HEAD\`"
+            echo "- Integrated main: \`$EXPECTED_MAIN\`"
+            echo "- Resolved head: \`$SEMANTIC_HEAD\`"
+            echo "- Full contracts restored; Zed packaging retained"
+            echo "- Generator, Node, TypeScript, and Rust validation passed"
+          } >> "$GITHUB_STEP_SUMMARY"

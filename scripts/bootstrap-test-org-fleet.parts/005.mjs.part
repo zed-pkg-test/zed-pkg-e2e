@@ -1,0 +1,64 @@
+ureTopics(owner, repository, topics) {
+  if (!options.apply || repository._planned) return;
+  const normalized = [...new Set(topics.map((topic) => topic.toLowerCase().replace(/[^a-z0-9-]/g, '-')).filter(Boolean))].slice(0, 20);
+  await api('PUT', `/repos/${route(owner)}/${route(repository.name)}/topics`, { names: normalized });
+}
+
+async function applyGovernance(pair) {
+  const spec = { name: '.github', profile: 'governance', description: `Governance and reusable test workflow policy for ${pair.testOrg}.`, visibility: 'public' };
+  const repository = await ensureRepository(pair.testOrg, spec, 'public');
+  if (!options.apply || repository._planned) return;
+  const result = await writeTree(pair.testOrg, repository, manifest.policy.governanceBranch, renderGovernanceFiles(pair), [], 'chore: bootstrap test org governance');
+  await ensurePullRequest(pair.testOrg, repository, manifest.policy.governanceBranch, result.defaultBranch, 'chore: bootstrap test organization governance', `## Changes\n- add organization profile and community health files\n- add a credential-free reusable contract workflow\n- document immutable source-pin and privacy requirements\n\n## Why\nStandardize governance for the ${pair.sourceOrg} test fleet.\n\n## Checks\n- generated files are deterministic\n- checkout credentials are not persisted\n- actions are pinned to immutable commits`);
+  await ensureTopics(pair.testOrg, repository, ['test-fleet', 'governance', 'github-actions']);
+}
+
+async function applyTestRepository(pair, spec) {
+  stats.planned += options.apply ? 0 : 1;
+  const repository = await ensureRepository(pair.testOrg, spec, pair.defaultVisibility);
+  if (!options.apply || repository._planned) return;
+  const generated = await generateRepositoryFiles(pair, spec);
+  const result = await writeTree(pair.testOrg, repository, manifest.policy.branch, generated.files, generated.gitlinks, `test: bootstrap ${spec.profile} harness`);
+  await ensurePullRequest(pair.testOrg, repository, manifest.policy.branch, result.defaultBranch, `test: bootstrap ${spec.profile} harness`, `## Changes\n- add the generated ${spec.profile} contract\n- pin source repositories to immutable commits\n- add submodule, Zed, and native-package lanes where declared\n- add credential-free PR validation and gated integration workflow\n\n## Why\nCreate the specialized ${pair.sourceOrg} test surface for: ${spec.focus.join('; ')}.\n\n## Impact\n${generated.missing.length ? `Source-gated until: ${generated.missing.join(', ')}.` : 'All declared source repositories resolved at bootstrap time.'}\n\n## Checks\n- node scripts/validate-plan.mjs\n- profile-specific checks are recorded in test-plan.json`);
+  await ensureTopics(pair.testOrg, repository, [...(spec.topics ?? []), pair.sourceOrg.toLowerCase(), spec.profile]);
+}
+
+async function mapConcurrent(items, limit, fn) {
+  const queue = [...items];
+  const workers = Array.from({ length: Math.min(limit, queue.length) }, async () => {
+    while (queue.length) {
+      const item = queue.shift();
+      try { await fn(item); }
+      catch (error) { stats.errors += 1; console.error(`error: ${error.stack || error.message}`); }
+    }
+  });
+  await Promise.all(workers);
+}
+
+const pairs = manifest.pairs.filter(selectedPair);
+for (const pair of pairs) {
+  const repos = pair.repositories.filter(selectedRepo);
+  log('selected test organization', { source: pair.sourceOrg, test: pair.testOrg, repositories: repos.length, governance: options.repos.length === 0 });
+}
+
+if (!options.apply) {
+  const selectedRepos = pairs.flatMap((pair) => pair.repositories.filter(selectedRepo).map((repository) => ({ pair, repository })));
+  stats.planned = selectedRepos.length + (options.repos.length === 0 ? pairs.length : 0);
+  for (const { pair, repository } of selectedRepos) log('would create or update harness', { repository: `${pair.testOrg}/${repository.name}`, profile: repository.profile, sourceCount: repository.sources.length, importLanes: repository.imports.length });
+} else {
+  await mapConcurrent(pairs, options.concurrency, async (pair) => {
+    if (options.repos.length === 0) await applyGovernance(pair);
+    for (const spec of pair.repositories.filter(selectedRepo)) await applyTestRepository(pair, spec);
+  });
+}
+
+const summary = {
+  mode: options.apply ? 'apply' : 'dry-run',
+  selectedOrganizations: pairs.length,
+  selectedRepositories: pairs.reduce((sum, pair) => sum + pair.repositories.filter(selectedRepo).length, 0),
+  governanceRepositories: options.repos.length === 0 ? pairs.length : 0,
+  ...stats,
+};
+if (options.summaryJson) process.stdout.write(`${JSON.stringify(summary, null, 2)}\n`);
+else console.log(`summary ${JSON.stringify(summary)}`);
+if (stats.errors) process.exit(1);

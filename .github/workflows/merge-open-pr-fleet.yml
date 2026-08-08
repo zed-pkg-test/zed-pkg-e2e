@@ -1,0 +1,45 @@
+name: merge open PR fleet
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/pr-merge/PREFLIGHT"
+      - ".github/pr-merge/APPLY"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: merge-open-pr-fleet
+  cancel-in-progress: false
+
+jobs:
+  merge:
+    if: >-
+      ${{
+        github.event.head_commit.message == 'chore: preflight safe PR fleet merge' ||
+        github.event.head_commit.message == 'chore: merge safe PR fleet'
+      }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    env:
+      GH_TOKEN: ${{ secrets.FLEET_GH_TOKEN }}
+      TARGET: "509"
+      APPLY: ${{ github.event.head_commit.message == 'chore: merge safe PR fleet' && 'true' || 'false' }}
+    steps:
+      - name: Validate stored credential
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test -n "$GH_TOKEN"
+          test "$(gh api user --jq '.login')" = "ORESoftware"
+
+      - name: Check out the exact merger implementation
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+
+      - name: Audit and optionally merge exact heads
+        shell: bash
+        run: node .github/scripts/merge-open-pr-fleet.mjs

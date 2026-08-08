@@ -1,0 +1,113 @@
+{
+  "binary": {
+    "version": "zed 0.1.0",
+    "archive_sha256": "ed55e39811cac6303162536397562ed004c96c4cd7e09b531f0d323f59142aff",
+    "source_commit": "2f98df7b0f3f20bd8eaec6abbe768566833589bc"
+  },
+  "suites": {
+    "zed-pkg-test/offline-cache-e2e": {
+      "checks": [
+        {
+          "name": "cold publish/install and Node consumer import",
+          "status": "pass",
+          "detail": "2a1d43172e751afd41564bd47ba549cafed2f6a0c9750a3dd6517437534ea4d7"
+        },
+        {
+          "name": "offline frozen reinstall with registry absent and proxies dead",
+          "status": "pass"
+        },
+        {
+          "name": "shared-home cache reuse in second checkout",
+          "status": "pass"
+        },
+        {
+          "name": "corrupt cache + offline registry rejected without partial materialization",
+          "status": "pass"
+        },
+        {
+          "name": "corrupt cache recovers from immutable registry artifact",
+          "status": "pass"
+        }
+      ],
+      "status": "pass"
+    },
+    "zed-pkg-test/version-solver-e2e": {
+      "checks": [
+        {
+          "name": "compatible range selects highest matching version",
+          "status": "pass",
+          "detail": "1.1.0"
+        },
+        {
+          "name": "exact version remains exact",
+          "status": "pass"
+        },
+        {
+          "name": "incompatible transitive constraints fail deterministically",
+          "status": "pass",
+          "detail": "          available versions: 2.0.0, 1.1.0, 1.0.0"
+        },
+        {
+          "name": "SemVer build-metadata ambiguity has a stable outcome",
+          "status": "pass",
+          "detail": "('resolved', '1.0.0+bbb')"
+        }
+      ],
+      "status": "pass"
+    },
+    "zed-pkg-test/security-adversarial-e2e": {
+      "checks": [
+        {
+          "name": "absolute symlink omitted from deterministic artifact without external bytes",
+          "status": "pass"
+        },
+        {
+          "name": "target directory traversal rejected",
+          "status": "pass"
+        },
+        {
+          "name": "package build hook does not execute without explicit consent",
+          "status": "pass"
+        },
+        {
+          "name": "explicit --allow-build executes declared hook",
+          "status": "pass",
+          "detail": "zed_modules/zed-pkg-test/hook-fixture/build-marker.txt"
+        },
+        {
+          "name": "tampered frozen lock rejected without partial install",
+          "status": "pass"
+        }
+      ],
+      "status": "pass"
+    },
+    "zed-pkg-test/manager-interop-e2e": {
+      "checks": [
+        {
+          "name": "mise frozen import/verify is parser-only, deterministic, and read-only",
+          "status": "pass",
+          "detail": "024d7c10747805264e831a8f1de9e288367b6c23201f2ae18c5967212ff74781"
+        },
+        {
+          "name": "mise ambiguity and incomplete frozen state fail closed",
+          "status": "pass"
+        },
+        {
+          "name": "asdf frozen import/verify validates immutable plugin/artifact provenance read-only",
+          "status": "pass",
+          "detail": "88a61a024d7fc0a7c32c7813076c23643bf8f6835fd8f3dbed1b1a1cdee632e8"
+        },
+        {
+          "name": "asdf moving selector rejected in frozen mode",
+          "status": "pass"
+        },
+        {
+          "name": "unsupported manager labels fail at typed CLI boundary",
+          "status": "pass",
+          "detail": "flox,devbox,nix"
+        }
+      ],
+      "status": "pass"
+    }
+  }
+}
