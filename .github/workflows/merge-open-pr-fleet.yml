@@ -15,8 +15,8 @@ permissions:
   contents: read
 
 concurrency:
-  group: merge-open-pr-fleet
-  cancel-in-progress: false
+  group: merge-open-pr-fleet-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   validate:
@@ -49,6 +49,8 @@ jobs:
           grep -Fq "github.event.head_commit.message == 'chore: merge safe PR fleet'" "$workflow"
           grep -Fq 'permissions:' "$workflow"
           grep -Fq 'contents: read' "$workflow"
+          grep -Fq 'group: merge-open-pr-fleet-${{ github.event_name }}-${{ github.ref }}' "$workflow"
+          grep -Fq "cancel-in-progress: 4{{ github.event_name == 'pull_request' }}" "$workflow"
           if grep -Eq -- '(^|[[:space:]])--force(-with-lease)?([[:space:]]|$)|contents:[[:space:]]*write' "$workflow"; then
             echo 'merge workflow must not use a force-update flag or grant the workflow token write access' >&2
             exit 1
