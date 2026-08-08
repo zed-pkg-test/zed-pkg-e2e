@@ -35,7 +35,7 @@ jobs:
           node scripts/export-test-org-fleet-index.mjs > "$RUNNER_TEMP/test-org-fleet-index.json"
           node -e "const x=require(process.argv[1]); if(x.pairCount!==19||x.specializedRepositoryCount!==319||x.managedRepositoryCount!==338||x.expectedRepositoryCount!==360) process.exit(1)" "$RUNNER_TEMP/test-org-fleet-index.json"
           git diff --check
-      - name: Commit the deterministic expansion
+      - name: Commit non-workflow generated files
         env:
           BRANCH_NAME: agent/add-hhm-test-fleet
         run: |
@@ -44,14 +44,11 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add \
             bootstrap/test-org-fleet.json.gz.b64.parts \
-            scripts/add-hhm-test-fleet.mjs \
             scripts/export-test-org-fleet-index.mjs \
             docs/test-org-fleet-index.md \
-            tests/test-org-fleet.test.mjs \
-            .github/workflows/apply-test-org-fleet.yml \
-            .github/workflows/secure-fleet-token-handoff.yml
+            tests/test-org-fleet.test.mjs
           if git diff --cached --quiet; then
-            echo "No generated changes"
+            echo "No non-workflow generated changes"
             exit 0
           fi
           git commit -m "test: add Hacker House Medellín test fleet"
