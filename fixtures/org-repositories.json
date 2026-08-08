@@ -3,7 +3,8 @@
   "organization": "zed-pkg-test",
   "package_organizations": [
     "zed-pkg-test",
-    "zedtest"
+    "zedtest",
+    "zed-pkg"
   ],
   "orchestrator": "zed-pkg-e2e",
   "repositories": [
