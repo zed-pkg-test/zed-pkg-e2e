@@ -22,9 +22,9 @@ defaults:
 env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: "1"
-  ZED_CLI_STAGING_REF: 2982bf2292c16b9a018e7e2a5a698aa23ffedb36
+  ZED_CLI_STAGING_REF: f6f125fa2465325687a6a678ed3a6c9a958fda30
   ZED_CLI_BASE_REF: 1ab18fcb2ff884e82af4cac4513d7b983a23c84a
-  ZED_INTERFACES_REF: 28e3a04cedd5437b9152476ded30409abb065c4e
+  ZED_INTERFACES_REF: ab784d43c9add1bdd527f832a719fdcc3c9491c8
 
 jobs:
   assemble:
@@ -62,7 +62,8 @@ jobs:
           set -euo pipefail
           test "$(git -C zed-cli rev-parse HEAD)" = "$ZED_CLI_STAGING_REF"
           test "$(git -C zed-cli rev-parse HEAD^)" = "$ZED_CLI_BASE_REF"
-          test "$(find zed-cli/.github -maxdepth 1 -name 'den-3017-apply.part-*' | wc -l | tr -d ' ')" = 6
+          test -f zed-cli/.github/den-3017-apply.py.gz.b64
+          test "$(find zed-cli/.github -maxdepth 1 -name 'den-3017-apply*' | wc -l | tr -d ' ')" = 1
 
       - name: Install validation toolchain
         run: |
@@ -76,10 +77,17 @@ jobs:
         working-directory: zed-cli
         run: |
           set -euo pipefail
-          cat .github/den-3017-apply.part-* > "$RUNNER_TEMP/den-3017-apply.py"
+          python3 - <<'PY'
+          import base64, gzip, os
+          from pathlib import Path
+          payload = Path('.github/den-3017-apply.py.gz.b64').read_bytes()
+          Path(os.environ['RUNNER_TEMP'], 'den-3017-apply.py').write_bytes(
+              gzip.decompress(base64.b64decode(payload))
+          )
+          PY
           PYTHONDONTWRITEBYTECODE=1 python3 "$RUNNER_TEMP/den-3017-apply.py"
           cargo update -p zed-interfaces --precise "$ZED_INTERFACES_REF"
-          rm .github/workflows/den-3017-apply.yml .github/den-3017-apply.part-*
+          rm .github/workflows/den-3017-apply.yml .github/den-3017-apply.py.gz.b64
           cargo fmt --all
           cargo fmt --all --check
           git diff --check
@@ -92,6 +100,7 @@ jobs:
           set -euo pipefail
           cargo test --locked --lib publish_rules
           cargo test --locked --lib manifest_and_zedignore_exclusions_are_a_conflict_safe_union
+          cargo test --locked --lib same_source_negation_can_cancel_an_earlier_manifest_exclusion
           cargo test --locked --lib polyglot_source_ignore_excludes_the_target_input
 
       - name: Run complete library test suite
