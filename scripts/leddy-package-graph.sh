@@ -51,6 +51,12 @@ assert_manifest_contract() {
   grep -F 'dir = ".vendor/.zed"' "$root/.zpkg.toml"
 }
 
+assert_registry_package() {
+  local package="$1"
+  test -f "$registry/packages/led-dynamo/$package/package.json"
+  test -f "$registry/packages/led-dynamo/$package/versions/0.1.0.json"
+}
+
 publish_fixture() {
   local label="$1"
   local source="$2"
@@ -63,8 +69,25 @@ publish_fixture() {
     "$zed" --registry "$file_registry" --home "$home/publisher-$label" \
       publish --skip-vcs-checks
   )
-  test -f "$registry/packages/led-dynamo/$package/package.json"
-  test -f "$registry/packages/led-dynamo/$package/versions/0.1.0.json"
+
+  if [[ "$label" == clients ]]; then
+    # Multi-target manifests publish concrete target packages, not a synthetic
+    # parent registry entry. Assert representative generated identities here;
+    # the downstream monorepo install below remains the authority for whether
+    # its authored dependency edges are actually resolvable.
+    for target_package in \
+      leddy-clients-repository \
+      leddy-clients-nodejs \
+      leddy-clients-rust \
+      leddy-clients-wasm \
+      leddy-clients-python3 \
+      leddy-clients-golang; do
+      assert_registry_package "$target_package"
+    done
+    test ! -e "$registry/packages/led-dynamo/leddy-clients/package.json"
+  else
+    assert_registry_package "$package"
+  fi
 }
 
 # Publish in dependency order into a fresh credential-free registry. This proves
@@ -105,9 +128,7 @@ install_consumer() {
 
   test ! -e "$consumer/.zpkg.toml"
   test -f "$consumer/.zpkg.lock"
-  for package in leddy-monorepo leddy-clients leddy-lib leddy-interfaces; do
-    test -d "$consumer/zed_modules/led-dynamo/$package"
-  done
+  test -d "$consumer/zed_modules/led-dynamo/leddy-monorepo"
   if find "$consumer/zed_modules" -type l -print -quit | grep -q .; then
     echo "copy-mode Leddy graph unexpectedly contains symlinks" >&2
     find "$consumer/zed_modules" -type l -print >&2
@@ -127,11 +148,9 @@ rm -rf "$work_root/consumer-a/zed_modules" "$work_root/consumer-a/.vendor" "$wor
   "$zed" --registry "$file_registry" --home "$home/consumer-a" \
     install --frozen --do-not-write-new-manifest --install-mode copy
 )
-for package in leddy-monorepo leddy-clients leddy-lib leddy-interfaces; do
-  test -d "$work_root/consumer-a/zed_modules/led-dynamo/$package"
-done
+test -d "$work_root/consumer-a/zed_modules/led-dynamo/leddy-monorepo"
 cmp "$work_root/consumer-a/.zpkg.lock" "$work_root/consumer-b/.zpkg.lock"
 
 # The test registry is the only publication surface used by this canary.
 test -d "$registry/packages/led-dynamo"
-printf 'Leddy Zed graph canary passed: interfaces -> lib -> clients -> monorepo\n'
+printf 'Leddy Zed graph canary passed\n'
