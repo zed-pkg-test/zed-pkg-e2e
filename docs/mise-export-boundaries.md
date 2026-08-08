@@ -8,19 +8,13 @@ This suite independently certifies deterministic, conflict-safe projection from 
 
 Canonical product PR: `zed-pkg/zed-cli#131`.
 
-Pinned current-main candidate:
+The product branch was semantically reconstructed on current `main`. Newer task-runtime, tool-profile, GitOps, locking, Nix, and role-auditor behavior remains authoritative. The durable exporter delta is limited to nine source, test, contract, and documentation files; no materializer workflow may remain in the final product diff.
 
-```text
-9fcd902c1e4c34c95f00dd97950d648cc6aba790
-```
-
-The product branch was semantically reconstructed on current `main`. Newer task-runtime, tool-profile, GitOps, locking, Nix, and role-auditor behavior remains authoritative. The durable exporter delta is limited to nine source, test, contract, and documentation files; no materializer workflow remains.
-
-The certification workflow pins the full immutable commit and never follows a mutable branch during a run.
+The certification workflow pins a full immutable product commit and never follows a mutable branch during a run. The pin is advanced whenever the product head changes, including ownership-integrity fixes.
 
 ## Certified behavior
 
-The harness runs the real CLI with an empty `PATH` and proves:
+The harnesses run the real CLI with an empty `PATH` and prove:
 
 - print mode is deterministic and read-only;
 - `--write` creates generated TOML plus typed ownership state;
@@ -28,6 +22,9 @@ The harness runs the real CLI with an empty `PATH` and proves:
 - repeated writes are idempotent;
 - hand-edited owned files are not overwritten;
 - differing unowned files are not adopted or overwritten;
+- an existing generated output cannot silently transfer ownership to a different plan, even when both plans currently render byte-identical TOML;
+- a stale or corrupted recorded output digest is rejected rather than silently repaired;
+- ownership-state failures leave both the generated output and state file unchanged;
 - safe missing output parent directories can be created transactionally;
 - output cannot alias its input plan, including case-only aliases relevant to Windows;
 - output and input cannot target the reserved export-state path;
@@ -46,7 +43,7 @@ The permanent workflow runs on:
 - macOS 15; and
 - Windows Server 2025.
 
-Each platform requires formatting, focused exporter unit tests, both real CLI test targets, all-target Clippy with warnings denied, a locked release build, and the black-box harness. An aggregate gate requires every platform to succeed. All ordinary repository-wide E2E workflows remain merge gates on the same certification head.
+Each platform requires formatting, focused exporter unit tests, both real CLI test targets, all-target Clippy with warnings denied, a locked release build, and both black-box harnesses. An aggregate gate requires every platform to succeed. All ordinary repository-wide E2E workflows remain merge gates on the same certification head.
 
 ## Deliberate boundary
 
@@ -64,9 +61,9 @@ The complete current manager-lock identity contract is separately merged and cer
 
 Promotion requires:
 
-1. the exact product head above remaining the final immutable head of `zed-pkg/zed-cli#131`;
+1. the workflow pin matching the final immutable head of `zed-pkg/zed-cli#131`;
 2. Ubuntu 24.04, macOS 15, and Windows Server 2025 success;
 3. formatting, focused unit tests, real CLI tests, a locked release build, and all-target Clippy with warnings denied;
-4. this black-box harness passing on all platforms, with symlink assertions skipped only where the host cannot create symlinks;
+4. both black-box harnesses passing on all platforms, with symlink assertions skipped only where the host cannot create symlinks;
 5. ordinary lifecycle, recursive-install, browser, install-boundary, and runtime-mise workflows remaining green; and
 6. exact implementation, certification, and merge commits recorded in DEN-1462 and the canonical mise interoperability policy.
