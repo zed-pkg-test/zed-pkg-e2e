@@ -5,6 +5,7 @@ on:
     paths:
       - scripts/git_submodule_overtake_lock.py
       - scripts/git_submodule_overtake_nested_lock.py
+      - scripts/project_recovery_operation_lock.py
       - docs/git-submodule-overtake-lock.md
       - .github/workflows/git-submodule-overtake-operation-lock.yml
   push:
@@ -12,6 +13,7 @@ on:
     paths:
       - scripts/git_submodule_overtake_lock.py
       - scripts/git_submodule_overtake_nested_lock.py
+      - scripts/project_recovery_operation_lock.py
       - docs/git-submodule-overtake-lock.md
       - .github/workflows/git-submodule-overtake-operation-lock.yml
   workflow_dispatch:
@@ -19,7 +21,7 @@ on:
       zed_cli_ref:
         description: Immutable zed-cli commit to certify
         required: false
-        default: c1435af21d15a359853df3c51687df67d72af24a
+        default: d163e98b9151340b368301b022c3a45bdf5bd70e
 
 permissions:
   contents: read
@@ -35,7 +37,7 @@ defaults:
 env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: "1"
-  ZED_CLI_REF: ${{ github.event.inputs.zed_cli_ref || 'c1435af21d15a359853df3c51687df67d72af24a' }}
+  ZED_CLI_REF: ${{ github.event.inputs.zed_cli_ref || 'd163e98b9151340b368301b022c3a45bdf5bd70e' }}
   ZED_INTERFACES_REF: d1bf8ef7c88a75292cbe8d697bfd269f30d62e2b
   ZED_LOCK_REF: a0dc78d385bc3ab553d3027b427f5f1428239c9c
 
@@ -43,7 +45,7 @@ jobs:
   contract:
     name: Process contention / ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 50
+    timeout-minutes: 55
     strategy:
       fail-fast: false
       matrix:
@@ -97,7 +99,8 @@ jobs:
           PYTHONPYCACHEPREFIX="$RUNNER_TEMP/python-cache" \
             python3 -m py_compile \
               harness/scripts/git_submodule_overtake_lock.py \
-              harness/scripts/git_submodule_overtake_nested_lock.py
+              harness/scripts/git_submodule_overtake_nested_lock.py \
+              harness/scripts/project_recovery_operation_lock.py
           git -C harness diff --check
           git -C zed-cli diff --check
           cargo fmt --all --check --manifest-path zed-cli/Cargo.toml
@@ -166,6 +169,28 @@ jobs:
           assert evidence["public_registry_mutation"] is False
           PY
 
+      - name: Certify pending recovery shares checkout ownership
+        env:
+          WORK_ROOT: ${{ runner.temp }}/zed-project-recovery-lock
+        run: |
+          set -euo pipefail
+          test ! -e "$WORK_ROOT"
+          python3 harness/scripts/project_recovery_operation_lock.py \
+            --zed "$RUNNER_TEMP/zed-bin/zed" \
+            --work-root "$WORK_ROOT"
+          python3 - "$WORK_ROOT/evidence/recovery-evidence.json" <<'PY'
+          import json
+          import pathlib
+          import sys
+
+          evidence = json.loads(pathlib.Path(sys.argv[1]).read_text(encoding="utf-8"))
+          assert evidence["schema"] == "zed.project-recovery-operation-lock/v1"
+          assert len(evidence["checks"]) == 4
+          assert evidence["observed_block_seconds"] >= 0.7
+          assert evidence["network_credentials"] is False
+          assert evidence["public_registry_mutation"] is False
+          PY
+
       - name: Require clean source checkouts
         run: |
           set -euo pipefail
@@ -180,6 +205,7 @@ jobs:
           path: |
             ${{ runner.temp }}/zed-overtake-operation-lock/evidence
             ${{ runner.temp }}/zed-overtake-nested-lock/evidence
+            ${{ runner.temp }}/zed-project-recovery-lock/evidence
           if-no-files-found: warn
           retention-days: 14
           include-hidden-files: false
