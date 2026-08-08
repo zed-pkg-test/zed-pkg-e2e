@@ -1,0 +1,8 @@
+{
+  "repository": "ORESoftware/k8s-libs-and-shared-defs",
+  "sha": "c1319a39c202568c2680b8221663a2093ad24a87",
+  "branch": "agent/den-2768-rust-enum-wire-values",
+  "linear": "DEN-2995",
+  "expect_fixed": false,
+  "note": "Pre-fix observation pin. Flip expect_fixed to true and repin to the repaired source head before promotion."
+}
