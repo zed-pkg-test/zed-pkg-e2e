@@ -21,10 +21,27 @@ def parse_args(argv: Sequence[str]) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
+def require_no_nested_state(nested: Path) -> None:
+    forbidden = (
+        nested / ".zed/operation.lock",
+        nested / ".zpkg.toml",
+        nested / ".zpkg.lock",
+        nested / ".zpkg-staging",
+    )
+    present = [str(path) for path in forbidden if path.exists()]
+    if present:
+        raise ContractError(
+            "nested cooperative install published a second project identity: "
+            + ", ".join(present)
+        )
+
+
 def main(argv: Sequence[str]) -> int:
     args = parse_args(argv)
     contract = Contract(args.zed, args.work_root)
     _, root = contract.fixture("cooperative-install")
+    nested = root / "packages/client/src"
+    nested.mkdir(parents=True)
 
     ready = contract.runs / "install.ready"
     release = contract.runs / "install.release"
@@ -36,10 +53,8 @@ def main(argv: Sequence[str]) -> int:
         "ZED_TEST_RELEASE": str(release),
     }
     holder = contract.start(
-        contract.zed_command(
-            "install-holder", "install", "--git-submodules"
-        ),
-        cwd=root,
+        contract.zed_command("install-holder", "install", "--git-submodules"),
+        cwd=nested,
         env=holder_env,
     )
     contract.wait_ready(ready, holder)
@@ -47,8 +62,9 @@ def main(argv: Sequence[str]) -> int:
     lock_path = root / ".zed/operation.lock"
     if not lock_path.is_file():
         raise ContractError(
-            "cooperative install reached Git sync before owning operation.lock"
+            "nested cooperative install reached Git sync before the superproject owned operation.lock"
         )
+    require_no_nested_state(nested)
     if (root / "vendor/child/.zpkg.toml").exists():
         raise ContractError("Git submodule update ran before the test release")
     if (root / ".zpkg.lock").exists():
@@ -63,6 +79,7 @@ def main(argv: Sequence[str]) -> int:
     blocked_for = time.monotonic() - started
     if (root / ".zpkg.lock").exists():
         raise ContractError("frozen waiter raced ahead of cooperative install")
+    require_no_nested_state(nested)
 
     release.write_text("release\n", encoding="utf-8")
     holder_output = contract.finish(holder, expected=0)
@@ -72,24 +89,28 @@ def main(argv: Sequence[str]) -> int:
     if "error:" in holder_output.lower() or "error:" in waiter_output.lower():
         raise ContractError("serialized install process reported an error")
     if not (root / ".zpkg.lock").is_file():
-        raise ContractError("cooperative install did not publish a lockfile")
+        raise ContractError("cooperative install did not publish a root lockfile")
     if not (root / "vendor/child/.zpkg.toml").is_file():
         raise ContractError("cooperative install did not initialize the child submodule")
     if (
         root / "vendor/child/payload.txt"
     ).read_text(encoding="utf-8") != "payload for cooperative-install\n":
         raise ContractError("initialized child payload did not match the pinned gitlink")
+    require_no_nested_state(nested)
 
     checks = [
-        "cooperative install owns operation.lock before Git submodule sync",
+        "nested cooperative install owns the superproject lock before Git sync",
+        "nested invocation creates no second lock, manifest, lockfile, or staging identity",
         "different-home frozen install blocks across Git sync and installation",
-        "blocked frozen install succeeds only after complete state publication",
+        "blocked frozen install succeeds only after complete root state publication",
     ]
     evidence = {
         "schema": "zed.git-submodule-install-operation-lock/v1",
         "checks": checks,
         "holder_pid": holder.pid,
         "waiter_pid": waiter.pid,
+        "holder_cwd": str(nested),
+        "authority_root": str(root),
         "observed_block_seconds": round(blocked_for, 3),
         "network_credentials": False,
         "public_registry_mutation": False,
@@ -98,7 +119,7 @@ def main(argv: Sequence[str]) -> int:
         json.dumps(evidence, indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
     )
-    contract.log("\ncertified 3 cooperative-install ownership checks")
+    contract.log("\ncertified 4 cooperative-install ownership checks")
     return 0
 
 
