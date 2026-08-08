@@ -1,0 +1,108 @@
+name: DEN-3089 polyglot zedignore assembly
+
+on:
+  push:
+    branches:
+      - alexanderdmills/den-3089-polyglot-zedignore
+    paths:
+      - .github/workflows/den-3089-assembly.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: den-3089-assembly-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  ZED_CLI_CARRIER: 2e78950af227d76577157aa4d23710bb8474838e
+  ZED_CLI_BASE: 0ada54a179835d2a64288887f8787d83a1eab1fe
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: "1"
+
+jobs:
+  assemble:
+    name: assemble, test, and export candidate source
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - name: Check out independent test-org harness
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: harness
+          fetch-depth: 1
+          persist-credentials: false
+          show-progress: false
+
+      - name: Check out exact product carrier
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: zed-pkg/zed-cli
+          ref: ${{ env.ZED_CLI_CARRIER }}
+          path: product/zed-cli
+          fetch-depth: 0
+          persist-credentials: false
+          show-progress: false
+
+      - name: Verify immutable carrier and base
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$ZED_CLI_CARRIER" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$ZED_CLI_BASE" =~ ^[0-9a-f]{40}$ ]]
+          test "$(git -C product/zed-cli rev-parse HEAD)" = "$ZED_CLI_CARRIER"
+          git -C product/zed-cli merge-base --is-ancestor "$ZED_CLI_BASE" "$ZED_CLI_CARRIER"
+          changed="$(git -C product/zed-cli diff --name-only "$ZED_CLI_BASE" "$ZED_CLI_CARRIER")"
+          expected=$'.github/workflows/den-3089-apply.yml\ntools/den-3089-apply.py.gz.b64'
+          test "$changed" = "$expected"
+
+      - name: Install stable Rust toolchain
+        uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30
+        with:
+          toolchain: stable
+          components: rustfmt,clippy
+
+      - name: Assemble candidate and run product gates
+        working-directory: product/zed-cli
+        shell: bash
+        env:
+          CARGO_NET_GIT_FETCH_WITH_CLI: "true"
+        run: |
+          set -euo pipefail
+          base64 --decode tools/den-3089-apply.py.gz.b64 | gzip --decompress > "$RUNNER_TEMP/den-3089-apply.py"
+          PYTHONDONTWRITEBYTECODE=1 python "$RUNNER_TEMP/den-3089-apply.py"
+          rm -f .github/workflows/den-3089-apply.yml tools/den-3089-apply.py.gz.b64
+          git add -N src/publish_ignore.rs tests/polyglot_zedignore.rs
+          cargo fmt --all
+          cargo fmt --all -- --check
+          cargo test --all-targets --locked
+          cargo clippy --locked --lib --bin zed -- -D warnings
+          git diff --check "$ZED_CLI_BASE"
+          changed="$(git diff --name-only "$ZED_CLI_BASE")"
+          expected=$'docs/publish-ignore.md\nsrc/lib.rs\nsrc/ops_entry.rs\nsrc/pack.rs\nsrc/pack_guard.rs\nsrc/pack_inputs.rs\nsrc/publish_ignore.rs\ntests/polyglot_zedignore.rs'
+          test "$changed" = "$expected"
+
+      - name: Export reproducible candidate source and patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          evidence="$RUNNER_TEMP/den-3089-evidence"
+          mkdir -p "$evidence"
+          git -C product/zed-cli diff --binary "$ZED_CLI_BASE" > "$evidence/den-3089.patch"
+          git -C product/zed-cli diff --name-status "$ZED_CLI_BASE" > "$evidence/changed-files.txt"
+          git -C product/zed-cli diff --stat "$ZED_CLI_BASE" > "$evidence/diff-stat.txt"
+          git -C product/zed-cli status --short > "$evidence/status.txt"
+          printf '%s\n' "$ZED_CLI_BASE" > "$evidence/base-sha.txt"
+          printf '%s\n' "$ZED_CLI_CARRIER" > "$evidence/carrier-sha.txt"
+          tar --exclude=.git --exclude=target -czf "$evidence/zed-cli-den-3089-source.tar.gz" -C product/zed-cli .
+          sha256sum "$evidence"/* > "$evidence/SHA256SUMS"
+
+      - name: Upload verified candidate source
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: den-3089-verified-source-${{ env.ZED_CLI_CARRIER }}
+          path: ${{ runner.temp }}/den-3089-evidence
+          if-no-files-found: error
+          retention-days: 14
+          include-hidden-files: false
