@@ -6,7 +6,7 @@
   "integrations": {
     "sublimetext": {"repository": "zed-pkg/zed-sublimetext", "state": "live", "platforms": ["linux", "macos", "windows"], "native_language": "python", "artifact": ".sublime-package"},
     "jetbrains": {"repository": "zed-pkg/zed-intellij", "state": "live", "platforms": ["linux", "macos", "windows"], "native_language": "kotlin", "artifact": "plugin-zip"},
-    "vscode": {"repository": "zed-pkg/zed-vscode", "state": "dedicated-repo-candidate", "candidate_sha": "5171a9a7b38f8aca1a403894499bda8b79d46eb1", "pull_request": 1, "platforms": ["linux", "macos", "windows"], "native_language": "javascript", "artifact": "vsix"},
+    "vscode": {"repository": "zed-pkg/zed-vscode", "state": "dedicated-repo-candidate", "candidate_sha": "96c0789a446891d5cb502be799ed121930aee9d1", "pull_request": 1, "platforms": ["linux", "macos", "windows"], "native_language": "javascript", "artifact": "vsix"},
     "qtcreator": {"repository": "zed-pkg/zed-qtcreator", "state": "dedicated-repo-candidate", "candidate_sha": "1780ee33eaf8ba3b5fffa8ce3ccc8fb2efea308e", "pull_request": 1, "platforms": ["linux", "macos", "windows"], "native_language": "cpp", "artifact": "qtcreator-plugin"},
     "xcode": {"repository": "zed-pkg/zed-xcode", "state": "dedicated-repo-candidate", "candidate_sha": "e7e7030fa44496c14de7da684772c4113cfdd92f", "pull_request": 1, "platforms": ["macos"], "native_language": "swift", "artifact": "appex"},
     "eclipse": {"repository": "zed-pkg/zed-eclipse", "state": "dedicated-repo-candidate", "candidate_sha": "58394c48e704f041bb29be7e9079806e25abd41e", "pull_request": 1, "platforms": ["linux", "macos", "windows"], "native_language": "java", "artifact": "p2-site"},
