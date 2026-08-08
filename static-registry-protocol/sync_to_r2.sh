@@ -24,12 +24,20 @@ fi
 : "${ZPKG_R2_SECRET_ACCESS_KEY:?ZPKG_R2_SECRET_ACCESS_KEY is required}"
 : "${ZPKG_R2_ENDPOINT:?ZPKG_R2_ENDPOINT is required}"
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TREE="$(cd "$1" && pwd)"
 BUCKET="$2"
 CHECKPOINT="checkpoint.json"
 
 if [[ ! -f "$TREE/$CHECKPOINT" ]]; then
   echo "missing $TREE/$CHECKPOINT" >&2
+  exit 2
+fi
+
+# Never publish a tree whose checkpoint, index, or package bytes already fail
+# the same local conformance boundary used by CI.
+if ! python3 "$SCRIPT_DIR/check_static_registry.py" --base "$TREE" >/dev/null; then
+  echo "refusing to upload a static registry tree that fails local conformance" >&2
   exit 2
 fi
 
@@ -84,16 +92,37 @@ upload_object() {
   esac
 }
 
-cd "$TREE"
+UPLOAD_LIST="$(mktemp)"
+trap 'rm -f "$UPLOAD_LIST"' EXIT
+
+# Produce a portable, NUL-delimited lexical inventory. GNU `sort -z` is not
+# available on the macOS runner, and newline-delimited filenames are unsafe.
+python3 - "$TREE" "$CHECKPOINT" > "$UPLOAD_LIST" <<'PY'
+import os
+import sys
+from pathlib import Path
+
+root = Path(sys.argv[1])
+checkpoint = sys.argv[2]
+entries = []
+for path in root.rglob("*"):
+    if path.is_symlink():
+        raise SystemExit(f"static registry tree contains a symbolic link: {path}")
+    if path.is_file():
+        relative = path.relative_to(root).as_posix()
+        if relative != checkpoint:
+            entries.append(relative)
+for relative in sorted(entries):
+    os.write(sys.stdout.fileno(), relative.encode("utf-8") + b"\0")
+PY
+
 count=0
 
 # Publish every object except the stable checkpoint first.
-while IFS= read -r -d '' file; do
-  rel="${file#./}"
-  [[ "$rel" == "$CHECKPOINT" ]] && continue
+while IFS= read -r -d '' rel; do
   upload_object "$rel"
   count=$((count + 1))
-done < <(find . -type f -print0 | sort -z)
+done < "$UPLOAD_LIST"
 
 # The stable checkpoint is the only publication pointer and is always last.
 put "$CHECKPOINT" application/json "no-cache" >/dev/null
