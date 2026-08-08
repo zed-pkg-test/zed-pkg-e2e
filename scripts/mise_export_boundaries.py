@@ -44,6 +44,31 @@ def snapshot(root: Path) -> dict[str, str]:
     }
 
 
+def snapshot_without_operation_rendezvous(root: Path) -> dict[str, str]:
+    """Snapshot semantic project state while validating the lock separately."""
+    relative_lock = Path(".zed/operation.lock")
+    return {
+        relative: digest
+        for relative, digest in snapshot(root).items()
+        if Path(relative) != relative_lock
+    }
+
+
+def assert_regular_operation_rendezvous(root: Path) -> None:
+    operation_lock = root / ".zed/operation.lock"
+    ensure(operation_lock.is_file(), "mutation did not retain the operation rendezvous")
+    ensure(not operation_lock.is_symlink(), "operation rendezvous is a symlink")
+    unexpected = [
+        path.relative_to(root).as_posix()
+        for path in sorted((root / ".zed").rglob("*"))
+        if path != operation_lock
+    ]
+    ensure(
+        not unexpected,
+        f"failed mutation left native adapter state: {unexpected!r}",
+    )
+
+
 def base_plan() -> dict[str, object]:
     return {
         "schema": 2,
@@ -193,7 +218,10 @@ def certify(zed: Path, root: Path) -> None:
     original_output = (project / ".mise.toml").read_bytes()
     (project / ".mise.toml").write_text("# hand edit\n", encoding="utf-8")
     run(zed, project, home, export_args("--write"), success=False, contains="edited")
-    ensure((project / ".mise.toml").read_text(encoding="utf-8") == "# hand edit\n", "edited output overwritten")
+    ensure(
+        (project / ".mise.toml").read_text(encoding="utf-8") == "# hand edit\n",
+        "edited output overwritten",
+    )
     (project / ".mise.toml").write_bytes(original_output)
     assertions.append("edited-output-protected")
 
@@ -201,10 +229,15 @@ def certify(zed: Path, root: Path) -> None:
     unowned.mkdir()
     write_json(unowned / "zed-env.json", base_plan())
     (unowned / ".mise.toml").write_text('[tools]\nnode = "18"\n', encoding="utf-8")
-    before = snapshot(unowned)
+    before = snapshot_without_operation_rendezvous(unowned)
     run(zed, unowned, home, export_args("--write"), success=False, contains="hand-authored")
-    ensure(snapshot(unowned) == before, "unowned output failure mutated project")
+    assert_regular_operation_rendezvous(unowned)
+    ensure(
+        snapshot_without_operation_rendezvous(unowned) == before,
+        "unowned output failure mutated semantic project state",
+    )
     assertions.append("unowned-output-protected")
+    assertions.append("operation-rendezvous-nonsemantic")
 
     nested = root / "nested-output"
     nested.mkdir()
@@ -239,7 +272,10 @@ def certify(zed: Path, root: Path) -> None:
             success=False,
             contains=diagnostic,
         )
-        ensure((boundaries / "zed-env.json").read_bytes() == original_plan, f"boundary {output} mutated plan")
+        ensure(
+            (boundaries / "zed-env.json").read_bytes() == original_plan,
+            f"boundary {output} mutated plan",
+        )
     assertions.append("portable-reserved-paths")
 
     nested_secret = root / "nested-secret"
