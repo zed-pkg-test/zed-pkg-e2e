@@ -101,7 +101,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: zed-pkg/zed-eclipse
-          ref: 58394c48e704f041bb29be7e9079806e25abd41e
+          ref: 246b46048cced1d1072afd3bedc9849efe3a8a8f
           persist-credentials: false
       - uses: actions/setup-java@03ad4de0992f5dab5e18fcb136590ce7c4a0ac95 # v5.6.0
         with: {distribution: temurin, java-version: "21", cache: maven}
@@ -114,7 +114,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: zed-pkg/zed-xcode
-          ref: e7e7030fa44496c14de7da684772c4113cfdd92f
+          ref: 9b9304fee2ff236fc59407ddd97cc2c01225a69d
           persist-credentials: false
       - run: swift test
       - run: swift build -c release
@@ -126,7 +126,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: zed-pkg/zed-visual-studio
-          ref: 4c4141d3ed595fd2b6a331a5a8756f1ed0cde455
+          ref: d85a9c827140426a8d9401b5c269ff36f591a299
           persist-credentials: false
       - uses: actions/setup-dotnet@9a946fdbd5fb07b82b2f5a4466058b876ab72bb2 # v5.3.0
         with: {dotnet-version: "8.0.x"}
@@ -143,7 +143,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: zed-pkg/zed-qtcreator
-          ref: 1780ee33eaf8ba3b5fffa8ce3ccc8fb2efea308e
+          ref: 8e7958c7c85a305b59accfe82c28e7ff42bfecba
           persist-credentials: false
       - run: cmake -S . -B build -DBUILD_TESTING=ON
       - run: cmake --build build --config Release --parallel 2
