@@ -189,7 +189,7 @@ jobs:
 
           evidence = json.loads(pathlib.Path(sys.argv[1]).read_text(encoding="utf-8"))
           assert evidence["schema"] == "zed.git-submodule-install-operation-lock/v1"
-          assert len(evidence["checks"]) == 3
+          assert len(evidence["checks"]) == 4
           assert evidence["observed_block_seconds"] >= 0.7
           assert evidence["network_credentials"] is False
           assert evidence["public_registry_mutation"] is False
