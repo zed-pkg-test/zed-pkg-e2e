@@ -20,7 +20,10 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  ZED_CLI_REF: fe4b4662fb252166b18c48f9c048f5888ec8df44
+  # This candidate canonicalizes a polyglot target rooted at `dir = "."` to
+  # the root package identity, so the Leddy repository target publishes as
+  # led-dynamo/leddy-clients rather than the obsolete target-suffixed name.
+  ZED_CLI_REF: 5d1d13119be5784f545a7d812cdfaae3ca120693
   LEDDY_INTERFACES_REF: 7d8ef79f1353aa6ed23e47739172a7500cab6f25
   LEDDY_LIB_REF: 2a9a0cd43180d4be1f09b1fd98ec00ead9203795
   LEDDY_CLIENTS_REF: c672cedcbcfc71b0310cde2e494c407cecd6ae32
