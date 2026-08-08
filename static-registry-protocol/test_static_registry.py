@@ -85,6 +85,20 @@ class StaticRegistryGeneratorSafetyTests(unittest.TestCase):
             self.assertEqual(sentinel.read_bytes(), b"do not overwrite\n")
             self.assertFalse((output / "checkpoint.json").exists())
 
+    def test_rejects_parent_traversal_output_path(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            fixtures = root / "fixtures"
+            self.package(fixtures)
+            output = root / "nested" / ".."
+
+            result = self.run_builder(fixtures, output)
+
+            self.assertEqual(result.returncode, 2)
+            self.assertIn("without `..`", result.stderr)
+            self.assertFalse((root / "checkpoint.json").exists())
+            self.assertFalse((root / "nested").exists())
+
     @unittest.skipUnless(hasattr(os, "symlink"), "platform has no symlink support")
     def test_rejects_fixture_symlinks_instead_of_following_them(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -101,6 +115,25 @@ class StaticRegistryGeneratorSafetyTests(unittest.TestCase):
             self.assertEqual(result.returncode, 2)
             self.assertIn("symbolic link", result.stderr)
             self.assertFalse((output / "checkpoint.json").exists())
+
+    @unittest.skipUnless(hasattr(os, "symlink"), "platform has no symlink support")
+    def test_rejects_symlinked_metadata_before_reading_it(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            fixtures = root / "fixtures"
+            package = self.package(fixtures)
+            metadata = package / "zpkg.json"
+            metadata.unlink()
+            outside = root / "outside-metadata.json"
+            outside.write_text('{"deps":[],"yanked":false}\n', encoding="utf-8")
+            os.symlink(outside, metadata)
+            output = root / "output"
+
+            result = self.run_builder(fixtures, output)
+
+            self.assertEqual(result.returncode, 2)
+            self.assertIn("metadata is a symbolic link", result.stderr)
+            self.assertFalse(output.exists())
 
     @unittest.skipUnless(hasattr(os, "symlink"), "platform has no symlink support")
     def test_later_invalid_package_leaves_no_partial_output_tree(self) -> None:
@@ -144,6 +177,55 @@ class StaticRegistryGeneratorSafetyTests(unittest.TestCase):
             self.assertEqual(result.returncode, 2)
             self.assertIn("output path is a symbolic link", result.stderr)
             self.assertEqual(list(real_output.iterdir()), [])
+
+    def test_rejects_non_object_metadata(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            fixtures = root / "fixtures"
+            package = self.package(fixtures)
+            (package / "zpkg.json").write_text("[]\n", encoding="utf-8")
+            output = root / "output"
+
+            result = self.run_builder(fixtures, output)
+
+            self.assertEqual(result.returncode, 2)
+            self.assertIn("metadata must be a JSON object", result.stderr)
+            self.assertFalse(output.exists())
+
+    def test_rejects_invalid_metadata_field_types(self) -> None:
+        for metadata, expected in (
+            ({"deps": "not-an-array", "yanked": False}, "`deps` must be an array"),
+            ({"deps": [], "yanked": "false"}, "`yanked` must be boolean"),
+        ):
+            with self.subTest(metadata=metadata):
+                with tempfile.TemporaryDirectory() as directory:
+                    root = Path(directory)
+                    fixtures = root / "fixtures"
+                    package = self.package(fixtures)
+                    (package / "zpkg.json").write_text(
+                        json.dumps(metadata) + "\n",
+                        encoding="utf-8",
+                    )
+                    output = root / "output"
+
+                    result = self.run_builder(fixtures, output)
+
+                    self.assertEqual(result.returncode, 2)
+                    self.assertIn(expected, result.stderr)
+                    self.assertFalse(output.exists())
+
+    def test_rejects_invalid_semantic_version_directory(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            fixtures = root / "fixtures"
+            self.package(fixtures, version="1.0")
+            output = root / "output"
+
+            result = self.run_builder(fixtures, output)
+
+            self.assertEqual(result.returncode, 2)
+            self.assertIn("invalid v0 semantic version", result.stderr)
+            self.assertFalse(output.exists())
 
     def test_rejects_uppercase_org_segments(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
