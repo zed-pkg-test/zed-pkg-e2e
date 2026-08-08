@@ -1,0 +1,10 @@
+[package]
+name = "zed-version-interop-corpus"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+zed-interfaces = { path = "../../../zed-interfaces" }
