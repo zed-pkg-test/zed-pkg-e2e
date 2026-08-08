@@ -251,3 +251,34 @@ class ZedParsingMixin:
                     if vcs_commit is not None:
                         edge["selected_commit"] = vcs_commit
                     edge["selection_provenance"] = list(matching_pin["provenance"])
+
+        pinned_coordinates = set(selected_by_coordinate)
+        for edge in sorted(
+            self.edges.values(),
+            key=lambda value: (
+                str(value.get("source", "")),
+                str(value.get("target", "")),
+                str(value.get("kind", "")),
+                str(value.get("requirement", "")),
+            ),
+        ):
+            if edge.get("source") != source or edge.get("kind") != "zed-declared":
+                continue
+            target = str(edge.get("target", ""))
+            prefix = "zpkg-package:"
+            if not target.startswith(prefix):
+                continue
+            coordinate = target.removeprefix(prefix)
+            if coordinate in pinned_coordinates:
+                continue
+            contradiction: dict[str, Any] = {
+                "code": "declared-dependency-missing-lock-pin",
+                "source": source,
+                "target": target,
+                "declared_provenance": list(edge.get("provenance", [])),
+                "lock_provenance": [provenance(blob)],
+            }
+            requirement = edge.get("requirement")
+            if requirement is not None:
+                contradiction["requirement"] = requirement
+            self.contradictions.append(contradiction)
