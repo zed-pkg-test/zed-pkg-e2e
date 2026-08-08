@@ -13,6 +13,10 @@ const generatedSource = fs
   .map((name) => fs.readFileSync(path.join(partsDirectory, name), 'utf8'))
   .join('')
   .replace(/^#![^\n]*\n/, '');
+const sourceCertificationDocumentation = fs.readFileSync(
+  path.join(root, 'docs', 'test-org-source-certification.md'),
+  'utf8',
+);
 
 function hardened() {
   return hardenGeneratedIntegrationPolicy(generatedSource);
@@ -76,6 +80,19 @@ test('generated file set leaves product-specific overlays outside fleet ownershi
     );
   }
   assert.match(source, /Product-specific files outside the generated file set are preserved/);
+});
+
+test('source certification documentation preserves the security and evidence meanings', () => {
+  assert.match(sourceCertificationDocumentation, /A skipped protected lane is not a soft pass/);
+  assert.match(sourceCertificationDocumentation, /must not fall back to `github\.token`/);
+  assert.match(sourceCertificationDocumentation, /Product-specific overlays are preserved/);
+  assert.match(sourceCertificationDocumentation, /`executed`/);
+  assert.match(sourceCertificationDocumentation, /`certified`/);
+  assert.match(sourceCertificationDocumentation, /Never choose an entire conflict side/);
+  assert.doesNotMatch(
+    sourceCertificationDocumentation,
+    /ghp_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}/,
+  );
 });
 
 test('policy transform is fail-closed when generated seams change', () => {
