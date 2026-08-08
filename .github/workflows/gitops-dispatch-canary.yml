@@ -6,6 +6,7 @@ on:
       - .github/workflows/gitops-dispatch-canary.yml
       - scripts/gitops_dispatch_canary.py
       - scripts/gitops_dispatch_canary_entry.py
+      - scripts/gitops_dispatch_trailing_options.py
       - fixtures/external_dispatch_probe.rs
       - docs/gitops-dispatch-canary.md
   workflow_dispatch:
@@ -13,7 +14,7 @@ on:
       candidate:
         description: Full immutable zed-pkg/zed-cli commit to certify
         required: false
-        default: ace157406d04f338698b6dc93a77021b07560e72
+        default: 1c94813c6b59c7621c1256d7c55246e7f06f44b7
         type: string
 
 permissions:
@@ -28,7 +29,7 @@ defaults:
     shell: bash
 
 env:
-  ZED_CLI_COMMIT: ${{ inputs.candidate || 'ace157406d04f338698b6dc93a77021b07560e72' }}
+  ZED_CLI_COMMIT: ${{ inputs.candidate || '1c94813c6b59c7621c1256d7c55246e7f06f44b7' }}
 
 jobs:
   certify:
@@ -109,7 +110,10 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p artifacts
-          python -m py_compile scripts/gitops_dispatch_canary.py scripts/gitops_dispatch_canary_entry.py
+          python -m py_compile \
+            scripts/gitops_dispatch_canary.py \
+            scripts/gitops_dispatch_canary_entry.py \
+            scripts/gitops_dispatch_trailing_options.py
           rm -rf scripts/__pycache__
           python scripts/gitops_dispatch_canary_entry.py \
             --zed "$ZED_BINARY" \
@@ -119,6 +123,12 @@ jobs:
             --candidate "$ZED_CLI_COMMIT" \
             --work "$RUNNER_TEMP/gitops-dispatch-canary" \
             --evidence "artifacts/gitops-dispatch-${RUNNER_OS}-${RUNNER_ARCH}.json"
+          python scripts/gitops_dispatch_trailing_options.py \
+            --zed "$ZED_BINARY" \
+            --probe "$DISPATCH_PROBE_BINARY" \
+            --candidate "$ZED_CLI_COMMIT" \
+            --work "$RUNNER_TEMP/gitops-dispatch-trailing" \
+            --evidence "artifacts/gitops-dispatch-trailing-${RUNNER_OS}-${RUNNER_ARCH}.json"
           rm -rf scripts/__pycache__
 
       - name: Require clean harness and product checkouts
@@ -141,7 +151,9 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: gitops-dispatch-${{ runner.os }}-${{ runner.arch }}-${{ env.ZED_CLI_COMMIT }}
-          path: artifacts/gitops-dispatch-${{ runner.os }}-${{ runner.arch }}.json
+          path: |
+            artifacts/gitops-dispatch-${{ runner.os }}-${{ runner.arch }}.json
+            artifacts/gitops-dispatch-trailing-${{ runner.os }}-${{ runner.arch }}.json
           if-no-files-found: error
           retention-days: 14
           include-hidden-files: false
