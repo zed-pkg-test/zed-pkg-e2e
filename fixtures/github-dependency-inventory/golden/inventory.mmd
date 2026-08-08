@@ -1,0 +1,36 @@
+flowchart LR
+  n_7c974afcce1aea9376ae["acme/app"]
+  n_c5d913dfdf91ec28e2d4["acme/archived"]
+  n_fb7cd9a2d983b4042332["acme/cycle-a"]
+  n_0c6884588964c77c72f9["acme/cycle-b"]
+  n_118763adadfdd7ab90b3["acme/lib-a"]
+  n_09ea16b5257c3f10ad4f["acme/lib-b"]
+  n_3248a465db81578fdcb9["acme/shared"]
+  n_623011f81f79be3f23b8["acme/app"]
+  n_1b2839d86de0d19b88d1["acme/cycle-a"]
+  n_15a9926fb052dc7358a8["acme/cycle-b"]
+  n_04944cea1bb2592e6626["acme/lib-a"]
+  n_9b937e7128272d4436a0["acme/lib-a@1.0.0"]
+  n_dced539eaf368baa2f03["acme/lib-b"]
+  n_b2833731c494f54caedc["acme/lib-b@1.0.0"]
+  n_d361611f054f0a6e62a3["acme/shared"]
+  n_6441e0446976246f397f["acme/shared@2.0.0"]
+  n_7c974afcce1aea9376ae -->|"nix-flake-lock &#124; 5555555555555555555555555555555555555555"| n_fb7cd9a2d983b4042332
+  n_7c974afcce1aea9376ae -->|"nix-flake-declared &#124; release-1"| n_118763adadfdd7ab90b3
+  n_7c974afcce1aea9376ae -->|"git-submodule &#124; 4444444444444444444444444444444444444444"| n_3248a465db81578fdcb9
+  n_7c974afcce1aea9376ae -->|"nix-source-pin &#124; 4444444444444444444444444444444444444444"| n_3248a465db81578fdcb9
+  n_7c974afcce1aea9376ae -->|"contains-zed-package"| n_623011f81f79be3f23b8
+  n_fb7cd9a2d983b4042332 -->|"contains-zed-package"| n_1b2839d86de0d19b88d1
+  n_0c6884588964c77c72f9 -->|"contains-zed-package"| n_15a9926fb052dc7358a8
+  n_118763adadfdd7ab90b3 -->|"contains-zed-package"| n_04944cea1bb2592e6626
+  n_09ea16b5257c3f10ad4f -->|"contains-zed-package"| n_dced539eaf368baa2f03
+  n_3248a465db81578fdcb9 -->|"contains-zed-package"| n_d361611f054f0a6e62a3
+  n_623011f81f79be3f23b8 -->|"zed-declared &#124; ^1.0&quot; &#93;&#10;malicious"| n_04944cea1bb2592e6626
+  n_623011f81f79be3f23b8 -->|"zed-lock-pin &#124; 1.0.0"| n_9b937e7128272d4436a0
+  n_623011f81f79be3f23b8 -->|"zed-declared &#124; ^1.0"| n_dced539eaf368baa2f03
+  n_623011f81f79be3f23b8 -->|"zed-lock-pin &#124; 1.0.0"| n_b2833731c494f54caedc
+  n_623011f81f79be3f23b8 -->|"zed-lock-pin &#124; 2.0.0"| n_6441e0446976246f397f
+  n_1b2839d86de0d19b88d1 -->|"zed-declared &#124; ^0.1"| n_15a9926fb052dc7358a8
+  n_15a9926fb052dc7358a8 -->|"zed-declared &#124; ^0.1"| n_1b2839d86de0d19b88d1
+  n_04944cea1bb2592e6626 -->|"zed-declared &#124; ^2.0"| n_d361611f054f0a6e62a3
+  n_dced539eaf368baa2f03 -->|"zed-declared &#124; ^2.0"| n_d361611f054f0a6e62a3
