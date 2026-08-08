@@ -94,6 +94,42 @@ class LockEvidenceTests(InventoryTestCase):
             )
         )
 
+    def test_declared_dependency_without_lock_pin_is_explicit_contradiction(self) -> None:
+        document = copy.deepcopy(self.fixture)
+        lock = document["repositories"]["acme/app"]["files"][".zpkg.lock"]
+        lib_b_block = f'''\n[[package]]
+org = "acme"
+name = "lib-b"
+version = "1.0.0"
+sha256 = "{"b" * 64}"
+'''
+        self.assertIn(lib_b_block, lock)
+        document["repositories"]["acme/app"]["files"][".zpkg.lock"] = lock.replace(
+            lib_b_block,
+            "",
+        )
+
+        result, _ = self.build(document)
+        contradiction = next(
+            item
+            for item in result["contradictions"]
+            if item["code"] == "declared-dependency-missing-lock-pin"
+        )
+        self.assertEqual(contradiction["source"], "zpkg-package:acme/app")
+        self.assertEqual(contradiction["target"], "zpkg-package:acme/lib-b")
+        self.assertEqual(contradiction["requirement"], "^1.0")
+        self.assertTrue(contradiction["declared_provenance"])
+        self.assertTrue(contradiction["lock_provenance"])
+        self.assertFalse(any(pin["package"] == "acme/lib-b" for pin in result["pins"]))
+        lib_b_edge = next(
+            edge
+            for edge in result["edges"]
+            if edge["source"] == "zpkg-package:acme/app"
+            and edge["target"] == "zpkg-package:acme/lib-b"
+            and edge["kind"] == "zed-declared"
+        )
+        self.assertNotIn("selected_version", lib_b_edge)
+
     def test_invalid_artifact_digest_is_explicit_and_not_annotated(self) -> None:
         document = copy.deepcopy(self.fixture)
         lock = document["repositories"]["acme/app"]["files"][".zpkg.lock"]
@@ -106,6 +142,13 @@ class LockEvidenceTests(InventoryTestCase):
         self.assertEqual(result["completeness"]["inventory"], "partial")
         self.assertTrue(
             any(failure["code"] == "invalid_lock_artifact_sha256" for failure in result["failures"])
+        )
+        self.assertTrue(
+            any(
+                item["code"] == "declared-dependency-missing-lock-pin"
+                and item["target"] == "zpkg-package:acme/lib-a"
+                for item in result["contradictions"]
+            )
         )
         self.assertFalse(any(pin["package"] == "acme/lib-a" for pin in result["pins"]))
         lib_a_edge = next(
