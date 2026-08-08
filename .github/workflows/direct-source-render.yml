@@ -6,6 +6,8 @@ on:
       - .github/workflows/direct-source-render.yml
       - scripts/install_pinned_kustomize.py
       - scripts/direct_source_render_canary.py
+      - scripts/check_snapshot_endpoint_policy.py
+      - scripts/test_snapshot_endpoint_policy.py
       - docs/direct-source-render.md
       - fixtures/direct-source/fabrication-server.rs/**
   workflow_dispatch:
@@ -13,12 +15,12 @@ on:
       cluster_commit:
         description: Exact ORESoftware/k8s-cluster catalog candidate
         required: false
-        default: 4bc664a651cd912e8c16a15dd8f0dfcb1e1870b5
+        default: 0c71eed05f8be50ac22ebe73715ded4a871234a8
         type: string
       child_commit:
         description: Exact private source commit represented by the snapshot
         required: false
-        default: 5e305b9bf40d28139bdabf9342c304f759cbfee5
+        default: cea4a3c772012e1f2f87050bac24e911b8e2e577
         type: string
 
 permissions:
@@ -33,9 +35,9 @@ defaults:
     shell: bash
 
 env:
-  K8S_CLUSTER_COMMIT: ${{ inputs.cluster_commit || '4bc664a651cd912e8c16a15dd8f0dfcb1e1870b5' }}
-  FABRICATION_SERVER_COMMIT: ${{ inputs.child_commit || '5e305b9bf40d28139bdabf9342c304f759cbfee5' }}
-  SOURCE_SNAPSHOT: fixtures/direct-source/fabrication-server.rs/5e305b9bf40d28139bdabf9342c304f759cbfee5
+  K8S_CLUSTER_COMMIT: ${{ inputs.cluster_commit || '0c71eed05f8be50ac22ebe73715ded4a871234a8' }}
+  FABRICATION_SERVER_COMMIT: ${{ inputs.child_commit || 'cea4a3c772012e1f2f87050bac24e911b8e2e577' }}
+  SOURCE_SNAPSHOT: fixtures/direct-source/fabrication-server.rs/cea4a3c772012e1f2f87050bac24e911b8e2e577
 
 jobs:
   render:
@@ -78,7 +80,12 @@ jobs:
           [[ "$FABRICATION_SERVER_COMMIT" =~ ^[0-9a-f]{40}$ ]]
           test "$(git -C product/k8s-cluster rev-parse HEAD)" = "$K8S_CLUSTER_COMMIT"
           test -f "$SOURCE_SNAPSHOT/source.json"
-          python -m py_compile scripts/install_pinned_kustomize.py scripts/direct_source_render_canary.py
+          python -m py_compile \
+            scripts/install_pinned_kustomize.py \
+            scripts/direct_source_render_canary.py \
+            scripts/check_snapshot_endpoint_policy.py \
+            scripts/test_snapshot_endpoint_policy.py
+          python scripts/test_snapshot_endpoint_policy.py
           rm -rf scripts/__pycache__
 
       - name: Install checksum-pinned Kustomize v5.8.1
@@ -90,6 +97,14 @@ jobs:
             --metadata "artifacts/kustomize-install-${RUNNER_OS}-${RUNNER_ARCH}.json")"
           test -f "$kustomize"
           echo "KUSTOMIZE_BINARY=$kustomize" >> "$GITHUB_ENV"
+
+      - name: Verify snapshot endpoint and NetworkPolicy parity
+        run: |
+          set -euo pipefail
+          python scripts/check_snapshot_endpoint_policy.py \
+            --deployment "$SOURCE_SNAPSHOT/k8s/deployment.yaml" \
+            --network-policy "$SOURCE_SNAPSHOT/k8s/networkpolicy.yaml" \
+            --evidence "artifacts/snapshot-endpoint-policy-${RUNNER_OS}-${RUNNER_ARCH}.json"
 
       - name: Verify catalog provenance and render exact source snapshot twice
         run: |
@@ -128,6 +143,7 @@ jobs:
           name: direct-source-snapshot-render-${{ runner.os }}-${{ runner.arch }}-${{ env.K8S_CLUSTER_COMMIT }}-${{ env.FABRICATION_SERVER_COMMIT }}
           path: |
             artifacts/kustomize-install-${{ runner.os }}-${{ runner.arch }}.json
+            artifacts/snapshot-endpoint-policy-${{ runner.os }}-${{ runner.arch }}.json
             artifacts/direct-source-render-${{ runner.os }}-${{ runner.arch }}.json
             artifacts/fabrication-render-${{ runner.os }}-${{ runner.arch }}.yaml
           if-no-files-found: error
