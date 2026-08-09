@@ -11,7 +11,7 @@ Canonical product PR: `zed-pkg/zed-cli#131`.
 Pinned product head:
 
 ```text
-7c5445b2cd15a503c8004da98cac31451ea2f1d4
+e8367425baa545dd045fc033e5fea4396aa31554
 ```
 
 The product branch was semantically merged with current `main` head `5d1d13119be5784f545a7d812cdfaae3ca120693`. Current submodule CLI and project-lock behavior were adopted verbatim; `src/main.rs` was composed by extracting the already-tested exporter import and dispatch arms into the current main-line recovery and locking flow. The exporter remains a ten-file source, test, contract, and documentation delta with no materializer or synchronization workflow.
@@ -71,7 +71,7 @@ The complete current manager-lock identity contract is separately merged and cer
 
 Promotion requires:
 
-1. the workflow pin matching final immutable head `7c5445b2cd15a503c8004da98cac31451ea2f1d4` of `zed-pkg/zed-cli#131`;
+1. the workflow pin matching final immutable head `e8367425baa545dd045fc033e5fea4396aa31554` of `zed-pkg/zed-cli#131`;
 2. Ubuntu 24.04, macOS 15, and Windows Server 2025 success;
 3. formatting, focused unit tests, the public API target, real CLI tests, a locked release build, and all-target Clippy with warnings denied;
 4. both black-box harnesses passing on all platforms, with symlink assertions skipped only where the host cannot create symlinks;
