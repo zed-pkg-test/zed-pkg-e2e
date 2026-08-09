@@ -1,0 +1,259 @@
+name: prepare immutable production Zed package releases
+
+on:
+  push:
+    branches: [feat/den-2788-full-stack-live-r2]
+    paths:
+      - .github/workflows/prepare-production-package-releases.yml
+      - bootstrap/prepare-production-packages.once
+      - config/production-packages.json
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: prepare-production-zed-package-releases
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    if: github.repository == 'zed-pkg-test/zed-pkg-e2e' && github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: feat/den-2788-full-stack-live-r2
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Validate one-time authorization
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(tr -d '\r\n' < bootstrap/prepare-production-packages.once)" = "PREPARE_ZED_PACKAGE_RELEASES_V1"
+          python3 scripts/production_package_inventory.py --self-test
+
+      - name: Add missing root manifests and immutable release tags
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.FLEET_GH_TOKEN }}
+        run: |
+          set -euo pipefail
+          test -n "$GH_TOKEN"
+          python3 - <<'PY'
+          from __future__ import annotations
+          import base64, json, os, re, tomllib, urllib.error, urllib.parse, urllib.request
+          from pathlib import Path
+
+          token = os.environ["GH_TOKEN"]
+          config = json.loads(Path("config/production-packages.json").read_text())
+          org = config["organization"]
+          minimum = int(config["minimum_packages"])
+          sha_re = re.compile(r"^[0-9a-f]{40}$")
+
+          def api(method: str, path: str, body=None, optional=False):
+              url = "https://api.github.com" + path
+              headers = {
+                  "Accept": "application/vnd.github+json",
+                  "Authorization": "Bearer " + token,
+                  "User-Agent": "zed-pkg-release-preparer/1",
+                  "X-GitHub-Api-Version": "2022-11-28",
+              }
+              data = None
+              if body is not None:
+                  data = json.dumps(body, separators=(",", ":")).encode()
+                  headers["Content-Type"] = "application/json"
+              request = urllib.request.Request(url, data=data, headers=headers, method=method)
+              try:
+                  with urllib.request.urlopen(request, timeout=45) as response:
+                      raw = response.read()
+                      return json.loads(raw) if raw else {}
+              except urllib.error.HTTPError as error:
+                  raw = error.read().decode(errors="replace")
+                  if optional and error.code == 404:
+                      return None
+                  raise RuntimeError(f"{method} {path}: HTTP {error.code}: {raw[:400]}") from error
+
+          def content(repo: str, ref: str):
+              payload = api(
+                  "GET",
+                  f"/repos/{org}/{repo}/contents/.zpkg.toml?ref={urllib.parse.quote(ref, safe='')}",
+                  optional=True,
+              )
+              if payload is None:
+                  return None
+              if payload.get("type") != "file" or payload.get("encoding") != "base64":
+                  raise RuntimeError(f"{org}/{repo}@{ref}: root manifest is not a base64 file")
+              return base64.b64decode(payload["content"]).decode(), payload["sha"]
+
+          def identity(repo: str, text: str):
+              document = tomllib.loads(text)
+              package = document.get("package")
+              if not isinstance(package, dict):
+                  raise RuntimeError(f"{org}/{repo}: missing [package]")
+              if package.get("org") != org or package.get("name") != repo:
+                  raise RuntimeError(f"{org}/{repo}: package coordinate must equal {org}/{repo}")
+              version = package.get("version")
+              repository = package.get("repository")
+              if not isinstance(version, str) or not version:
+                  raise RuntimeError(f"{org}/{repo}: missing package.version")
+              if not isinstance(repository, dict):
+                  raise RuntimeError(f"{org}/{repo}: missing [package.repository]")
+              actual = str(repository.get("url", "")).removesuffix(".git").rstrip("/")
+              expected = f"https://github.com/{org}/{repo}"
+              if actual.casefold() != expected.casefold():
+                  raise RuntimeError(f"{org}/{repo}: repository URL does not match {expected}")
+              publish = document.get("publish")
+              tag_format = publish.get("tag_format", "v{version}") if isinstance(publish, dict) else "v{version}"
+              if not isinstance(tag_format, str) or tag_format.count("{version}") != 1:
+                  raise RuntimeError(f"{org}/{repo}: invalid publish.tag_format")
+              return version, tag_format.replace("{version}", version)
+
+          def manifest(repo: str, description):
+              quote = json.dumps
+              description = description or f"Zed package for {repo}"
+              return f'''[package]
+          org = {quote(org)}
+          name = {quote(repo)}
+          version = "0.1.0"
+          description = {quote(description)}
+          license = "MIT"
+          keywords = ["zed-pkg", "package-manager"]
+
+          [package.repository]
+          vcs = "git"
+          url = {quote(f"https://github.com/{org}/{repo}")}
+
+          [publish]
+          include_readme = true
+          tag_format = "v{{version}}"
+          exclude = [".env", ".env.*", ".direnv/**", ".zed/**", ".zed-pack/**", ".vendor/.zed/**", "target/**", "**/target/**", "**/node_modules/**", "tmp/**", "**/*.log", ".DS_Store"]
+
+          [install]
+          dir = ".vendor/.zed"
+
+          [targets.repository]
+          dir = "."
+          adapter = "none"
+          '''
+
+          def peel(repo: str, tag: str):
+              encoded = urllib.parse.quote(tag, safe="")
+              ref = api("GET", f"/repos/{org}/{repo}/git/ref/tags/{encoded}", optional=True)
+              if ref is None:
+                  return None
+              obj = ref.get("object") or {}
+              for _ in range(8):
+                  kind, sha = obj.get("type"), obj.get("sha")
+                  if kind == "commit" and isinstance(sha, str) and sha_re.fullmatch(sha):
+                      return sha
+                  if kind != "tag" or not isinstance(sha, str):
+                      break
+                  obj = (api("GET", f"/repos/{org}/{repo}/git/tags/{sha}").get("object") or {})
+              raise RuntimeError(f"{org}/{repo}: tag {tag} does not peel to a commit")
+
+          prepared, failures = [], []
+          for repo in config["repositories"]:
+              try:
+                  metadata = api("GET", f"/repos/{org}/{repo}")
+                  if metadata.get("archived"):
+                      raise RuntimeError("repository is archived")
+                  branch = metadata["default_branch"]
+                  branch_ref = urllib.parse.quote(branch, safe="")
+                  head = (api("GET", f"/repos/{org}/{repo}/git/ref/heads/{branch_ref}").get("object") or {}).get("sha")
+                  if not isinstance(head, str) or not sha_re.fullmatch(head):
+                      raise RuntimeError("default branch did not resolve to a commit")
+                  pair = content(repo, head)
+                  created = False
+                  if pair is None:
+                      text = manifest(repo, metadata.get("description"))
+                      result = api(
+                          "PUT",
+                          f"/repos/{org}/{repo}/contents/.zpkg.toml",
+                          {
+                              "message": "build(DEN-2788): declare the repository as an immutable Zed package",
+                              "branch": branch,
+                              "content": base64.b64encode(text.encode()).decode(),
+                          },
+                      )
+                      head = (result.get("commit") or {}).get("sha")
+                      if not isinstance(head, str) or not sha_re.fullmatch(head):
+                          raise RuntimeError("manifest creation returned no commit")
+                      pair = content(repo, head)
+                      created = True
+                  text, _ = pair
+                  version, tag = identity(repo, text)
+                  tag_sha = peel(repo, tag)
+                  tag_created = False
+                  if tag_sha is None:
+                      api("POST", f"/repos/{org}/{repo}/git/refs", {"ref": f"refs/tags/{tag}", "sha": head})
+                      tag_sha = peel(repo, tag)
+                      tag_created = True
+                  tagged = content(repo, tag_sha)
+                  if tagged is None:
+                      raise RuntimeError(f"immutable tag {tag} has no root manifest")
+                  tagged_version, tagged_tag = identity(repo, tagged[0])
+                  if tagged_version != version or tagged_tag != tag:
+                      raise RuntimeError(f"immutable tag {tag} does not match the default manifest")
+                  prepared.append({
+                      "repository": f"{org}/{repo}",
+                      "version": version,
+                      "tag": tag,
+                      "tag_sha": tag_sha,
+                      "manifest_created": created,
+                      "tag_created": tag_created,
+                  })
+                  print(f"prepared {org}/{repo}@{version} {tag_sha[:12]}", flush=True)
+              except Exception as error:
+                  failures.append({"repository": f"{org}/{repo}", "error": str(error)})
+                  print(f"failed {org}/{repo}: {error}", flush=True)
+
+          evidence = Path("evidence/release-preparation")
+          evidence.mkdir(parents=True, exist_ok=True)
+          ledger = {"schema": 1, "prepared": len(prepared), "failed": len(failures), "packages": prepared, "failures": failures}
+          (evidence / "release-preparation.json").write_text(json.dumps(ledger, indent=2, sort_keys=True) + "\n")
+          lines = [
+              "# Production package release preparation", "",
+              f"Prepared: **{len(prepared)}**", f"Failed: **{len(failures)}**", "",
+              "| Package | Version | Tag | Commit |", "| --- | --- | --- | --- |",
+          ]
+          lines += [f"| `{item['repository']}` | `{item['version']}` | `{item['tag']}` | `{item['tag_sha']}` |" for item in prepared]
+          if failures:
+              lines += ["", "## Failures", ""] + [f"- `{item['repository']}` — {item['error']}" for item in failures]
+          (evidence / "release-preparation.md").write_text("\n".join(lines) + "\n")
+          if len(prepared) < minimum:
+              raise SystemExit(f"only {len(prepared)} immutable releases prepared; minimum is {minimum}")
+          if not any(item["repository"] == f"{org}/zed-lib-core" for item in prepared):
+              raise SystemExit("zed-lib-core was not prepared")
+          PY
+          cat evidence/release-preparation/release-preparation.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Inventory exact tagged release candidates
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.FLEET_GH_TOKEN }}
+        run: |
+          set -euo pipefail
+          python3 scripts/production_package_inventory.py \
+            --config config/production-packages.json \
+            --output evidence/package-inventory
+          count="$(jq -r '.count' evidence/package-inventory/production-package-inventory.json)"
+          test "$count" -ge 16
+          test "$count" -le 23
+          jq -e '.packages | any(.name == "zed-lib-core")' \
+            evidence/package-inventory/production-package-inventory.json >/dev/null
+          cat evidence/package-inventory/production-package-inventory.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Persist evidence and remove one-shot authority
+        shell: bash
+        run: |
+          set -euo pipefail
+          git rm .github/workflows/prepare-production-package-releases.yml bootstrap/prepare-production-packages.once
+          git add evidence/release-preparation evidence/package-inventory
+          git diff --cached --check
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "test(DEN-2788): record immutable production package release ledger"
+          git push origin HEAD:feat/den-2788-full-stack-live-r2
