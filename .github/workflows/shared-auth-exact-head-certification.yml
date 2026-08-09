@@ -70,7 +70,7 @@ jobs:
           token: ${{ secrets.FLEET_GH_TOKEN }}
           persist-credentials: true
 
-      - name: Assert and apply the bounded issuer-derived endpoint correction
+      - name: Assert and apply the bounded issuer correction with regression tests
         working-directory: shared-auth
         shell: bash
         env:
@@ -79,25 +79,93 @@ jobs:
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
           python3 - <<'PY'
+          import re
           from pathlib import Path
+
           path = Path('src/handoff/mod.rs')
           text = path.read_text()
-          old = '''        let endpoint = format!(
-              "https://{}.supabase.co/auth/v1/token?grant_type=password",
-              project.project_ref
-          );'''
-          new = '''        // The configured issuer is the Supabase `/auth/v1` base for both
-          // hosted and self-hosted projects. Derive the password token endpoint
-          // from it instead of reconstructing a cloud-only hostname.
-          let endpoint = format!(
-              "{}/token?grant_type=password",
-              project.issuer().trim_end_matches('/')
-          );'''
-          if text.count(old) != 1:
-              raise SystemExit(f'expected one cloud-only token endpoint, found {text.count(old)}')
-          path.write_text(text.replace(old, new, 1))
+
+          cloud_only = re.compile(
+              r'''(?mx)
+              ^[ ]{8}let[ ]endpoint[ ]=[ ]format!\(
+              [ ]*"https://\{\}\.supabase\.co/auth/v1/token\?grant_type=password",
+              [ ]*project\.project_ref
+              [ ]*\);
+              '''
+          )
+          text, count = cloud_only.subn(
+              '        let endpoint = supabase_password_token_endpoint(project);',
+              text,
+              count=1,
+          )
+          if count != 1:
+              raise SystemExit(f'expected one cloud-only token endpoint, found {count}')
+
+          helper = '''fn supabase_password_token_endpoint(project: &SupabaseProject) -> String {
+              format!(
+                  "{}/token?grant_type=password",
+                  project.issuer().trim_end_matches('/')
+              )
+          }
+
+          '''
+          anchor = 'impl HandoffService {\n'
+          if 'fn supabase_password_token_endpoint(' in text:
+              raise SystemExit('endpoint helper unexpectedly exists at the locked source head')
+          if text.count(anchor) != 1:
+              raise SystemExit('HandoffService implementation anchor drifted')
+          text = text.replace(anchor, helper + anchor, 1)
+
+          tests = r'''
+
+          #[cfg(test)]
+          mod endpoint_tests {
+              use serde_json::json;
+
+              use super::supabase_password_token_endpoint;
+              use crate::config::SupabaseProject;
+
+              fn project(project_ref: &str, issuer: Option<&str>) -> SupabaseProject {
+                  let mut value = json!({
+                      "name": "zpkg-test",
+                      "project_ref": project_ref
+                  });
+                  if let Some(issuer) = issuer {
+                      value["issuer"] = json!(issuer);
+                  }
+                  serde_json::from_value(value).expect("valid Supabase project fixture")
+              }
+
+              #[test]
+              fn derives_hosted_password_endpoint_from_default_issuer() {
+                  let project = project("abcdefghijklmnopqrst", None);
+                  assert_eq!(
+                      supabase_password_token_endpoint(&project),
+                      "https://abcdefghijklmnopqrst.supabase.co/auth/v1/token?grant_type=password"
+                  );
+              }
+
+              #[test]
+              fn honors_explicit_self_hosted_issuer_and_trims_trailing_slash() {
+                  let project = project(
+                      "unused-for-explicit-issuer",
+                      Some("http://127.0.0.1:54321/auth/v1/"),
+                  );
+                  assert_eq!(
+                      supabase_password_token_endpoint(&project),
+                      "http://127.0.0.1:54321/auth/v1/token?grant_type=password"
+                  );
+              }
+          }
+          '''
+          if 'mod endpoint_tests' in text:
+              raise SystemExit('endpoint regression tests unexpectedly exist at the locked source head')
+          path.write_text(text.rstrip() + tests + '\n')
           PY
+          grep -Fq 'supabase_password_token_endpoint(project)' src/handoff/mod.rs
           grep -Fq "project.issuer().trim_end_matches('/')" src/handoff/mod.rs
+          grep -Fq 'derives_hosted_password_endpoint_from_default_issuer' src/handoff/mod.rs
+          grep -Fq 'honors_explicit_self_hosted_issuer_and_trims_trailing_slash' src/handoff/mod.rs
           ! grep -Fq 'https://{}.supabase.co/auth/v1/token' src/handoff/mod.rs
 
       - name: Install the Rust verification toolchain
@@ -176,7 +244,9 @@ jobs:
             clippy: true,
             tests: true,
             release_build: true,
-            supabase_endpoint_from_issuer: true
+            supabase_endpoint_from_issuer: true,
+            hosted_endpoint_test: true,
+            self_hosted_endpoint_test: true
           }' > evidence/shared-auth/exact-head-certification.json
           cat > evidence/shared-auth/exact-head-certification.md <<EOF
           # Shared Auth exact-head certification
@@ -186,8 +256,8 @@ jobs:
           The Zpkg browser-handoff head passed declarative PostgreSQL schema application,
           auth-realm validation, locked Rust formatting, compile, Clippy with warnings denied,
           all-target tests, and a release build with PostgreSQL and Redis configured. Password
-          handoff derives the token endpoint from the configured Supabase issuer, preserving
-          hosted defaults and supporting self-hosted/deterministic E2E providers.
+          handoff derives the token endpoint from the configured Supabase issuer. Dedicated
+          regression tests cover both hosted defaults and explicit self-hosted issuers.
           EOF
           rm -f .github/workflows/repair-shared-auth-configurable-issuer.yml
           git rm bootstrap/shared-auth-configurable-issuer.once
