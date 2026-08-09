@@ -11,10 +11,10 @@ Canonical product PR: `zed-pkg/zed-cli#131`.
 Pinned product head:
 
 ```text
-e8367425baa545dd045fc033e5fea4396aa31554
+3434716591e048d0a769bafd47353d2953e89e48
 ```
 
-The product branch was semantically merged with current `main` head `5d1d13119be5784f545a7d812cdfaae3ca120693`. Current submodule CLI and project-lock behavior were adopted verbatim; `src/main.rs` was composed by extracting the already-tested exporter import and dispatch arms into the current main-line recovery and locking flow. The exporter remains a ten-file source, test, contract, and documentation delta with no materializer or synchronization workflow.
+The product branch was semantically merged with current `main` head `751358fe130e64b646844bc7d857c4cff215ca2d`. Current submodule CLI and project-lock behavior were adopted verbatim, including the independently merged Windows lock-contention normalization; `src/main.rs` retains only the already-tested exporter import and dispatch arms inside the current main-line recovery and locking flow. The exporter remains a ten-file source, test, contract, and documentation delta with no materializer or synchronization workflow.
 
 The public Rust API enforces the reserved exporter-state source boundary before delegating to the implementation. This protects the CLI, external Rust callers, portable case aliases, and in-project symlink aliases through one shared guard.
 
@@ -71,7 +71,7 @@ The complete current manager-lock identity contract is separately merged and cer
 
 Promotion requires:
 
-1. the workflow pin matching final immutable head `e8367425baa545dd045fc033e5fea4396aa31554` of `zed-pkg/zed-cli#131`;
+1. the workflow pin matching final immutable head `3434716591e048d0a769bafd47353d2953e89e48` of `zed-pkg/zed-cli#131`;
 2. Ubuntu 24.04, macOS 15, and Windows Server 2025 success;
 3. formatting, focused unit tests, the public API target, real CLI tests, a locked release build, and all-target Clippy with warnings denied;
 4. both black-box harnesses passing on all platforms, with symlink assertions skipped only where the host cannot create symlinks;
