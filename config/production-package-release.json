@@ -8,7 +8,7 @@
       "org": "shared-auth",
       "package": "shared-auth/shared-auth-interfaces",
       "repo": "shared-auth-interfaces",
-      "sha": "499961c4dee23299da6d0861344c05fc5bac4aa4",
+      "sha": "6a6c604211701ff5655aee72452d52cee0161531",
       "tag": "v0.1.0",
       "version": "0.1.0"
     },
@@ -21,7 +21,7 @@
       "org": "shared-auth",
       "package": "shared-auth/shared-auth-lib",
       "repo": "shared-auth-lib",
-      "sha": "346b85ce7bf6100be204d14e224e1421f8730b61",
+      "sha": "fdb5687824c1662632bfb108b7abed16688efafa",
       "tag": "v0.1.0",
       "version": "0.1.0"
     },
@@ -35,18 +35,18 @@
       "org": "oresoftware",
       "package": "oresoftware/k8s-libs-and-shared-defs",
       "repo": "k8s-libs-and-shared-defs",
-      "sha": "d8fb884023a26de79d4f5d533f486a2d3dbec7cc",
+      "sha": "399d7b2b92344125d92fbf590d08944e98e2b4f1",
       "tag": null,
       "version": "0.1.0"
     },
     {
       "dependencies": [],
       "github_owner": "zed-pkg",
-      "name": "zed-api-server.rs",
+      "name": "zed-api-server",
       "org": "zed-pkg",
-      "package": "zed-pkg/zed-api-server.rs",
+      "package": "zed-pkg/zed-api-server",
       "repo": "zed-api-server.rs",
-      "sha": "949b0872cf715b85ffc7e80a2a9e9cb9eb99efcf",
+      "sha": "17f2abdcf473dcfee9d24b19f531e26f8513425b",
       "tag": "v0.1.0",
       "version": "0.1.0"
     },
@@ -90,7 +90,7 @@
       "org": "zed-pkg",
       "package": "zed-pkg/zed-interfaces",
       "repo": "zed-interfaces",
-      "sha": "5394b2e7b070354ee79a4c6ac79c26d6264970cd",
+      "sha": "2687d46b2049669b5d1183d9d2cbc69c63a78f61",
       "tag": "v0.1.0",
       "version": "0.1.0"
     },
@@ -112,7 +112,7 @@
       "org": "zed-pkg",
       "package": "zed-pkg/zed-lock",
       "repo": "zed-lock",
-      "sha": "a0dc78d385bc3ab553d3027b427f5f1428239c9c",
+      "sha": "803e7050ef0a7baa36aecb215d4530b7c28094ce",
       "tag": "v0.1.1",
       "version": "0.1.1"
     },
@@ -123,7 +123,7 @@
       "org": "zed-pkg",
       "package": "zed-pkg/zed-monorepo",
       "repo": "zed-monorepo",
-      "sha": "d130f0af41ddc261d35fbe6c456dc9fed656e190",
+      "sha": "ac9ecd49fa9a73e37855de9a027cfdfff4aae284",
       "tag": "v0.1.0",
       "version": "0.1.0"
     },
@@ -151,12 +151,12 @@
     },
     {
       "dependencies": [],
-      "github_owner": "zed-pkg",
-      "name": "zed-web-server.rs",
-      "org": "zed-pkg",
-      "package": "zed-pkg/zed-web-server.rs",
-      "repo": "zed-web-server.rs",
-      "sha": "98d94515eca2d5cd99849475d5e7b0cb6c2a93fe",
+      "github_owner": "opto-sync",
+      "name": "syncer-rs",
+      "org": "opto-sync",
+      "package": "opto-sync/syncer-rs",
+      "repo": "syncer.rs",
+      "sha": "27692fb7c7423999eaff45afa5bd64b1bf86ad57",
       "tag": "v0.1.0",
       "version": "0.1.0"
     },
@@ -230,8 +230,8 @@
       "version": "0.1.0"
     }
   ],
-  "purpose": "DEN-2788 exact-source publish/install certification",
-  "registry_api_sha": "949b0872cf715b85ffc7e80a2a9e9cb9eb99efcf",
+  "purpose": "DEN-2788 exact-source API-only publish/install certification across GitHub organizations",
+  "registry_api_sha": "17f2abdcf473dcfee9d24b19f531e26f8513425b",
   "schema": 1,
-  "zed_cli_sha": "8929a58c6591c7a964d7f91412665d7c8a4afdf3"
+  "zed_cli_sha": "751358fe130e64b646844bc7d857c4cff215ca2d"
 }
