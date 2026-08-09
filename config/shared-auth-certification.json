@@ -4,5 +4,5 @@
   "branch": "feat/zpkg-browser-handoff-20260809",
   "expected_head": "3e1d0dac99ea3add4abb70b5949b0cfce26af7e8",
   "independent_test_repository": "shared-auth-test/server-api-contract-e2e",
-  "independent_test_head": "dc079b9501f32ccc2e59c4df9859191be0a9c746"
+  "independent_test_head": "091e8daff6ca4babed41af649f4d793b1bd40857"
 }
