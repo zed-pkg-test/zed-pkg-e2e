@@ -5,14 +5,14 @@ on:
     paths:
       - ".github/workflows/production-package-roundtrip.yml"
       - "config/production-package-release.json"
-      - "scripts/production_package_roundtrip.py"
+      - "scripts/production_package_*.py"
       - "docs/production-package-roundtrip.md"
   push:
     branches: [main]
     paths:
       - ".github/workflows/production-package-roundtrip.yml"
       - "config/production-package-release.json"
-      - "scripts/production_package_roundtrip.py"
+      - "scripts/production_package_*.py"
       - "docs/production-package-roundtrip.md"
   workflow_dispatch:
 
@@ -83,7 +83,7 @@ jobs:
           set -euo pipefail
           test "$(git -C zed-api-server.rs rev-parse HEAD)" = "$ZED_API_SHA"
           test "$(git -C zed-cli rev-parse HEAD)" = "$ZED_CLI_SHA"
-          python3 -m py_compile scripts/production_package_roundtrip.py
+          python3 -m py_compile scripts/production_package_*.py
           python3 - <<'PY'
           import importlib.util
           import pathlib
