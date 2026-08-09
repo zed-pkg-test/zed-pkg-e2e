@@ -1,0 +1,284 @@
+name: workstation Cloudflare inventory
+run-name: workstation Cloudflare inventory @ ${{ github.sha }}
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - .github/workflows/workstation-cloudflare-inventory.yml
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/workstation-cloudflare-inventory.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: workstation-cloudflare-inventory
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Check out exact revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 2
+
+      - name: Validate workflow syntax
+        uses: docker://rhysd/actionlint@sha256:b1934ee5f1c509618f2508e6eb47ee0d3520686341fec936f3b79331f9315667
+        with:
+          args: .github/workflows/workstation-cloudflare-inventory.yml
+
+      - name: Validate credential boundary
+        shell: bash
+        run: |
+          set -euo pipefail
+          workflow=.github/workflows/workstation-cloudflare-inventory.yml
+          grep -qF 'rsa_padding_mode:oaep' "$workflow"
+          grep -qF 'rsa_oaep_md:sha256' "$workflow"
+          grep -qF 'Destroy credential material' "$workflow"
+          credential_pattern='gh''p_|github_''pat_|cfat_|BEGIN [A-Z ]*PRIVATE KEY'
+          if grep -nE "$credential_pattern" "$workflow"; then
+            echo 'credential-shaped source material detected' >&2
+            exit 1
+          fi
+          git diff --check HEAD^ HEAD
+
+  inventory:
+    if: >-
+      github.event_name != 'pull_request' &&
+      github.repository == 'zed-pkg-test/zed-pkg-e2e' &&
+      github.ref == 'refs/heads/main'
+    needs: validate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      issues: write
+    env:
+      ISSUE_NUMBER: 158
+      CONFIRMATION: inspect-zpkg-workstation-tunnel
+      ACCOUNT_ID: 62b833940607839add74bd2379cac303
+      TUNNEL_ID: 2eb5c6d9-a2b7-4c5e-9222-2f43e91f90e1
+      ZPKG_ZONE_ID: b559136046dcffc550ee8b3ed49cdf09
+    steps:
+      - name: Check out exact trusted main
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Receive one run-bound encrypted Cloudflare API token
+        id: handoff
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          umask 077
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          run_id="${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-$(openssl rand -hex 16)"
+          private_key="$RUNNER_TEMP/workstation-cf-private.pem"
+          public_key="$RUNNER_TEMP/workstation-cf-public.pem"
+          matches="$RUNNER_TEMP/workstation-cf-ciphertext-matches"
+          encrypted="$RUNNER_TEMP/workstation-cf-token.bin"
+          payload="$RUNNER_TEMP/workstation-cf-payload.json"
+          token_file="$RUNNER_TEMP/workstation-cf-api-token"
+
+          openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:4096 -out "$private_key" >/dev/null 2>&1
+          openssl pkey -in "$private_key" -pubout -out "$public_key" >/dev/null 2>&1
+          key_b64="$(base64 -w0 < "$public_key")"
+          gh api --method POST "repos/${GITHUB_REPOSITORY}/issues/${ISSUE_NUMBER}/comments" \
+            -f body="CF_WORKSTATION_INVENTORY_PUBLIC_KEY protocol=1 run_id=${run_id} key_b64=${key_b64} confirm=${CONFIRMATION}" >/dev/null
+          echo "run_id=${run_id}" >> "$GITHUB_OUTPUT"
+          echo "token_file=${token_file}" >> "$GITHUB_OUTPUT"
+          echo "HANDSHAKE_READY run_id=${run_id} issue=${ISSUE_NUMBER}"
+
+          prefix="CF_WORKSTATION_INVENTORY_CIPHERTEXT protocol=1 run_id=${run_id} data="
+          query_matches() {
+            gh api --paginate "repos/${GITHUB_REPOSITORY}/issues/${ISSUE_NUMBER}/comments" \
+              --jq ".[] | select(.body | startswith(\"${prefix}\")) | .body" > "$matches"
+          }
+          reject_duplicates() {
+            count="$1"
+            gh api --method POST "repos/${GITHUB_REPOSITORY}/issues/${ISSUE_NUMBER}/comments" \
+              -f body="CF_WORKSTATION_INVENTORY_REJECTED protocol=1 run_id=${run_id} reason=duplicate_ciphertexts count=${count}" >/dev/null
+            echo "expected exactly one ciphertext; observed ${count}" >&2
+            exit 1
+          }
+
+          ciphertext=''
+          for _ in $(seq 1 360); do
+            query_matches
+            count="$(awk 'NF { count += 1 } END { print count + 0 }' "$matches")"
+            [ "$count" -le 1 ] || reject_duplicates "$count"
+            if [ "$count" -eq 1 ]; then
+              sleep 5
+              query_matches
+              count="$(awk 'NF { count += 1 } END { print count + 0 }' "$matches")"
+              [ "$count" -eq 1 ] || reject_duplicates "$count"
+              line="$(cat "$matches")"
+              ciphertext="${line#"$prefix"}"
+              break
+            fi
+            sleep 5
+          done
+          test -n "$ciphertext" || { echo "encrypted credential was not received for ${run_id}" >&2; exit 1; }
+          printf '%s' "$ciphertext" | base64 -d > "$encrypted"
+          openssl pkeyutl -decrypt -inkey "$private_key" -in "$encrypted" \
+            -pkeyopt rsa_padding_mode:oaep \
+            -pkeyopt rsa_oaep_md:sha256 \
+            -pkeyopt rsa_mgf1_md:sha256 \
+            -out "$payload"
+          jq -e --arg run_id "$run_id" --arg confirmation "$CONFIRMATION" '
+            (.run_id == $run_id) and (.confirm == $confirmation) and
+            (.cf_api_token | type == "string" and length >= 20 and (test("\\s") | not))
+          ' "$payload" >/dev/null
+          token="$(jq -r .cf_api_token "$payload")"
+          echo "::add-mask::${token}"
+          printf '%s' "$token" > "$token_file"
+          chmod 600 "$token_file"
+          rm -f "$matches" "$encrypted" "$payload"
+
+      - name: Query tunnel, DNS, and Access metadata
+        id: inventory
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TOKEN_FILE: ${{ steps.handoff.outputs.token_file }}
+          RUN_ID: ${{ steps.handoff.outputs.run_id }}
+        run: |
+          set -Eeuo pipefail
+          umask 077
+          token="$(cat "$TOKEN_FILE")"
+          api=https://api.cloudflare.com/client/v4
+          out="$RUNNER_TEMP/workstation-tunnel-inventory.json"
+          raw="$RUNNER_TEMP/workstation-tunnel-raw"
+          mkdir -p "$raw"
+
+          cf_get_required() {
+            name="$1"
+            path="$2"
+            destination="$raw/${name}.json"
+            curl --fail-with-body --silent --show-error \
+              -H "Authorization: Bearer ${token}" \
+              -H 'Content-Type: application/json' \
+              "${api}${path}" > "$destination"
+            jq -e '.success == true' "$destination" >/dev/null
+          }
+          cf_get_optional() {
+            name="$1"
+            path="$2"
+            destination="$raw/${name}.json"
+            if ! curl --fail-with-body --silent --show-error \
+              -H "Authorization: Bearer ${token}" \
+              -H 'Content-Type: application/json' \
+              "${api}${path}" > "$destination"; then
+              jq -n --arg endpoint "$path" '{success:false,endpoint:$endpoint,result:null,errors:[{message:"request failed or permission denied"}]}' > "$destination"
+            fi
+          }
+
+          cf_get_required verify '/user/tokens/verify'
+          cf_get_required tunnels "/accounts/${ACCOUNT_ID}/cfd_tunnel?is_deleted=false&per_page=100"
+          cf_get_required tunnel_config "/accounts/${ACCOUNT_ID}/cfd_tunnel/${TUNNEL_ID}/configurations"
+          cf_get_optional tunnel_connections "/accounts/${ACCOUNT_ID}/cfd_tunnel/${TUNNEL_ID}/connections"
+          cf_get_optional access_apps "/accounts/${ACCOUNT_ID}/access/apps?per_page=200"
+          cf_get_optional dns_records "/zones/${ZPKG_ZONE_ID}/dns_records?per_page=500"
+
+          jq -n \
+            --arg account_id "$ACCOUNT_ID" \
+            --arg tunnel_id "$TUNNEL_ID" \
+            --arg zone_id "$ZPKG_ZONE_ID" \
+            --slurpfile verify "$raw/verify.json" \
+            --slurpfile tunnels "$raw/tunnels.json" \
+            --slurpfile config "$raw/tunnel_config.json" \
+            --slurpfile connections "$raw/tunnel_connections.json" \
+            --slurpfile apps "$raw/access_apps.json" \
+            --slurpfile dns "$raw/dns_records.json" '
+            def relevant_domain:
+              ascii_downcase | test("(zpkg|registry|ssh|mac[-.]?mini|workstation|toolbox|credistrata)");
+            {
+              schema: "cloudflare.workstation-tunnel-inventory/v1",
+              account_id: $account_id,
+              tunnel_id: $tunnel_id,
+              zone_id: $zone_id,
+              token_status: ($verify[0].result.status // "unknown"),
+              tunnel: (
+                ($tunnels[0].result // [])
+                | map(select(.id == $tunnel_id or .name == "zpkg-registry-local"))
+                | map({id,name,status,remote_config,created_at,deleted_at})
+              ),
+              ingress: (
+                $config[0].result.config.ingress // $config[0].result.ingress // []
+                | map({hostname,service,originRequest})
+              ),
+              connections: {
+                readable: ($connections[0].success // false),
+                count: (($connections[0].result // []) | length),
+                connectors: (($connections[0].result // []) | map({id,colo_name,is_pending_reconnect,opened_at,origin_ip,uuid}))
+              },
+              dns: {
+                readable: ($dns[0].success // false),
+                records: (
+                  ($dns[0].result // [])
+                  | map(select(
+                      (((.name // "") | type) == "string" and ((.name // "") | relevant_domain)) or
+                      (((.content // "") | type) == "string" and ((.content // "") | ascii_downcase | contains(($tunnel_id | ascii_downcase)))) or
+                      (((.content // "") | type) == "string" and ((.content // "") | ascii_downcase | contains("cfargotunnel.com")))
+                    ))
+                  | map({id,type,name,content,proxied,ttl})
+                )
+              },
+              access: {
+                readable: ($apps[0].success // false),
+                applications: (
+                  ($apps[0].result // [])
+                  | map(select(
+                      (((.domain // "") | type) == "string" and ((.domain // "") | relevant_domain)) or
+                      (((.name // "") | type) == "string" and ((.name // "") | relevant_domain)) or
+                      (((.type // "") | type) == "string" and ((.type // "") | ascii_downcase | test("ssh|self_hosted")))
+                    ))
+                  | map({id,name,domain,type,session_duration,auto_redirect_to_identity,enable_binding_cookie,http_only_cookie_attribute,same_site_cookie_attribute})
+                )
+              }
+            }
+          ' > "$out"
+
+          jq -e '.tunnel | length >= 1' "$out" >/dev/null
+          jq . "$out"
+
+          tunnel_status="$(jq -r '.tunnel[0].status // "unknown"' "$out")"
+          connector_count="$(jq -r '.connections.count' "$out")"
+          ingress_b64="$(jq -c '[.ingress[] | {hostname,service}]' "$out" | base64 -w0)"
+          dns_b64="$(jq -c '.dns.records' "$out" | base64 -w0)"
+          access_b64="$(jq -c '.access.applications' "$out" | base64 -w0)"
+          gh api --method POST "repos/${GITHUB_REPOSITORY}/issues/${ISSUE_NUMBER}/comments" \
+            -f body="CF_WORKSTATION_INVENTORY_RESULT protocol=1 run_id=${RUN_ID} tunnel_status=${tunnel_status} connector_count=${connector_count} ingress_b64=${ingress_b64} dns_b64=${dns_b64} access_b64=${access_b64}" >/dev/null
+
+      - name: Upload non-secret inventory
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: workstation-tunnel-inventory-${{ github.run_id }}
+          path: ${{ runner.temp }}/workstation-tunnel-inventory.json
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Destroy credential material
+        if: always()
+        shell: bash
+        run: |
+          shred -u \
+            "$RUNNER_TEMP/workstation-cf-private.pem" \
+            "$RUNNER_TEMP/workstation-cf-public.pem" \
+            "$RUNNER_TEMP/workstation-cf-token.bin" \
+            "$RUNNER_TEMP/workstation-cf-payload.json" \
+            "$RUNNER_TEMP/workstation-cf-api-token" \
+            2>/dev/null || true
+          rm -rf "$RUNNER_TEMP/workstation-cf-ciphertext-matches" "$RUNNER_TEMP/workstation-tunnel-raw"

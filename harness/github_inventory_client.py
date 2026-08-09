@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 from typing import Any, Callable, Mapping
 
@@ -16,10 +17,12 @@ _metadata_full_name = _support._metadata_full_name
 _next_link = _support._next_link
 _quote = _support._quote
 
+
 class FixtureTransport(Transport):
     def __init__(self, backend: FixtureBackend) -> None:
         self.backend = backend
         self.base_url = backend.base_url
+        self._base_path = urllib.parse.urlsplit(self.base_url).path.rstrip("/")
         self.requests: list[str] = []
 
     def request(
@@ -30,9 +33,10 @@ class FixtureTransport(Transport):
         max_bytes: int,
     ) -> ApiResponse:
         del timeout, max_bytes
-        relative = self.relative_from_link(path)
+        relative = self.normalize_request_path(path)
         self.requests.append(relative)
         return self.backend.handle(relative, headers.get("Authorization"))
+
 
 class GitHubClient:
     def __init__(
@@ -63,15 +67,20 @@ class GitHubClient:
             if path in seen_pages:
                 raise ApiError(400, path, "pagination_cycle")
             seen_pages.add(path)
-            response, value = self._get_json(path)
+            current_path = path
+            response, value = self._get_json(current_path)
             if not isinstance(value, list):
-                raise ApiError(502, path, "invalid_github_json_shape")
+                raise ApiError(502, current_path, "invalid_github_json_shape")
             for item in value:
                 if not isinstance(item, dict):
-                    raise ApiError(502, path, "invalid_github_json_shape")
+                    raise ApiError(502, current_path, "invalid_github_json_shape")
                 repositories.append(item)
             next_link = _next_link(response.header("Link"))
-            path = self.transport.relative_from_link(next_link) if next_link else ""
+            path = (
+                self.transport.relative_from_link(next_link, current_path=current_path)
+                if next_link
+                else ""
+            )
         return repositories
 
     def get_repository(self, full_name: str) -> dict[str, Any]:
@@ -126,15 +135,33 @@ class GitHubClient:
             data = base64.b64decode(encoded, validate=True)
         except (ValueError, TypeError) as error:
             raise ApiError(502, path, "invalid_blob_base64") from error
+
+        response_size = value.get("size")
+        if not isinstance(response_size, int) or response_size < 0 or len(data) != response_size:
+            raise ApiError(502, path, "blob_size_mismatch")
         if declared_size is not None and len(data) != declared_size:
             raise ApiError(502, path, "blob_size_mismatch")
         if len(data) > self.budget.limits.max_manifest_bytes:
             raise LimitError(
                 f"manifest blob exceeded {self.budget.limits.max_manifest_bytes} bytes"
             )
+
         response_sha = value.get("sha")
-        if response_sha is not None and response_sha != blob_sha:
+        if not isinstance(response_sha, str):
             raise ApiError(502, path, "blob_sha_mismatch")
+        response_sha = response_sha.lower()
+        if response_sha != blob_sha or not GIT_SHA_RE.fullmatch(response_sha):
+            raise ApiError(502, path, "blob_sha_mismatch")
+
+        header = f"blob {len(data)}\0".encode("ascii")
+        if len(blob_sha) == 40:
+            computed_sha = hashlib.sha1(header + data, usedforsecurity=False).hexdigest()
+        elif len(blob_sha) == 64:
+            computed_sha = hashlib.sha256(header + data).hexdigest()
+        else:
+            raise ApiError(502, path, "invalid_git_sha")
+        if computed_sha != blob_sha:
+            raise ApiError(502, path, "blob_object_id_mismatch")
         return data
 
     def _get_json(self, path: str) -> tuple[ApiResponse, Any]:
