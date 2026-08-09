@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
-"""Resolve immutable, tag-ready Zed package candidates from GitHub.
+"""Resolve immutable Zed package releases from GitHub.
 
-The resulting JSON is the release ledger input. Every selected package has a
-root `.zpkg.toml`, a valid `zed-pkg/<name>@<version>` identity, and a matching
-release tag that peels to the exact default-branch head recorded in the ledger.
+The default-branch manifest declares the release version and tag name. The
+release ledger itself is built from the manifest at the commit peeled from that
+tag, so normal development after a release does not invalidate the immutable
+release. Default-head drift is retained as evidence instead of treated as a
+failure.
 """
 
 from __future__ import annotations
@@ -19,7 +21,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from collections import defaultdict, deque
-from dataclasses import dataclass, asdict
+from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 
@@ -44,13 +46,27 @@ class Candidate:
     archive_format: str
     repository_url: str
     dependencies: tuple[str, ...]
+    default_sha: str
+    default_head_matches_tag: bool
+
+
+@dataclass(frozen=True)
+class ManifestDeclaration:
+    package: str
+    org: str
+    name: str
+    version: str
+    tag: str
+    archive_format: str
+    repository_url: str
+    dependencies: tuple[str, ...]
 
 
 def api_get(path: str, token: str | None) -> dict[str, Any]:
     url = path if path.startswith("https://") else f"https://api.github.com{path}"
     headers = {
         "Accept": "application/vnd.github+json",
-        "User-Agent": "zed-pkg-production-inventory/1",
+        "User-Agent": "zed-pkg-production-inventory/2",
         "X-GitHub-Api-Version": "2022-11-28",
     }
     if token:
@@ -79,6 +95,12 @@ def decode_manifest(payload: dict[str, Any], coordinate: str) -> dict[str, Any]:
     return document
 
 
+def fetch_manifest(org: str, repo: str, ref: str, token: str | None) -> dict[str, Any]:
+    encoded_ref = urllib.parse.quote(ref, safe="")
+    payload = api_get(f"/repos/{org}/{repo}/contents/.zpkg.toml?ref={encoded_ref}", token)
+    return decode_manifest(payload, f"{org}/{repo}@{ref}")
+
+
 def peel_tag(org: str, repo: str, tag: str, token: str | None) -> str:
     encoded = urllib.parse.quote(tag, safe="")
     reference = api_get(f"/repos/{org}/{repo}/git/ref/tags/{encoded}", token)
@@ -97,7 +119,7 @@ def peel_tag(org: str, repo: str, tag: str, token: str | None) -> str:
     raise InventoryError(f"{org}/{repo}: tag {tag!r} does not peel to a commit")
 
 
-def archive_format(document: dict[str, Any]) -> str:
+def resolve_archive_format(document: dict[str, Any]) -> str:
     publish = document.get("publish")
     value: Any = None
     if isinstance(publish, dict):
@@ -111,13 +133,7 @@ def archive_format(document: dict[str, Any]) -> str:
     return value
 
 
-def parse_candidate(
-    org: str,
-    repo: str,
-    sha: str,
-    document: dict[str, Any],
-    token: str | None,
-) -> Candidate:
+def parse_manifest(org: str, repo: str, document: dict[str, Any]) -> ManifestDeclaration:
     package = document.get("package")
     if not isinstance(package, dict):
         raise InventoryError(f"{org}/{repo}: missing [package]")
@@ -126,8 +142,8 @@ def parse_candidate(
     version = package.get("version")
     if manifest_org != org:
         raise InventoryError(f"{org}/{repo}: package.org is {manifest_org!r}, expected {org!r}")
-    if not isinstance(name, str) or not name or len(name) > 128:
-        raise InventoryError(f"{org}/{repo}: invalid package.name")
+    if name != repo:
+        raise InventoryError(f"{org}/{repo}: package.name is {name!r}, expected {repo!r}")
     if not isinstance(version, str) or not VERSION_RE.fullmatch(version):
         raise InventoryError(f"{org}/{repo}: invalid package.version {version!r}")
     repository = package.get("repository")
@@ -144,11 +160,6 @@ def parse_candidate(
     if not isinstance(tag_format, str) or tag_format.count("{version}") != 1:
         raise InventoryError(f"{org}/{repo}: publish.tag_format must contain exactly one {{version}}")
     tag = tag_format.replace("{version}", version)
-    tag_sha = peel_tag(org, repo, tag, token)
-    if tag_sha != sha:
-        raise InventoryError(
-            f"{org}/{repo}: tag {tag!r} peels to {tag_sha}, default-branch head is {sha}"
-        )
     dependencies = document.get("dependencies")
     dependency_names: tuple[str, ...]
     if dependencies is None:
@@ -157,18 +168,53 @@ def parse_candidate(
         dependency_names = tuple(sorted(dependencies))
     else:
         raise InventoryError(f"{org}/{repo}: [dependencies] is not a string-keyed table")
-    return Candidate(
-        repo=repo,
-        sha=sha,
+    return ManifestDeclaration(
         package=f"{manifest_org}/{name}",
         org=manifest_org,
         name=name,
         version=version,
         tag=tag,
-        tag_sha=tag_sha,
-        archive_format=archive_format(document),
+        archive_format=resolve_archive_format(document),
         repository_url=expected_url,
         dependencies=dependency_names,
+    )
+
+
+def resolve_candidate(
+    org: str,
+    repo: str,
+    default_sha: str,
+    default_document: dict[str, Any],
+    token: str | None,
+) -> Candidate:
+    requested = parse_manifest(org, repo, default_document)
+    tag_sha = peel_tag(org, repo, requested.tag, token)
+    tagged_document = fetch_manifest(org, repo, tag_sha, token)
+    released = parse_manifest(org, repo, tagged_document)
+    if (released.package, released.version, released.tag) != (
+        requested.package,
+        requested.version,
+        requested.tag,
+    ):
+        raise InventoryError(
+            f"{org}/{repo}: default manifest requests {requested.package}@{requested.version} "
+            f"via {requested.tag!r}, but that tag contains "
+            f"{released.package}@{released.version} via {released.tag!r}"
+        )
+    return Candidate(
+        repo=repo,
+        sha=tag_sha,
+        package=released.package,
+        org=released.org,
+        name=released.name,
+        version=released.version,
+        tag=released.tag,
+        tag_sha=tag_sha,
+        archive_format=released.archive_format,
+        repository_url=released.repository_url,
+        dependencies=released.dependencies,
+        default_sha=default_sha,
+        default_head_matches_tag=default_sha == tag_sha,
     )
 
 
@@ -201,8 +247,9 @@ def topological_order(candidates: list[Candidate]) -> list[Candidate]:
 def write_outputs(candidates: list[Candidate], rejected: list[dict[str, str]], output: Path) -> None:
     output.mkdir(parents=True, exist_ok=True)
     ledger = {
-        "schema": 1,
+        "schema": 2,
         "count": len(candidates),
+        "drifted_default_heads": sum(not candidate.default_head_matches_tag for candidate in candidates),
         "packages": [asdict(candidate) for candidate in candidates],
         "rejected": rejected,
     }
@@ -213,14 +260,16 @@ def write_outputs(candidates: list[Candidate], rejected: list[dict[str, str]], o
         "# Production package inventory",
         "",
         f"Selected immutable packages: **{len(candidates)}**",
+        f"Default branches advanced after the immutable tag: **{ledger['drifted_default_heads']}**",
         "",
-        "| Order | Package | Version | Repository | Commit | Tag | Format |",
+        "| Order | Package | Version | Release commit | Default commit | Tag | Format |",
         "| ---: | --- | --- | --- | --- | --- | --- |",
     ]
     for index, candidate in enumerate(candidates, 1):
+        default = candidate.default_sha if candidate.default_head_matches_tag else f"{candidate.default_sha} (advanced)"
         lines.append(
             f"| {index} | `{candidate.package}` | `{candidate.version}` | "
-            f"`{candidate.repo}` | `{candidate.sha}` | `{candidate.tag}` | "
+            f"`{candidate.sha}` | `{default}` | `{candidate.tag}` | "
             f"`{candidate.archive_format}` |"
         )
     if rejected:
@@ -256,20 +305,22 @@ def inventory(config_path: Path, output: Path, token: str | None) -> None:
             default_branch = metadata.get("default_branch")
             if not isinstance(default_branch, str):
                 raise InventoryError("repository has no default branch")
-            commit = api_get(f"/repos/{org}/{repo}/commits/{urllib.parse.quote(default_branch, safe='')}", token)
-            sha = commit.get("sha")
-            if not isinstance(sha, str) or not SHA_RE.fullmatch(sha):
+            commit = api_get(
+                f"/repos/{org}/{repo}/commits/{urllib.parse.quote(default_branch, safe='')}",
+                token,
+            )
+            default_sha = commit.get("sha")
+            if not isinstance(default_sha, str) or not SHA_RE.fullmatch(default_sha):
                 raise InventoryError("default branch did not resolve to an exact commit")
-            manifest = api_get(f"/repos/{org}/{repo}/contents/.zpkg.toml?ref={sha}", token)
-            document = decode_manifest(manifest, f"{org}/{repo}@{sha}")
-            candidates.append(parse_candidate(org, repo, sha, document, token))
+            default_document = fetch_manifest(org, repo, default_sha, token)
+            candidates.append(resolve_candidate(org, repo, default_sha, default_document, token))
         except InventoryError as error:
             rejected.append({"repo": repo, "reason": str(error)})
     candidates = topological_order(candidates)
     if not minimum <= len(candidates) <= maximum:
         write_outputs(candidates, rejected, output)
         raise InventoryError(
-            f"tag-ready root-manifest package count {len(candidates)} is outside [{minimum}, {maximum}]"
+            f"immutable root-manifest package count {len(candidates)} is outside [{minimum}, {maximum}]"
         )
     if not any(candidate.name == "zed-lib-core" for candidate in candidates):
         raise InventoryError("zed-lib-core is mandatory but was not selected")
@@ -279,15 +330,38 @@ def inventory(config_path: Path, output: Path, token: str | None) -> None:
 
 
 def self_test() -> None:
+    document = {
+        "package": {
+            "org": "zed-pkg",
+            "name": "a",
+            "version": "1.0.0",
+            "repository": {"url": "https://github.com/zed-pkg/a.git"},
+        },
+        "publish": {"format": "zip", "tag_format": "release-{version}"},
+        "dependencies": {"zed-pkg/b": {"version": "1.0.0"}},
+    }
+    declaration = parse_manifest("zed-pkg", "a", document)
+    assert declaration.package == "zed-pkg/a"
+    assert declaration.tag == "release-1.0.0"
+    assert declaration.archive_format == "zip"
+    assert declaration.dependencies == ("zed-pkg/b",)
+
     sample = [
-        Candidate("b", "b" * 40, "zed-pkg/b", "zed-pkg", "b", "1.0.0", "v1.0.0", "b" * 40, "zip", "https://github.com/zed-pkg/b", ("zed-pkg/a",)),
-        Candidate("a", "a" * 40, "zed-pkg/a", "zed-pkg", "a", "1.0.0", "v1.0.0", "a" * 40, "tar.gz", "https://github.com/zed-pkg/a", ()),
+        Candidate(
+            "b", "b" * 40, "zed-pkg/b", "zed-pkg", "b", "1.0.0", "v1.0.0",
+            "b" * 40, "zip", "https://github.com/zed-pkg/b", ("zed-pkg/a",),
+            "c" * 40, False,
+        ),
+        Candidate(
+            "a", "a" * 40, "zed-pkg/a", "zed-pkg", "a", "1.0.0", "v1.0.0",
+            "a" * 40, "tar.gz", "https://github.com/zed-pkg/a", (),
+            "a" * 40, True,
+        ),
     ]
     assert [candidate.name for candidate in topological_order(sample)] == ["a", "b"]
-    assert archive_format({}) == "tar.gz"
-    assert archive_format({"publish": {"format": "zip"}}) == "zip"
+    assert resolve_archive_format({}) == "tar.gz"
     try:
-        archive_format({"publish": {"format": "rar"}})
+        resolve_archive_format({"publish": {"format": "rar"}})
     except InventoryError:
         pass
     else:
@@ -304,7 +378,11 @@ def main() -> int:
         if args.self_test:
             self_test()
         else:
-            inventory(args.config, args.output, os.environ.get("GH_TOKEN") or os.environ.get("GITHUB_TOKEN"))
+            inventory(
+                args.config,
+                args.output,
+                os.environ.get("GH_TOKEN") or os.environ.get("GITHUB_TOKEN"),
+            )
     except (InventoryError, OSError, json.JSONDecodeError, KeyError, TypeError) as error:
         print(f"inventory failed: {error}", file=sys.stderr)
         return 1
