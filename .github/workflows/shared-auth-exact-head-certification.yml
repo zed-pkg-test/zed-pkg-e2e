@@ -138,7 +138,7 @@ jobs:
             --realm-source src/realm.rs
           psql -h 127.0.0.1 -U shared_auth -d shared_auth_test -Atc \
             "select to_regclass('shared_auth.browser_authorization_codes') is not null" | grep -Fx t
-          redis-cli -h 127.0.0.1 ping | grep -Fx PONG
+          python3 -c 'import socket; connection = socket.create_connection(("127.0.0.1", 6379), 5); connection.sendall(b"*1\r\n$4\r\nPING\r\n"); response = connection.recv(64); connection.close(); assert response == b"+PONG\r\n", response'
 
       - name: Prove database first-use, replay, PKCE, redirect, client, and expiry boundaries
         env:
