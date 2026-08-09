@@ -189,16 +189,13 @@
       "version": "0.1.0"
     },
     {
-      "dependencies": [
-        "oresoftware/k8s-libs-and-shared-defs",
-        "zed-pkg/zed-interfaces"
-      ],
+      "dependencies": [],
       "github_owner": "zed-pkg",
-      "name": "zed-lib",
+      "name": "zed-docs",
       "org": "zed-pkg",
-      "package": "zed-pkg/zed-lib",
-      "repo": "zed-lib",
-      "sha": "12071278e728100cc80b8ba60297ebff8e0914cb",
+      "package": "zed-pkg/zed-docs",
+      "repo": "zed-docs",
+      "sha": "a5e9c713c6e6b6c5120a89e9a0233c7eeb420720",
       "tag": null,
       "version": "0.1.0"
     },
