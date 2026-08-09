@@ -1,0 +1,237 @@
+{
+  "count": 19,
+  "packages": [
+    {
+      "dependencies": [],
+      "github_owner": "shared-auth",
+      "name": "shared-auth-interfaces",
+      "org": "shared-auth",
+      "package": "shared-auth/shared-auth-interfaces",
+      "repo": "shared-auth-interfaces",
+      "sha": "499961c4dee23299da6d0861344c05fc5bac4aa4",
+      "tag": "v0.1.0",
+      "version": "0.1.0"
+    },
+    {
+      "dependencies": [
+        "shared-auth/shared-auth-interfaces"
+      ],
+      "github_owner": "shared-auth",
+      "name": "shared-auth-lib",
+      "org": "shared-auth",
+      "package": "shared-auth/shared-auth-lib",
+      "repo": "shared-auth-lib",
+      "sha": "346b85ce7bf6100be204d14e224e1421f8730b61",
+      "tag": "v0.1.0",
+      "version": "0.1.0"
+    },
+    {
+      "dependencies": [
+        "shared-auth/shared-auth-interfaces",
+        "shared-auth/shared-auth-lib"
+      ],
+      "github_owner": "ORESoftware",
+      "name": "k8s-libs-and-shared-defs",
+      "org": "oresoftware",
+      "package": "oresoftware/k8s-libs-and-shared-defs",
+      "repo": "k8s-libs-and-shared-defs",
+      "sha": "d8fb884023a26de79d4f5d533f486a2d3dbec7cc",
+      "tag": null,
+      "version": "0.1.0"
+    },
+    {
+      "dependencies": [],
+      "github_owner": "zed-pkg",
+      "name": "zed-api-server.rs",
+      "org": "zed-pkg",
+      "package": "zed-pkg/zed-api-server.rs",
+      "repo": "zed-api-server.rs",
+      "sha": "949b0872cf715b85ffc7e80a2a9e9cb9eb99efcf",
+      "tag": "v0.1.0",
+      "version": "0.1.0"
+    },
+    {
+      "dependencies": [],
+      "github_owner": "zed-pkg",
+      "name": "zed-e2e",
+      "org": "zed-pkg",
+      "package": "zed-pkg/zed-e2e",
+      "repo": "zed-e2e",
+      "sha": "f636118e83a8a3edde7285431651850eddf53a14",
+      "tag": "v0.1.0",
+      "version": "0.1.0"
+    },
+    {
+      "dependencies": [],
+      "github_owner": "zed-pkg",
+      "name": "zed-infra",
+      "org": "zed-pkg",
+      "package": "zed-pkg/zed-infra",
+      "repo": "zed-infra",
+      "sha": "807ce6eb427270cb9df2f0af676faab310e00b05",
+      "tag": "v0.1.0",
+      "version": "0.1.0"
+    },
+    {
+      "dependencies": [],
+      "github_owner": "zed-pkg",
+      "name": "zed-intellij",
+      "org": "zed-pkg",
+      "package": "zed-pkg/zed-intellij",
+      "repo": "zed-intellij",
+      "sha": "7282fdbc7046bb2ba58369b59ef627211033e145",
+      "tag": "v0.1.0",
+      "version": "0.1.0"
+    },
+    {
+      "dependencies": [],
+      "github_owner": "zed-pkg",
+      "name": "zed-interfaces",
+      "org": "zed-pkg",
+      "package": "zed-pkg/zed-interfaces",
+      "repo": "zed-interfaces",
+      "sha": "5394b2e7b070354ee79a4c6ac79c26d6264970cd",
+      "tag": "v0.1.0",
+      "version": "0.1.0"
+    },
+    {
+      "dependencies": [],
+      "github_owner": "zed-pkg",
+      "name": "zed-jetbrains-air",
+      "org": "zed-pkg",
+      "package": "zed-pkg/zed-jetbrains-air",
+      "repo": "zed-jetbrains-air",
+      "sha": "be357c41573e4afb936faea2b410272b32bf5649",
+      "tag": "v0.1.0",
+      "version": "0.1.0"
+    },
+    {
+      "dependencies": [],
+      "github_owner": "zed-pkg",
+      "name": "zed-lock",
+      "org": "zed-pkg",
+      "package": "zed-pkg/zed-lock",
+      "repo": "zed-lock",
+      "sha": "a0dc78d385bc3ab553d3027b427f5f1428239c9c",
+      "tag": "v0.1.1",
+      "version": "0.1.1"
+    },
+    {
+      "dependencies": [],
+      "github_owner": "zed-pkg",
+      "name": "zed-monorepo",
+      "org": "zed-pkg",
+      "package": "zed-pkg/zed-monorepo",
+      "repo": "zed-monorepo",
+      "sha": "d130f0af41ddc261d35fbe6c456dc9fed656e190",
+      "tag": "v0.1.0",
+      "version": "0.1.0"
+    },
+    {
+      "dependencies": [],
+      "github_owner": "zed-pkg",
+      "name": "zed-sublimetext",
+      "org": "zed-pkg",
+      "package": "zed-pkg/zed-sublimetext",
+      "repo": "zed-sublimetext",
+      "sha": "c3153867dff0b560946c9b7e287ed50366b87e6c",
+      "tag": "v0.1.0",
+      "version": "0.1.0"
+    },
+    {
+      "dependencies": [],
+      "github_owner": "zed-pkg",
+      "name": "zed-sync",
+      "org": "zed-pkg",
+      "package": "zed-pkg/zed-sync",
+      "repo": "zed-sync",
+      "sha": "0dcaee9d9a8185870f7d06f9a077ecf5161d9e7f",
+      "tag": "v0.1.0",
+      "version": "0.1.0"
+    },
+    {
+      "dependencies": [],
+      "github_owner": "zed-pkg",
+      "name": "zed-web-server.rs",
+      "org": "zed-pkg",
+      "package": "zed-pkg/zed-web-server.rs",
+      "repo": "zed-web-server.rs",
+      "sha": "98d94515eca2d5cd99849475d5e7b0cb6c2a93fe",
+      "tag": "v0.1.0",
+      "version": "0.1.0"
+    },
+    {
+      "dependencies": [
+        "zed-pkg/zed-interfaces"
+      ],
+      "github_owner": "zed-pkg",
+      "name": "zed-clients",
+      "org": "zed-pkg",
+      "package": "zed-pkg/zed-clients",
+      "repo": "zed-clients",
+      "sha": "e79723981b88f8b6fbb2f49e7d3d954e2832cdc6",
+      "tag": "v0.1.0",
+      "version": "0.1.0"
+    },
+    {
+      "dependencies": [
+        "oresoftware/k8s-libs-and-shared-defs"
+      ],
+      "github_owner": "zed-pkg",
+      "name": "zed-orm-core",
+      "org": "zed-pkg",
+      "package": "zed-pkg/zed-orm-core",
+      "repo": "zed-orm-core",
+      "sha": "a78baf355e8ba3b98fa09780af9f67e8b7c12b85",
+      "tag": "v0.1.0",
+      "version": "0.1.0"
+    },
+    {
+      "dependencies": [
+        "oresoftware/k8s-libs-and-shared-defs",
+        "zed-pkg/zed-interfaces"
+      ],
+      "github_owner": "zed-pkg",
+      "name": "zed-lib",
+      "org": "zed-pkg",
+      "package": "zed-pkg/zed-lib",
+      "repo": "zed-lib",
+      "sha": "12071278e728100cc80b8ba60297ebff8e0914cb",
+      "tag": "v0.1.0",
+      "version": "0.1.0"
+    },
+    {
+      "dependencies": [
+        "oresoftware/k8s-libs-and-shared-defs",
+        "zed-pkg/zed-interfaces"
+      ],
+      "github_owner": "zed-pkg",
+      "name": "zed-lib-core",
+      "org": "zed-pkg",
+      "package": "zed-pkg/zed-lib-core",
+      "repo": "zed-lib-core",
+      "sha": "700f1f9578c6633a20693a5b1f52970ab845a740",
+      "tag": "v0.1.0",
+      "version": "0.1.0"
+    },
+    {
+      "dependencies": [
+        "zed-pkg/zed-clients",
+        "zed-pkg/zed-interfaces",
+        "zed-pkg/zed-lock"
+      ],
+      "github_owner": "zed-pkg",
+      "name": "zed-cli",
+      "org": "zed-pkg",
+      "package": "zed-pkg/zed-cli",
+      "repo": "zed-cli",
+      "sha": "751358fe130e64b646844bc7d857c4cff215ca2d",
+      "tag": "v0.1.0",
+      "version": "0.1.0"
+    }
+  ],
+  "purpose": "DEN-2788 exact-source publish/install certification",
+  "registry_api_sha": "949b0872cf715b85ffc7e80a2a9e9cb9eb99efcf",
+  "schema": 1,
+  "zed_cli_sha": "8929a58c6591c7a964d7f91412665d7c8a4afdf3"
+}
