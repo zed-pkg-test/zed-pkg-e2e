@@ -18,7 +18,7 @@ jobs:
       github.event.pull_request.head.repo.full_name == github.repository &&
       github.event.pull_request.head.ref == 'feat/den-2788-full-stack-live-r2'
     runs-on: ubuntu-24.04
-    timeout-minutes: 60
+    timeout-minutes: 75
     services:
       postgres:
         image: postgres:17-bookworm
@@ -36,6 +36,7 @@ jobs:
         options: >-
           --health-cmd="redis-cli ping"
           --health-interval=5s --health-timeout=5s --health-retries=20
+
     steps:
       - name: Check out the requesting evidence head
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
@@ -71,11 +72,11 @@ jobs:
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           repository: ${{ steps.request.outputs.repository }}
-          ref: ${{ steps.request.outputs.branch }}
+          ref: ${{ steps.request.outputs.expected_head }}
           path: shared-auth
           fetch-depth: 0
           token: ${{ secrets.FLEET_GH_TOKEN }}
-          persist-credentials: true
+          persist-credentials: false
 
       - name: Check out the independent Shared Auth test contract
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
@@ -87,7 +88,7 @@ jobs:
           token: ${{ secrets.FLEET_GH_TOKEN }}
           persist-credentials: false
 
-      - name: Assert exact source and independent test pins
+      - name: Assert immutable source and independent test pins
         shell: bash
         run: |
           set -euo pipefail
@@ -95,100 +96,23 @@ jobs:
             "${{ steps.request.outputs.expected_head }}"
           test "$(git -C shared-auth-tests rev-parse HEAD)" = \
             "${{ steps.request.outputs.independent_test_head }}"
-          node --check shared-auth-tests/scripts/verify-zpkg-handoff-source.mjs
-          node --check shared-auth-tests/scripts/verify-zpkg-handoff-certified-head.mjs
+          test -z "$(git -C shared-auth config --local --get-all http.https://github.com/.extraheader || true)"
+          node --check shared-auth-tests/scripts/verify-zpkg-handoff-certified-head-v2.mjs
 
-      - name: Apply the bounded issuer correction with regression tests
-        working-directory: shared-auth
+      - name: Run the independent exact-source contract
         shell: bash
         run: |
           set -euo pipefail
-          python3 - <<'PY'
-          from pathlib import Path
-
-          path = Path('src/handoff/mod.rs')
-          text = path.read_text()
-
-          cloud_only = '''        let endpoint = format!(
-                      "https://{}.supabase.co/auth/v1/token?grant_type=password",
-                      project.project_ref
-                  );'''
-          if text.count(cloud_only) != 1:
-              raise SystemExit(
-                  f'expected one exact cloud-only token endpoint, found {text.count(cloud_only)}'
-              )
-          text = text.replace(
-              cloud_only,
-              '        let endpoint = supabase_password_token_endpoint(project);',
-              1,
-          )
-
-          helper = '''fn supabase_password_token_endpoint(project: &SupabaseProject) -> String {
-              format!(
-                  "{}/token?grant_type=password",
-                  project.issuer().trim_end_matches('/')
-              )
-          }
-
-          '''
-          anchor = 'impl HandoffService {\n'
-          if 'fn supabase_password_token_endpoint(' in text:
-              raise SystemExit('endpoint helper unexpectedly exists at the locked source head')
-          if text.count(anchor) != 1:
-              raise SystemExit('HandoffService implementation anchor drifted')
-          text = text.replace(anchor, helper + anchor, 1)
-
-          tests = r'''
-
-          #[cfg(test)]
-          mod endpoint_tests {
-              use serde_json::json;
-
-              use super::supabase_password_token_endpoint;
-              use crate::config::SupabaseProject;
-
-              fn project(project_ref: &str, issuer: Option<&str>) -> SupabaseProject {
-                  let mut value = json!({
-                      "name": "zpkg-test",
-                      "project_ref": project_ref
-                  });
-                  if let Some(issuer) = issuer {
-                      value["issuer"] = json!(issuer);
-                  }
-                  serde_json::from_value(value).expect("valid Supabase project fixture")
-              }
-
-              #[test]
-              fn derives_hosted_password_endpoint_from_default_issuer() {
-                  let project = project("abcdefghijklmnopqrst", None);
-                  assert_eq!(
-                      supabase_password_token_endpoint(&project),
-                      "https://abcdefghijklmnopqrst.supabase.co/auth/v1/token?grant_type=password"
-                  );
-              }
-
-              #[test]
-              fn honors_explicit_self_hosted_issuer_and_trims_trailing_slash() {
-                  let project = project(
-                      "unused-for-explicit-issuer",
-                      Some("http://127.0.0.1:54321/auth/v1/"),
-                  );
-                  assert_eq!(
-                      supabase_password_token_endpoint(&project),
-                      "http://127.0.0.1:54321/auth/v1/token?grant_type=password"
-                  );
-              }
-          }
-          '''
-          if 'mod endpoint_tests' in text:
-              raise SystemExit('endpoint regression tests unexpectedly exist at the locked source head')
-          path.write_text(text.rstrip() + tests + '\n')
-          PY
-          grep -Fq 'supabase_password_token_endpoint(project)' src/handoff/mod.rs
-          grep -Fq "project.issuer().trim_end_matches('/')" src/handoff/mod.rs
-          grep -Fq 'derives_hosted_password_endpoint_from_default_issuer' src/handoff/mod.rs
-          grep -Fq 'honors_explicit_self_hosted_issuer_and_trims_trailing_slash' src/handoff/mod.rs
-          ! grep -Fq 'let endpoint = format!(' src/handoff/mod.rs
+          mkdir -p evidence-repo/evidence/shared-auth
+          node shared-auth-tests/scripts/verify-zpkg-handoff-certified-head-v2.mjs \
+            --source-root shared-auth \
+            --lock shared-auth-tests/zpkg-handoff-lock.json \
+            --expected-sha "${{ steps.request.outputs.expected_head }}" \
+            --json-output evidence-repo/evidence/shared-auth/shared-auth-test-contract-v2.json
+          jq -e \
+            --arg sha "${{ steps.request.outputs.expected_head }}" \
+            '.source.actualSha == $sha and .certification.exactHead == true and .certification.currentDependencyApis == true and .certification.boundedCsrfCookie == true' \
+            evidence-repo/evidence/shared-auth/shared-auth-test-contract-v2.json >/dev/null
 
       - name: Install the Rust verification toolchain
         uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c
@@ -200,9 +124,13 @@ jobs:
         working-directory: shared-auth
         env:
           PGPASSWORD: shared_auth_test
+        shell: bash
         run: |
           set -euo pipefail
-          psql -h 127.0.0.1 -U shared_auth -d shared_auth_test -v ON_ERROR_STOP=1 -f db/schema.sql
+          mkdir -p ../evidence-repo/evidence/shared-auth
+          psql -h 127.0.0.1 -U shared_auth -d shared_auth_test -v ON_ERROR_STOP=1 \
+            -f db/schema.sql \
+            >../evidence-repo/evidence/shared-auth/schema-apply.log
           python3 -m unittest scripts/test_validate_auth_realms.py
           python3 scripts/validate_auth_realms.py \
             --contract config/auth-realms.contract.json \
@@ -210,113 +138,284 @@ jobs:
             --realm-source src/realm.rs
           psql -h 127.0.0.1 -U shared_auth -d shared_auth_test -Atc \
             "select to_regclass('shared_auth.browser_authorization_codes') is not null" | grep -Fx t
+          redis-cli -h 127.0.0.1 ping | grep -Fx PONG
+
+      - name: Prove database first-use, replay, PKCE, redirect, client, and expiry boundaries
+        env:
+          PGPASSWORD: shared_auth_test
+        shell: bash
+        run: |
+          set -euo pipefail
+          psql -h 127.0.0.1 -U shared_auth -d shared_auth_test -v ON_ERROR_STOP=1 <<'SQL'
+          insert into shared_auth.browser_authorization_codes (
+            code_hash,
+            client_id,
+            redirect_uri,
+            return_path,
+            supabase_project,
+            code_challenge,
+            encrypted_tokens,
+            created_at,
+            expires_at
+          ) values
+            (
+              repeat('a', 43),
+              'zpkg',
+              'https://app.zpkg.net/auth/shared/callback',
+              '/dashboard',
+              'zpkg',
+              repeat('b', 43),
+              repeat('e', 64),
+              now(),
+              now() + interval '90 seconds'
+            ),
+            (
+              repeat('c', 43),
+              'zpkg',
+              'https://app.zpkg.net/auth/shared/callback',
+              '/dashboard',
+              'zpkg',
+              repeat('d', 43),
+              repeat('f', 64),
+              now(),
+              now() + interval '90 seconds'
+            ),
+            (
+              repeat('g', 43),
+              'zpkg',
+              'https://app.zpkg.net/auth/shared/callback',
+              '/dashboard',
+              'zpkg',
+              repeat('h', 43),
+              repeat('i', 64),
+              now() - interval '120 seconds',
+              now() - interval '60 seconds'
+            ),
+            (
+              repeat('j', 43),
+              'zpkg',
+              'https://app.zpkg.net/auth/shared/callback',
+              '/dashboard',
+              'zpkg',
+              repeat('k', 43),
+              repeat('l', 64),
+              now(),
+              now() + interval '90 seconds'
+            );
+
+          do $$
+          declare
+            first_count integer;
+            replay_count integer;
+            wrong_pkce_count integer;
+            wrong_redirect_count integer;
+            wrong_client_count integer;
+            expired_count integer;
+          begin
+            with redeemed as (
+              update shared_auth.browser_authorization_codes
+              set consumed_at = now()
+              where code_hash = repeat('a', 43)
+                and client_id = 'zpkg'
+                and redirect_uri = 'https://app.zpkg.net/auth/shared/callback'
+                and consumed_at is null
+                and expires_at > now()
+                and code_challenge = repeat('b', 43)
+              returning encrypted_tokens, supabase_project
+            ) select count(*) into first_count from redeemed;
+
+            with redeemed as (
+              update shared_auth.browser_authorization_codes
+              set consumed_at = now()
+              where code_hash = repeat('a', 43)
+                and client_id = 'zpkg'
+                and redirect_uri = 'https://app.zpkg.net/auth/shared/callback'
+                and consumed_at is null
+                and expires_at > now()
+                and code_challenge = repeat('b', 43)
+              returning encrypted_tokens, supabase_project
+            ) select count(*) into replay_count from redeemed;
+
+            with redeemed as (
+              update shared_auth.browser_authorization_codes
+              set consumed_at = now()
+              where code_hash = repeat('c', 43)
+                and client_id = 'zpkg'
+                and redirect_uri = 'https://app.zpkg.net/auth/shared/callback'
+                and consumed_at is null
+                and expires_at > now()
+                and code_challenge = repeat('x', 43)
+              returning encrypted_tokens, supabase_project
+            ) select count(*) into wrong_pkce_count from redeemed;
+
+            with redeemed as (
+              update shared_auth.browser_authorization_codes
+              set consumed_at = now()
+              where code_hash = repeat('c', 43)
+                and client_id = 'zpkg'
+                and redirect_uri = 'https://evil.example/callback'
+                and consumed_at is null
+                and expires_at > now()
+                and code_challenge = repeat('d', 43)
+              returning encrypted_tokens, supabase_project
+            ) select count(*) into wrong_redirect_count from redeemed;
+
+            with redeemed as (
+              update shared_auth.browser_authorization_codes
+              set consumed_at = now()
+              where code_hash = repeat('c', 43)
+                and client_id = 'other-client'
+                and redirect_uri = 'https://app.zpkg.net/auth/shared/callback'
+                and consumed_at is null
+                and expires_at > now()
+                and code_challenge = repeat('d', 43)
+              returning encrypted_tokens, supabase_project
+            ) select count(*) into wrong_client_count from redeemed;
+
+            with redeemed as (
+              update shared_auth.browser_authorization_codes
+              set consumed_at = now()
+              where code_hash = repeat('g', 43)
+                and client_id = 'zpkg'
+                and redirect_uri = 'https://app.zpkg.net/auth/shared/callback'
+                and consumed_at is null
+                and expires_at > now()
+                and code_challenge = repeat('h', 43)
+              returning encrypted_tokens, supabase_project
+            ) select count(*) into expired_count from redeemed;
+
+            if first_count <> 1 then
+              raise exception 'first redemption count %, expected 1', first_count;
+            end if;
+            if replay_count <> 0 then
+              raise exception 'replay count %, expected 0', replay_count;
+            end if;
+            if wrong_pkce_count <> 0 then
+              raise exception 'wrong PKCE count %, expected 0', wrong_pkce_count;
+            end if;
+            if wrong_redirect_count <> 0 then
+              raise exception 'wrong redirect count %, expected 0', wrong_redirect_count;
+            end if;
+            if wrong_client_count <> 0 then
+              raise exception 'wrong client count %, expected 0', wrong_client_count;
+            end if;
+            if expired_count <> 0 then
+              raise exception 'expired count %, expected 0', expired_count;
+            end if;
+          end
+          $$;
+          SQL
+
+      - name: Prove concurrent redemption consumes exactly once
+        env:
+          PGPASSWORD: shared_auth_test
+        shell: bash
+        run: |
+          set -euo pipefail
+          redeem_sql="with redeemed as (
+            update shared_auth.browser_authorization_codes
+            set consumed_at = now()
+            where code_hash = repeat('j', 43)
+              and client_id = 'zpkg'
+              and redirect_uri = 'https://app.zpkg.net/auth/shared/callback'
+              and consumed_at is null
+              and expires_at > now()
+              and code_challenge = repeat('k', 43)
+            returning encrypted_tokens, supabase_project
+          ) select count(*) from redeemed;"
+
+          psql -h 127.0.0.1 -U shared_auth -d shared_auth_test -Atc "$redeem_sql" \
+            >evidence-repo/evidence/shared-auth/concurrent-a.txt &
+          pid_a=$!
+          psql -h 127.0.0.1 -U shared_auth -d shared_auth_test -Atc "$redeem_sql" \
+            >evidence-repo/evidence/shared-auth/concurrent-b.txt &
+          pid_b=$!
+          wait "$pid_a"
+          wait "$pid_b"
+
+          total=$(awk '{ total += $1 } END { print total + 0 }' \
+            evidence-repo/evidence/shared-auth/concurrent-a.txt \
+            evidence-repo/evidence/shared-auth/concurrent-b.txt)
+          test "$total" = 1
+          test "$(psql -h 127.0.0.1 -U shared_auth -d shared_auth_test -Atc \
+            "select count(*) from shared_auth.browser_authorization_codes where code_hash=repeat('j',43) and consumed_at is not null")" = 1
 
       - name: Run exact locked Rust certification
         working-directory: shared-auth
         env:
           AUTH_TEST_DATABASE_URL: postgres://shared_auth:shared_auth_test@127.0.0.1:5432/shared_auth_test
           AUTH_TEST_REDIS_URL: redis://127.0.0.1:6379/
+        shell: bash
         run: |
           set -euo pipefail
-          cargo fmt --all
           cargo fmt --all -- --check
           cargo check --all-targets --locked
           cargo clippy --all-targets --locked -- -D warnings
           cargo test --all-targets --locked
           cargo build --release --locked
-          git diff --check
-          test "$(git diff --name-only)" = 'src/handoff/mod.rs'
+          git diff --exit-code
 
-      - name: Commit the locally certified Shared Auth candidate
-        id: shared_auth_commit
-        working-directory: shared-auth
-        shell: bash
-        run: |
-          set -euo pipefail
-          git add src/handoff/mod.rs
-          git diff --cached --check
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git commit -m 'fix(auth): derive Supabase password endpoint from configured issuer'
-          printf 'sha=%s\n' "$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
-
-      - name: Run the independent shared-auth-test exact-head contract
-        shell: bash
-        env:
-          CERTIFIED_SHA: ${{ steps.shared_auth_commit.outputs.sha }}
-        run: |
-          set -euo pipefail
-          mkdir -p evidence-repo/evidence/shared-auth
-          node shared-auth-tests/scripts/verify-zpkg-handoff-certified-head.mjs \
-            --source-root shared-auth \
-            --lock shared-auth-tests/zpkg-handoff-lock.json \
-            --expected-sha "$CERTIFIED_SHA" \
-            --json-output evidence-repo/evidence/shared-auth/shared-auth-test-contract.json
-          jq -e \
-            --arg sha "$CERTIFIED_SHA" \
-            '.source.actualSha == $sha and .certification.exactHead == true' \
-            evidence-repo/evidence/shared-auth/shared-auth-test-contract.json >/dev/null
-
-      - name: Push the independently certified Shared Auth head
-        working-directory: shared-auth
-        shell: bash
-        env:
-          BRANCH: ${{ steps.request.outputs.branch }}
-        run: |
-          set -euo pipefail
-          git push origin HEAD:"$BRANCH"
-
-      - name: Persist evidence and consume the one-shot request
+      - name: Persist exact-head certification evidence
         working-directory: evidence-repo
         shell: bash
         env:
-          CERTIFIED_SHA: ${{ steps.shared_auth_commit.outputs.sha }}
+          CERTIFIED_SHA: ${{ steps.request.outputs.expected_head }}
           HEAD_BRANCH: ${{ github.event.pull_request.head.ref }}
           INDEPENDENT_TEST_SHA: ${{ steps.request.outputs.independent_test_head }}
         run: |
           set -euo pipefail
           mkdir -p evidence/shared-auth
           jq --arg sha "$CERTIFIED_SHA" '.expected_head = $sha | .certified_head = $sha' \
-            config/shared-auth-certification.json > config/shared-auth-certification.json.tmp
+            config/shared-auth-certification.json >config/shared-auth-certification.json.tmp
           mv config/shared-auth-certification.json.tmp config/shared-auth-certification.json
           jq -n \
             --arg sha "$CERTIFIED_SHA" \
             --arg test_sha "$INDEPENDENT_TEST_SHA" \
             '{
-              schema: 1,
+              schema: 2,
               repository: "shared-auth/shared-auth-server.rs",
               commit: $sha,
               postgres_schema: true,
-              redis_configured: true,
+              postgres_first_use: 1,
+              postgres_replay: 0,
+              postgres_wrong_pkce: 0,
+              postgres_wrong_redirect: 0,
+              postgres_wrong_client: 0,
+              postgres_expired: 0,
+              postgres_concurrent_successes: 1,
+              redis_ping: true,
               realm_contract: true,
               fmt: true,
               check: true,
               clippy: true,
               tests: true,
               release_build: true,
-              supabase_endpoint_from_issuer: true,
+              configured_supabase_issuer: true,
               hosted_endpoint_test: true,
               self_hosted_endpoint_test: true,
+              current_crypto_apis: true,
+              bounded_csrf_cookie: true,
               independent_test_repository: "shared-auth-test/server-api-contract-e2e",
               independent_test_commit: $test_sha,
-              independent_contract: true
-            }' > evidence/shared-auth/exact-head-certification.json
-          cat > evidence/shared-auth/exact-head-certification.md <<EOF
+              independent_contract_v2: true,
+              production_certified: false
+            }' >evidence/shared-auth/exact-head-certification.json
+          cat >evidence/shared-auth/exact-head-certification.md <<EOF
           # Shared Auth exact-head certification
 
           Certified commit: \`$CERTIFIED_SHA\`
 
-          The Zpkg browser-handoff head passed declarative PostgreSQL schema application,
-          auth-realm validation, locked Rust formatting, compile, Clippy with warnings denied,
-          all-target tests, and a release build with PostgreSQL and Redis configured. Password
-          handoff derives the token endpoint from the configured Supabase issuer. Dedicated
-          regression tests cover both hosted defaults and explicit self-hosted issuers.
+          The Zpkg browser-handoff source passed the independent Shared Auth test contract,
+          declarative PostgreSQL schema application, realm validation, Redis reachability,
+          first-use/replay/PKCE/redirect/client/expiry database boundaries, concurrent
+          single-consumer redemption, locked formatting, compile, Clippy with warnings denied,
+          all-target tests, and a release build.
 
-          The source was also checked by the independent
-          \`shared-auth-test/server-api-contract-e2e\` contract at
-          \`$INDEPENDENT_TEST_SHA\` before the Shared Auth branch was pushed.
+          Independent contract commit: \`$INDEPENDENT_TEST_SHA\`.
+
+          This is disposable test-environment evidence, not production Supabase, RDS,
+          Kubernetes, browser, or traffic certification.
           EOF
-          rm -f .github/workflows/repair-shared-auth-configurable-issuer.yml
           git rm bootstrap/shared-auth-configurable-issuer.once
           git add config/shared-auth-certification.json evidence/shared-auth
           git diff --cached --check
