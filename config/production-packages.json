@@ -1,0 +1,32 @@
+{
+  "organization": "zed-pkg",
+  "minimum_packages": 16,
+  "maximum_packages": 25,
+  "repositories": [
+    "zed-infra",
+    "zed-lib",
+    "zed-lib-core",
+    "zed-api-server.rs",
+    "zed-interfaces",
+    "zed-storage-server.rs",
+    "zed-client.rs",
+    "zed-registry",
+    "zed-web-server.rs",
+    "zed-docs",
+    "zed-github-app",
+    "zed-ci",
+    "zed-s3-service.rs",
+    "zed-dep-graph.rs",
+    "zed-security",
+    "zed-gh-app-installation-token.rs",
+    "zed",
+    "zed-testing",
+    "zed-conformance",
+    "zed-lockfile",
+    "zed-resolver",
+    "zed-types",
+    "zed-diagnostics.rs",
+    "zed-license-scanner.rs",
+    "zed-cli"
+  ]
+}
