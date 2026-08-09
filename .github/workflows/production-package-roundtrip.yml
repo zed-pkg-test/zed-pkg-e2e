@@ -90,6 +90,7 @@ jobs:
           import sys
 
           path = pathlib.Path("scripts/production_package_roundtrip.py")
+          sys.path.insert(0, str(path.parent.resolve()))
           spec = importlib.util.spec_from_file_location("roundtrip", path)
           module = importlib.util.module_from_spec(spec)
           sys.modules[spec.name] = module
