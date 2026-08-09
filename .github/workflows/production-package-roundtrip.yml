@@ -26,8 +26,8 @@ concurrency:
 env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: "1"
-  ZED_API_SHA: 949b0872cf715b85ffc7e80a2a9e9cb9eb99efcf
-  ZED_CLI_SHA: 8929a58c6591c7a964d7f91412665d7c8a4afdf3
+  ZED_API_SHA: 17f2abdcf473dcfee9d24b19f531e26f8513425b
+  ZED_CLI_SHA: 751358fe130e64b646844bc7d857c4cff215ca2d
   ZED_PKG_REGISTRY: http://127.0.0.1:8080
   ZED_PKG_ALLOW_NO_MANIFEST: "1"
   ZED_PKG_INSTALL_MODE: copy
@@ -97,9 +97,14 @@ jobs:
           assert spec.loader is not None
           spec.loader.exec_module(module)
           raw, packages = module.load_ledger(pathlib.Path("config/production-package-release.json"))
-          assert raw["registry_api_sha"] == "949b0872cf715b85ffc7e80a2a9e9cb9eb99efcf"
-          assert raw["zed_cli_sha"] == "8929a58c6591c7a964d7f91412665d7c8a4afdf3"
+          assert raw["registry_api_sha"] == "17f2abdcf473dcfee9d24b19f531e26f8513425b"
+          assert raw["zed_cli_sha"] == "751358fe130e64b646844bc7d857c4cff215ca2d"
           assert len(packages) == 19
+          assert [
+              package.package
+              for package in packages
+              if package.allow_repo_name_mismatch
+          ] == ["zed-pkg/zed-api-server", "opto-sync/syncer-rs"]
           PY
           git diff --check
 
