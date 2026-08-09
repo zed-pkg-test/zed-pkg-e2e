@@ -1,0 +1,100 @@
+name: DEN-2788 ORM core canary
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/den-2788-orm-core.yml'
+      - 'proofs/den-2788-orm-core.json'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: den-2788-orm-core-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  exact-source:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Check out independent harness
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          show-progress: false
+
+      - name: Read immutable source pin
+        id: pin
+        shell: bash
+        run: |
+          set -euo pipefail
+          jq -e '
+            .schema_version == 1 and
+            .linear_issue == "DEN-2788" and
+            .source_repository == "zed-pkg/zed-orm-core" and
+            .source_pull_request == 2 and
+            (.source_commit | test("^[0-9a-f]{40}$")) and
+            .expected_package == "zed-pkg/zed-orm-core" and
+            .expected_schema == "zed_pkg" and
+            .release_policy == "private-git-zed-only"
+          ' proofs/den-2788-orm-core.json >/dev/null
+          echo "commit=$(jq -r .source_commit proofs/den-2788-orm-core.json)" >> "$GITHUB_OUTPUT"
+
+      - name: Check out exact product source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: zed-pkg/zed-orm-core
+          ref: ${{ steps.pin.outputs.commit }}
+          path: source
+          fetch-depth: 1
+          persist-credentials: false
+          show-progress: false
+
+      - name: Verify exact source and release boundary
+        shell: bash
+        run: |
+          set -euo pipefail
+          expected="${{ steps.pin.outputs.commit }}"
+          test "$(git -C source rev-parse HEAD)" = "$expected"
+          grep -Fq 'org = "zed-pkg"' source/.zpkg.toml
+          grep -Fq 'name = "zed-orm-core"' source/.zpkg.toml
+          grep -Fq 'publish = false' source/Cargo.toml
+          grep -Fq '"schema": "zed_pkg"' source/shared-defs.lock.json
+          grep -Fq 'c8bdc06d74746acc6439f9527ebd02697fdf028b' source/shared-defs.lock.json
+          ! grep -Eq '^license\s*=' source/.zpkg.toml
+          ! grep -Fq '[targets.rust.native]' source/.zpkg.toml
+          ! grep -Eq '(gh[pousr]_[A-Za-z0-9]{20,}|lin_api_[A-Za-z0-9]{20,}|cfat_[A-Za-z0-9_-]{20,})' \
+            proofs/den-2788-orm-core.json .github/workflows/den-2788-orm-core.yml source/.zpkg.toml
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          workspaces: source
+          shared-key: den-2788-orm-core-canary
+
+      - name: Format
+        working-directory: source
+        run: cargo fmt --all -- --check
+
+      - name: Strict Clippy for both surfaces
+        working-directory: source
+        run: cargo clippy --all-targets --all-features -- -D warnings
+
+      - name: Test default read-only surface
+        working-directory: source
+        run: cargo test --all-targets
+
+      - name: Test explicit read-write surface
+        working-directory: source
+        run: cargo test --all-targets --all-features
+
+      - name: Compile documentation policy examples
+        working-directory: source
+        run: cargo test --doc

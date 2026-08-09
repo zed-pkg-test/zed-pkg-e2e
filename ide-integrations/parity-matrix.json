@@ -6,10 +6,10 @@
   "integrations": {
     "sublimetext": {"repository": "zed-pkg/zed-sublimetext", "state": "live", "platforms": ["linux", "macos", "windows"], "native_language": "python", "artifact": ".sublime-package"},
     "jetbrains": {"repository": "zed-pkg/zed-intellij", "state": "live", "platforms": ["linux", "macos", "windows"], "native_language": "kotlin", "artifact": "plugin-zip"},
-    "vscode": {"repository": "zed-pkg/zed-vscode", "state": "buildable-candidate", "source": "blueprints/zed-vscode", "platforms": ["linux", "macos", "windows"], "native_language": "javascript", "artifact": "vsix"},
-    "qtcreator": {"repository": "zed-pkg/zed-qtcreator", "state": "buildable-candidate", "source": "blueprints/zed-qtcreator", "platforms": ["linux", "macos", "windows"], "native_language": "cpp", "artifact": "qtcreator-plugin"},
-    "xcode": {"repository": "zed-pkg/zed-xcode", "state": "buildable-candidate", "source": "blueprints/zed-xcode", "platforms": ["macos"], "native_language": "swift", "artifact": "appex"},
-    "eclipse": {"repository": "zed-pkg/zed-eclipse", "state": "buildable-candidate", "source": "blueprints/zed-eclipse", "platforms": ["linux", "macos", "windows"], "native_language": "java", "artifact": "p2-site"},
-    "visual-studio": {"repository": "zed-pkg/zed-visual-studio", "state": "buildable-candidate", "source": "blueprints/zed-visual-studio", "platforms": ["windows"], "native_language": "csharp", "artifact": "vsix"}
+    "vscode": {"repository": "zed-pkg/zed-vscode", "state": "dedicated-repo-candidate", "candidate_sha": "c1d3318a2cf8cd717f9b0af67117ddbac3e28d2e", "pull_request": 1, "platforms": ["linux", "macos", "windows"], "native_language": "javascript", "artifact": "vsix"},
+    "qtcreator": {"repository": "zed-pkg/zed-qtcreator", "state": "dedicated-repo-candidate", "candidate_sha": "8e7958c7c85a305b59accfe82c28e7ff42bfecba", "pull_request": 1, "platforms": ["linux", "macos", "windows"], "native_language": "cpp", "artifact": "qtcreator-plugin"},
+    "xcode": {"repository": "zed-pkg/zed-xcode", "state": "dedicated-repo-candidate", "candidate_sha": "9b9304fee2ff236fc59407ddd97cc2c01225a69d", "pull_request": 1, "platforms": ["macos"], "native_language": "swift", "artifact": "appex"},
+    "eclipse": {"repository": "zed-pkg/zed-eclipse", "state": "dedicated-repo-candidate", "candidate_sha": "246b46048cced1d1072afd3bedc9849efe3a8a8f", "pull_request": 1, "platforms": ["linux", "macos", "windows"], "native_language": "java", "artifact": "p2-site"},
+    "visual-studio": {"repository": "zed-pkg/zed-visual-studio", "state": "dedicated-repo-candidate", "candidate_sha": "d85a9c827140426a8d9401b5c269ff36f591a299", "pull_request": 1, "platforms": ["windows"], "native_language": "csharp", "artifact": "vsix"}
   }
 }

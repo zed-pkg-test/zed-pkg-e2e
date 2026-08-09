@@ -18,12 +18,12 @@ The exporter includes, for every paired test organization:
 
 It fails unless the live manifest still describes:
 
-- 18 production/test pairs;
+- 19 production/test pairs;
 - 22 retained repositories;
-- 301 specialized repositories;
-- 18 governance repositories;
-- 319 managed repositories;
-- 341 total expected repositories; and
+- 319 specialized repositories;
+- 19 governance repositories;
+- 338 managed repositories;
+- 360 total expected repositories; and
 - explicit exclusion of `r2g` and `r2g-test`.
 
 The fleet contract workflow publishes the full JSON index to its GitHub Actions job summary, making manifest changes visible in review before provisioning occurs.

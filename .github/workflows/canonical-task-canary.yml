@@ -1,3 +1,5 @@
+# Re-run after zed-pkg-test/zed-interfaces#1 and zed-pkg-test/zed-lib#1
+# corrected the live-fleet package namespaces exposed by the first certification.
 name: canonical task CLI canary
 
 on:
@@ -11,7 +13,7 @@ on:
       candidate:
         description: Full immutable zed-pkg/zed-cli commit to certify
         required: false
-        default: 86613ff1cc5b19afb0b394e4ebbc2d0a1faaf9aa
+        default: 4c708dcece916a81caace9d82083a523a297475c
 
 permissions:
   contents: read
@@ -25,13 +27,13 @@ defaults:
     shell: bash
 
 env:
-  ZED_CLI_COMMIT: ${{ inputs.candidate || '86613ff1cc5b19afb0b394e4ebbc2d0a1faaf9aa' }}
+  ZED_CLI_COMMIT: ${{ inputs.candidate || '4c708dcece916a81caace9d82083a523a297475c' }}
 
 jobs:
   certify:
     name: canonical task / ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 40
+    timeout-minutes: 55
     strategy:
       fail-fast: false
       matrix:
@@ -64,11 +66,27 @@ jobs:
         uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30
         with:
           toolchain: stable
+          components: rustfmt,clippy
 
       - name: Install Python 3.12
         uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
           python-version: '3.12'
+
+      - name: Validate exact product source and typed contracts
+        working-directory: product/zed-cli
+        run: |
+          set -euo pipefail
+          cargo fmt --all --check
+          cargo test --locked --lib task_runtime::tests
+          cargo test --locked --lib task_cli::tests
+          cargo test --locked --test task_runtime_cli
+          cargo test --locked --test task_main_cli
+          cargo test --locked cli::tests::task_commands_are_typed_and_reject_zero_concurrency
+          cargo test --locked cli::tests::cli_flags_toml_is_in_sync_with_clap
+          cargo test --locked cli::tests::readme_documents_every_command
+          cargo clippy --locked --bin zed --bin zed-task \
+            --test task_runtime_cli --test task_main_cli -- -D warnings
 
       - name: Build exact release binaries
         working-directory: product/zed-cli
