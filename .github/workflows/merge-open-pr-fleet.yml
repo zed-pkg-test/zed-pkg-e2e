@@ -1,0 +1,122 @@
+name: merge open PR fleet
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/merge-open-pr-fleet.yml"
+      - ".github/scripts/merge-open-pr-fleet.mjs"
+  push:
+    branches: [main]
+    paths:
+      - ".github/pr-merge/PREFLIGHT"
+      - ".github/pr-merge/APPLY"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: merge-open-pr-fleet-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  validate:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Check out the exact workflow and merger implementation
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Validate workflow syntax
+        uses: docker://rhysd/actionlint@sha256:b1934ee5f1c509618f2508e6eb47ee0d3520686341fec936f3b79331f9315667
+        with:
+          args: .github/workflows/merge-open-pr-fleet.yml
+
+      - name: Validate merger JavaScript syntax
+        run: node --check .github/scripts/merge-open-pr-fleet.mjs
+
+      - name: Enforce the guarded trigger contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          workflow=.github/workflows/merge-open-pr-fleet.yml
+          grep -Fq 'branches: [main]' "$workflow"
+          grep -Fq '.github/pr-merge/PREFLIGHT' "$workflow"
+          grep -Fq '.github/pr-merge/APPLY' "$workflow"
+          grep -Fq "github.event.head_commit.message == 'chore: preflight safe PR fleet merge'" "$workflow"
+          grep -Fq "github.event.head_commit.message == 'chore: merge safe PR fleet'" "$workflow"
+          grep -Fq 'permissions:' "$workflow"
+          grep -Fq 'contents: read' "$workflow"
+          python3 - <<'PY'
+          from pathlib import Path
+
+          text = Path('.github/workflows/merge-open-pr-fleet.yml').read_text(encoding='utf-8')
+          opener = '$' + '{{'
+          expected_group = (
+              'group: merge-open-pr-fleet-'
+              + opener
+              + ' github.event_name }}-'
+              + opener
+              + ' github.ref }}'
+          )
+          expected_cancel = (
+              'cancel-in-progress: '
+              + opener
+              + " github.event_name == 'pull_request' }}"
+          )
+          assert expected_group in text, 'event/ref-scoped concurrency group is missing'
+          assert expected_cancel in text, 'pull-request cancellation contract is missing'
+          assert not any(ord(character) < 0x20 and character not in '\n\t\r' for character in text)
+          PY
+          if grep -Eq -- '(^|[[:space:]])--force(-with-lease)?([[:space:]]|$)|contents:[[:space:]]*write' "$workflow"; then
+            echo 'merge workflow must not use a force-update flag or grant the workflow token write access' >&2
+            exit 1
+          fi
+
+  merge:
+    if: >-
+      github.event_name == 'push' &&
+      (github.event.head_commit.message == 'chore: preflight safe PR fleet merge' ||
+       github.event.head_commit.message == 'chore: merge safe PR fleet')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    env:
+      GH_TOKEN: ${{ secrets.FLEET_GH_TOKEN }}
+      TARGET: "509"
+    steps:
+      - name: Resolve the exact guarded mode
+        shell: bash
+        env:
+          HEAD_COMMIT_MESSAGE: ${{ github.event.head_commit.message }}
+        run: |
+          set -Eeuo pipefail
+          case "$HEAD_COMMIT_MESSAGE" in
+            'chore: preflight safe PR fleet merge')
+              echo 'APPLY=false' >> "$GITHUB_ENV"
+              ;;
+            'chore: merge safe PR fleet')
+              echo 'APPLY=true' >> "$GITHUB_ENV"
+              ;;
+            *)
+              echo 'unexpected merge workflow commit message' >&2
+              exit 1
+              ;;
+          esac
+
+      - name: Validate stored credential
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test -n "$GH_TOKEN"
+          test "$(gh api user --jq '.login')" = "ORESoftware"
+
+      - name: Check out the exact merger implementation
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Audit and optionally merge exact heads
+        shell: bash
+        run: node .github/scripts/merge-open-pr-fleet.mjs

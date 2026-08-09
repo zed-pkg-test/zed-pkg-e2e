@@ -1,0 +1,139 @@
+name: audit open PR fleet
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/pr-merge/AUDIT"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: audit-open-pr-fleet
+  cancel-in-progress: false
+
+jobs:
+  audit:
+    if: "${{ github.event.head_commit.message == 'chore: run open PR fleet audit' }}"
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      GH_TOKEN: ${{ secrets.FLEET_GH_TOKEN }}
+    steps:
+      - name: Validate stored credential
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test -n "$GH_TOKEN"
+          test "$(gh api user --jq '.login')" = "ORESoftware"
+
+      - name: Snapshot and classify open pull requests
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          root="$(mktemp -d)"
+          export ROOT="$root"
+
+          for page in $(seq 1 10); do
+            gh api \
+              -H 'Accept: application/vnd.github+json' \
+              "search/issues?q=is%3Apr%20is%3Aopen%20author%3AORESoftware&sort=created&order=desc&per_page=100&page=$page" \
+              > "$root/page-$page.json"
+          done
+
+          node <<'NODE'
+          const fs = require('node:fs');
+          const path = require('node:path');
+          const root = process.env.ROOT;
+          const pages = fs.readdirSync(root)
+            .filter((name) => /^page-\d+\.json$/.test(name))
+            .sort((a, b) => Number(a.match(/\d+/)[0]) - Number(b.match(/\d+/)[0]))
+            .map((name) => JSON.parse(fs.readFileSync(path.join(root, name), 'utf8')));
+
+          const byUrl = new Map();
+          for (const page of pages) {
+            for (const item of page.items || []) byUrl.set(item.html_url, item);
+          }
+          const items = [...byUrl.values()];
+          const total = pages[0]?.total_count ?? items.length;
+          const repoOf = (item) => item.repository_url.replace('https://api.github.com/repos/', '');
+          const ownerOf = (item) => repoOf(item).split('/')[0];
+          const textOf = (item) => `${item.title || ''}\n${item.body || ''}`.toLowerCase();
+          const generated = (item) => {
+            const text = textOf(item);
+            return ownerOf(item).toLowerCase().endsWith('-test') ||
+              text.includes('github-test-org-factory') ||
+              text.includes('generated independent acceptance repository') ||
+              text.includes('generated repository harness') ||
+              text.includes('generated test harness');
+          };
+          const veto = (item) => {
+            const repo = repoOf(item).toLowerCase();
+            const text = textOf(item);
+            return (repo === 'oresoftware/k8s-cluster' && item.number === 231) ||
+              (repo === 'oresoftware/k8s-cluster' && item.number === 792) ||
+              /do not merge|don['’]?t merge|never merge|temporary synchronization|\bwip\b/.test(text);
+          };
+
+          const titleCounts = new Map();
+          const ownerCounts = new Map();
+          const repoCounts = new Map();
+          for (const item of items) {
+            titleCounts.set(item.title, (titleCounts.get(item.title) || 0) + 1);
+            ownerCounts.set(ownerOf(item), (ownerCounts.get(ownerOf(item)) || 0) + 1);
+            repoCounts.set(repoOf(item), (repoCounts.get(repoOf(item)) || 0) + 1);
+          }
+          const sortCounts = (map) => [...map.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+          const duplicatedRepos = [...repoCounts.values()].filter((n) => n > 1).length;
+          const generatedItems = items.filter(generated);
+          const nonVetoGenerated = generatedItems.filter((item) => !veto(item));
+          const summary = {
+            api_total_count: total,
+            unique_items_seen: items.length,
+            drafts: items.filter((item) => item.draft).length,
+            generated_or_test_org: generatedItems.length,
+            generated_non_veto: nonVetoGenerated.length,
+            generated_non_veto_drafts: nonVetoGenerated.filter((item) => item.draft).length,
+            generated_non_veto_ready: nonVetoGenerated.filter((item) => !item.draft).length,
+            explicit_veto_or_temporary: items.filter(veto).length,
+            repositories_with_multiple_open_authored_prs: duplicatedRepos,
+          };
+
+          console.log('AUDIT_SUMMARY ' + JSON.stringify(summary));
+          console.log('TOP_TITLES');
+          for (const [title, count] of sortCounts(titleCounts).slice(0, 50)) {
+            const drafts = items.filter((item) => item.title === title && item.draft).length;
+            console.log(`${count}\tdrafts=${drafts}\t${title}`);
+          }
+          console.log('TOP_OWNERS');
+          for (const [owner, count] of sortCounts(ownerCounts).slice(0, 50)) {
+            console.log(`${count}\t${owner}`);
+          }
+          console.log('DUPLICATED_REPOSITORIES');
+          for (const [repo, count] of sortCounts(repoCounts).filter(([, count]) => count > 1).slice(0, 100)) {
+            console.log(`${count}\t${repo}`);
+          }
+
+          const lines = [
+            '## Open PR fleet audit',
+            '',
+            `- GitHub search total: ${total}`,
+            `- Unique PRs observed across the first 1,000 results: ${items.length}`,
+            `- Drafts: ${summary.drafts}`,
+            `- Generated or test-organization PRs: ${summary.generated_or_test_org}`,
+            `- Generated, non-veto PRs: ${summary.generated_non_veto}`,
+            `- Explicit veto/temporary PRs: ${summary.explicit_veto_or_temporary}`,
+            `- Repositories with multiple open authored PRs: ${summary.repositories_with_multiple_open_authored_prs}`,
+            '',
+            '### Most common titles',
+            '',
+            '| Count | Drafts | Title |',
+            '|---:|---:|---|',
+            ...sortCounts(titleCounts).slice(0, 25).map(([title, count]) => {
+              const drafts = items.filter((item) => item.title === title && item.draft).length;
+              return `| ${count} | ${drafts} | ${String(title).replaceAll('|', '\\|')} |`;
+            }),
+          ];
+          fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, lines.join('\n') + '\n');
+          NODE
