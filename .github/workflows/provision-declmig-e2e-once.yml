@@ -1,0 +1,250 @@
+name: provision Declarative Migrations aggregate E2E once
+
+on:
+  push:
+    branches:
+      - agent/provision-declmig-e2e-once
+    paths:
+      - bootstrap/provision-declmig-e2e.once
+
+permissions:
+  contents: read
+
+concurrency:
+  group: provision-declmig-e2e-once
+  cancel-in-progress: false
+
+jobs:
+  provision:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      GH_TOKEN: ${{ secrets.FLEET_GH_TOKEN }}
+      BLUEPRINT_REPOSITORY: declarative-migrations/.github
+      BLUEPRINT_COMMIT: 6ed862e42a2c8ad170fb6840ea2a7b2fd7fba594
+      BOOTSTRAP_BRANCH: agent/initial-declmig-e2e-v1
+    steps:
+      - name: Check out the scoped authorization marker
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          show-progress: false
+
+      - name: Validate the one-time scope and stored credential
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(tr -d '\r\n' < bootstrap/provision-declmig-e2e.once)" = "PROVISION_DECLMIG_E2E"
+          test -n "$GH_TOKEN"
+          test "$(gh api user --jq .login)" = "ORESoftware"
+          gh api orgs/declarative-migrations --silent
+          gh api orgs/declarative-migrations-test --silent
+
+      - name: Fetch the exact reviewed repository blueprint
+        shell: bash
+        run: |
+          set -euo pipefail
+          git clone --quiet --filter=blob:none --no-checkout \
+            "https://github.com/${BLUEPRINT_REPOSITORY}.git" blueprint
+          git -C blueprint fetch --quiet --depth=1 origin "$BLUEPRINT_COMMIT"
+          git -C blueprint checkout --quiet --detach "$BLUEPRINT_COMMIT"
+          test "$(git -C blueprint rev-parse HEAD)" = "$BLUEPRINT_COMMIT"
+          test -f blueprint/blueprints/declmig-e2e/common/.github/workflows/e2e.yml
+          test -f blueprint/blueprints/declmig-e2e/production/config/repository.json
+          test -f blueprint/blueprints/declmig-e2e/test/config/repository.json
+
+      - name: Configure authenticated Git transport
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh auth setup-git
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Create or adopt both aggregate repositories and open bootstrap PRs
+        id: bootstrap
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          provision_repository() {
+            local organization="$1"
+            local mode="$2"
+            local description="$3"
+            local full_name="${organization}/declmig-e2e"
+            local work="work-${organization}"
+            local created=false
+
+            case "$full_name" in
+              declarative-migrations/declmig-e2e|declarative-migrations-test/declmig-e2e) ;;
+              *) echo "::error::Refusing unexpected repository $full_name"; return 1 ;;
+            esac
+
+            if ! gh api "repos/$full_name" --silent 2>/dev/null; then
+              gh api --method POST "orgs/$organization/repos" \
+                -f name=declmig-e2e \
+                -f description="$description" \
+                -F private=false \
+                -F auto_init=true \
+                -F has_issues=true \
+                -F has_projects=true \
+                -F has_wiki=false \
+                --silent
+              created=true
+            fi
+
+            gh api --method PATCH "repos/$full_name" \
+              -f description="$description" \
+              -F private=false \
+              -F has_issues=true \
+              -F has_projects=true \
+              -F has_wiki=false \
+              -F delete_branch_on_merge=true \
+              --silent
+
+            gh api --method PUT "repos/$full_name/actions/permissions/workflow" \
+              --input - --silent <<'JSON'
+          {
+            "default_workflow_permissions": "read",
+            "can_approve_pull_request_reviews": false
+          }
+          JSON
+
+            gh api --method PUT "repos/$full_name/topics" \
+              --input - --silent <<'JSON'
+          {
+            "names": ["declarative-migrations", "database-migrations", "end-to-end-testing", "postgresql", "rust"]
+          }
+          JSON
+
+            gh api --method PUT "repos/$full_name/vulnerability-alerts" --silent || \
+              echo "::warning::Could not enable vulnerability alerts for $full_name"
+            gh api --method PUT "repos/$full_name/automated-security-fixes" --silent || \
+              echo "::warning::Could not enable automated security fixes for $full_name"
+
+            rm -rf "$work"
+            git clone --quiet "https://github.com/${full_name}.git" "$work"
+
+            if git -C "$work" ls-remote --exit-code --heads origin "$BOOTSTRAP_BRANCH" >/dev/null 2>&1; then
+              git -C "$work" fetch --quiet origin "$BOOTSTRAP_BRANCH"
+              git -C "$work" checkout --quiet -b "$BOOTSTRAP_BRANCH" FETCH_HEAD
+            else
+              git -C "$work" checkout --quiet -b "$BOOTSTRAP_BRANCH"
+            fi
+
+            rm -f "$work/README.md" "$work/SECURITY.md" "$work/.gitignore"
+            rm -f "$work/.github/workflows/e2e.yml" "$work/.github/dependabot.yml"
+            rm -rf "$work/config" "$work/pins" "$work/fixtures" "$work/scripts"
+
+            cp -a blueprint/blueprints/declmig-e2e/common/. "$work/"
+            mkdir -p "$work/config"
+            cp "blueprint/blueprints/declmig-e2e/${mode}/config/repository.json" \
+              "$work/config/repository.json"
+
+            (
+              cd "$work"
+              GITHUB_REPOSITORY="$full_name" python3 scripts/validate_repository_config.py
+              python3 -m py_compile scripts/validate_repository_config.py
+              bash -n scripts/run_postgres_smoke.sh
+              git add -A
+              if ! git diff --cached --quiet; then
+                git commit --quiet -m "feat: bootstrap aggregate Declarative Migrations E2E"
+                git push --quiet --set-upstream origin "$BOOTSTRAP_BRANCH"
+              fi
+            )
+
+            local body_file
+            body_file="$(mktemp)"
+            cat > "$body_file" <<EOF
+          ## Summary
+
+          Bootstrap the aggregate Declarative Migrations E2E repository from the exact reviewed blueprint commit \`$BLUEPRINT_COMMIT\`.
+
+          - exact DPM source commit pin
+          - Rust formatting, strict Clippy, and test gates
+          - real PostgreSQL diff → verify → apply → empty-post-diff lane
+          - immutable GitHub Action pins and non-persisted checkout credentials
+          - repository-mode validation and SHA-256 evidence
+          - product boundary contract: API writes, bounded web reads, isolated web state, migrator-only DDL, Shared Auth without product DB ownership
+
+          Mode: \`$mode\`.
+
+          Governance review: https://github.com/declarative-migrations/.github/pull/12
+          Test portfolio review: https://github.com/declarative-migrations-test/.github/pull/14
+          EOF
+
+            local pr_url
+            pr_url="$(gh pr list --repo "$full_name" --head "$BOOTSTRAP_BRANCH" --state open --json url --jq '.[0].url // empty')"
+            if [[ -z "$pr_url" ]]; then
+              pr_url="$(gh pr create \
+                --repo "$full_name" \
+                --base main \
+                --head "$BOOTSTRAP_BRANCH" \
+                --draft \
+                --title "feat: bootstrap aggregate Declarative Migrations E2E" \
+                --body-file "$body_file")"
+            else
+              gh pr edit "$pr_url" \
+                --title "feat: bootstrap aggregate Declarative Migrations E2E" \
+                --body-file "$body_file"
+            fi
+            rm -f "$body_file"
+
+            cat > /tmp/branch-protection.json <<'JSON'
+          {
+            "required_status_checks": {
+              "strict": true,
+              "contexts": ["contract", "postgres-smoke"]
+            },
+            "enforce_admins": false,
+            "required_pull_request_reviews": {
+              "dismiss_stale_reviews": true,
+              "require_code_owner_reviews": false,
+              "required_approving_review_count": 1
+            },
+            "restrictions": null,
+            "allow_force_pushes": false,
+            "allow_deletions": false,
+            "required_conversation_resolution": true
+          }
+          JSON
+            gh api --method PUT "repos/$full_name/branches/main/protection" \
+              --input /tmp/branch-protection.json --silent || \
+              echo "::warning::Could not apply branch protection for $full_name"
+
+            printf '%s\t%s\t%s\n' "$full_name" "$created" "$pr_url" >> /tmp/declmig-e2e-results.tsv
+          }
+
+          : > /tmp/declmig-e2e-results.tsv
+          provision_repository \
+            declarative-migrations-test \
+            test \
+            "Aggregate candidate, destructive, and cross-repository E2E certification for Declarative Migrations."
+          provision_repository \
+            declarative-migrations \
+            production \
+            "Stable Declarative Migrations promotion orchestration using immutable test-organization evidence."
+
+          while IFS=$'\t' read -r repository created pr_url; do
+            {
+              echo "### $repository"
+              echo
+              echo "Created now: \`$created\`"
+              echo
+              echo "Bootstrap PR: $pr_url"
+              echo
+            } >> "$GITHUB_STEP_SUMMARY"
+          done < /tmp/declmig-e2e-results.tsv
+
+      - name: Verify both repositories and bootstrap pull requests exist
+        shell: bash
+        run: |
+          set -euo pipefail
+          for full_name in \
+            declarative-migrations-test/declmig-e2e \
+            declarative-migrations/declmig-e2e
+          do
+            gh api "repos/$full_name" --silent
+            test "$(gh api "repos/$full_name" --jq .visibility)" = "public"
+            test "$(gh pr list --repo "$full_name" --head "$BOOTSTRAP_BRANCH" --state open --json isDraft --jq '.[0].isDraft')" = "true"
+          done
