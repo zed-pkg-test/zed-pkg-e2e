@@ -133,6 +133,21 @@ def resolve_archive_format(document: dict[str, Any]) -> str:
     return value
 
 
+def expected_package_names(repo: str) -> set[str]:
+    """Return package identities permitted for one source repository.
+
+    Rust service repositories retain a `.rs` suffix for source-discovery and
+    deployment conventions, while their cross-registry Zed coordinates may use
+    the canonical suffix-free package name. Repository URL validation below
+    still binds either accepted package identity to the exact source repo.
+    """
+
+    names = {repo}
+    if repo.endswith(".rs"):
+        names.add(repo.removesuffix(".rs"))
+    return names
+
+
 def parse_manifest(org: str, repo: str, document: dict[str, Any]) -> ManifestDeclaration:
     package = document.get("package")
     if not isinstance(package, dict):
@@ -142,8 +157,11 @@ def parse_manifest(org: str, repo: str, document: dict[str, Any]) -> ManifestDec
     version = package.get("version")
     if manifest_org != org:
         raise InventoryError(f"{org}/{repo}: package.org is {manifest_org!r}, expected {org!r}")
-    if name != repo:
-        raise InventoryError(f"{org}/{repo}: package.name is {name!r}, expected {repo!r}")
+    allowed_names = expected_package_names(repo)
+    if name not in allowed_names:
+        raise InventoryError(
+            f"{org}/{repo}: package.name is {name!r}, expected one of {sorted(allowed_names)!r}"
+        )
     if not isinstance(version, str) or not VERSION_RE.fullmatch(version):
         raise InventoryError(f"{org}/{repo}: invalid package.version {version!r}")
     repository = package.get("repository")
@@ -345,6 +363,30 @@ def self_test() -> None:
     assert declaration.tag == "release-1.0.0"
     assert declaration.archive_format == "zip"
     assert declaration.dependencies == ("zed-pkg/b",)
+
+    rust_service_document = {
+        "package": {
+            "org": "zed-pkg",
+            "name": "zed-api-server",
+            "version": "0.1.0",
+            "repository": {"url": "https://github.com/zed-pkg/zed-api-server.rs"},
+        },
+        "publish": {"tag_format": "v{version}"},
+    }
+    rust_declaration = parse_manifest(
+        "zed-pkg", "zed-api-server.rs", rust_service_document
+    )
+    assert rust_declaration.package == "zed-pkg/zed-api-server"
+    assert rust_declaration.repository_url == "https://github.com/zed-pkg/zed-api-server.rs"
+
+    invalid_rust_service = json.loads(json.dumps(rust_service_document))
+    invalid_rust_service["package"]["name"] = "unrelated-api"
+    try:
+        parse_manifest("zed-pkg", "zed-api-server.rs", invalid_rust_service)
+    except InventoryError:
+        pass
+    else:
+        raise AssertionError("unrelated package name was accepted for a .rs repository")
 
     sample = [
         Candidate(
