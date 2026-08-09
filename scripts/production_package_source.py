@@ -6,7 +6,7 @@ import tomllib
 from pathlib import Path
 from typing import Any
 from urllib.parse import quote
-from production_package_common import CertificationError, Package, run
+from production_package_common import CertificationError, Package, RegistryPackage, run
 
 def _credential_file(root: Path) -> Path | None:
     token = os.environ.get('ZED_PKG_GITHUB_TOKEN', '').strip()
@@ -119,7 +119,47 @@ def checkout_source(package: Package, root: Path) -> Path:
         if credential_file is not None:
             credential_file.unlink(missing_ok=True)
 
-def parse_manifest(path: Path, package: Package) -> dict[str, Any]:
+def _registry_packages(document: dict[str, Any], package: Package) -> tuple[RegistryPackage, ...]:
+    targets = document.get('targets')
+    if targets is None or targets == {}:
+        return (
+            RegistryPackage(
+                logical_package=package.package,
+                org=package.org,
+                name=package.name,
+                version=package.version,
+                target=None,
+            ),
+        )
+    if not isinstance(targets, dict):
+        raise CertificationError(f'{package.package}: [targets] must be a table')
+    concrete: list[RegistryPackage] = []
+    for target, section in sorted(targets.items()):
+        if not isinstance(target, str) or not target or '/' in target:
+            raise CertificationError(f'{package.package}: invalid target key {target!r}')
+        if not isinstance(section, dict):
+            raise CertificationError(f'{package.package}: target {target!r} must be a table')
+        explicit_name = section.get('name')
+        if explicit_name is not None and (not isinstance(explicit_name, str) or not explicit_name):
+            raise CertificationError(f'{package.package}: target {target!r} has invalid name')
+        name = explicit_name or f'{package.name}-{target}'
+        if '/' in name:
+            raise CertificationError(f'{package.package}: target {target!r} has invalid package name {name!r}')
+        concrete.append(
+            RegistryPackage(
+                logical_package=package.package,
+                org=package.org,
+                name=name,
+                version=package.version,
+                target=target,
+            )
+        )
+    coordinates = [item.package for item in concrete]
+    if len(coordinates) != len(set(coordinates)):
+        raise CertificationError(f'{package.package}: targets publish duplicate package identities {coordinates!r}')
+    return tuple(concrete)
+
+def parse_manifest(path: Path, package: Package) -> tuple[dict[str, Any], tuple[RegistryPackage, ...]]:
     manifest_path = path / '.zpkg.toml'
     if not manifest_path.is_file():
         raise CertificationError(f'{package.package}: missing root .zpkg.toml')
@@ -142,4 +182,4 @@ def parse_manifest(path: Path, package: Package) -> dict[str, Any]:
     manifest_dependencies = tuple(sorted(dependencies)) if isinstance(dependencies, dict) else ()
     if manifest_dependencies != tuple(sorted(package.dependencies)):
         raise CertificationError(f'{package.package}: dependency ledger mismatch: manifest={manifest_dependencies!r}, ledger={tuple(sorted(package.dependencies))!r}')
-    return document
+    return document, _registry_packages(document, package)
