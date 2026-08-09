@@ -40,6 +40,7 @@
       "version": "0.1.0"
     },
     {
+      "allow_repo_name_mismatch": true,
       "dependencies": [],
       "github_owner": "zed-pkg",
       "name": "zed-api-server",
@@ -150,6 +151,7 @@
       "version": "0.1.0"
     },
     {
+      "allow_repo_name_mismatch": true,
       "dependencies": [],
       "github_owner": "opto-sync",
       "name": "syncer-rs",
