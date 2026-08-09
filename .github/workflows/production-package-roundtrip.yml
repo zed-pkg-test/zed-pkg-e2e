@@ -1,0 +1,218 @@
+name: production package publish/install roundtrip
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/production-package-roundtrip.yml"
+      - "config/production-package-release.json"
+      - "scripts/production_package_*.py"
+      - "docs/production-package-roundtrip.md"
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/production-package-roundtrip.yml"
+      - "config/production-package-release.json"
+      - "scripts/production_package_*.py"
+      - "docs/production-package-roundtrip.md"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production-package-roundtrip-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: "1"
+  ZED_API_SHA: 949b0872cf715b85ffc7e80a2a9e9cb9eb99efcf
+  ZED_CLI_SHA: 8929a58c6591c7a964d7f91412665d7c8a4afdf3
+  ZED_PKG_REGISTRY: http://127.0.0.1:8080
+  ZED_PKG_ALLOW_NO_MANIFEST: "1"
+  ZED_PKG_INSTALL_MODE: copy
+
+jobs:
+  real-repository-roundtrip:
+    name: 19 exact repositories / Rust API / Postgres
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    services:
+      postgres:
+        image: pgvector/pgvector:0.8.2-pg17-bookworm
+        env:
+          POSTGRES_USER: zed
+          POSTGRES_PASSWORD: zed
+          POSTGRES_DB: zed
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U zed -d zed"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+
+    steps:
+      - name: Check out the exact certification controller
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Check out the exact registry API
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          repository: zed-pkg/zed-api-server.rs
+          ref: ${{ env.ZED_API_SHA }}
+          path: zed-api-server.rs
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Check out the exact publishing CLI
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          repository: zed-pkg/zed-cli
+          ref: ${{ env.ZED_CLI_SHA }}
+          path: zed-cli
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Verify immutable controller pins and dependency closure
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git -C zed-api-server.rs rev-parse HEAD)" = "$ZED_API_SHA"
+          test "$(git -C zed-cli rev-parse HEAD)" = "$ZED_CLI_SHA"
+          python3 -m py_compile scripts/production_package_*.py
+          python3 - <<'PY'
+          import importlib.util
+          import pathlib
+          import sys
+
+          path = pathlib.Path("scripts/production_package_roundtrip.py")
+          sys.path.insert(0, str(path.parent.resolve()))
+          spec = importlib.util.spec_from_file_location("roundtrip", path)
+          module = importlib.util.module_from_spec(spec)
+          sys.modules[spec.name] = module
+          assert spec.loader is not None
+          spec.loader.exec_module(module)
+          raw, packages = module.load_ledger(pathlib.Path("config/production-package-release.json"))
+          assert raw["registry_api_sha"] == "949b0872cf715b85ffc7e80a2a9e9cb9eb99efcf"
+          assert raw["zed_cli_sha"] == "8929a58c6591c7a964d7f91412665d7c8a4afdf3"
+          assert len(packages) == 19
+          PY
+          git diff --check
+
+      - name: Install the pinned Rust toolchain
+        uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
+
+      - name: Cache the two Rust builds
+        uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          workspaces: |
+            zed-api-server.rs
+            zed-cli
+
+      - name: Build the exact registry API and Zed CLI
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo build --release --locked --manifest-path zed-api-server.rs/Cargo.toml
+          cargo build --release --locked --manifest-path zed-cli/Cargo.toml --bin zed
+          test -x zed-api-server.rs/target/release/zed-api-server
+          test -x zed-cli/target/release/zed
+
+      - name: Start the real Rust registry on Postgres and local artifact storage
+        shell: bash
+        env:
+          DATABASE_URL: postgres://zed:zed@127.0.0.1:5432/zed
+          AUTO_MIGRATE: "true"
+          BIND_ADDR: 127.0.0.1:8080
+          PUBLIC_BASE_URL: http://127.0.0.1:8080
+          STORAGE_BACKEND: local
+          STORAGE_LOCAL_DIR: ${{ runner.temp }}/zed-artifacts
+          ZED_VERIFY_TAGS: "off"
+          ZED_RATE_LIMIT_DISABLED: "1"
+          DB_CONNECT_MAX_WAIT_SECS: "30"
+          RUST_LOG: info
+        run: |
+          set -euo pipefail
+          mkdir -p "$STORAGE_LOCAL_DIR" "$RUNNER_TEMP/production-package-evidence"
+          zed-api-server.rs/target/release/zed-api-server \
+            >"$RUNNER_TEMP/zed-api.log" 2>&1 &
+          echo $! >"$RUNNER_TEMP/zed-api.pid"
+          for attempt in $(seq 1 90); do
+            if curl -fsS "$ZED_PKG_REGISTRY/healthz" >/dev/null; then
+              exit 0
+            fi
+            if ! kill -0 "$(cat "$RUNNER_TEMP/zed-api.pid")" 2>/dev/null; then
+              cat "$RUNNER_TEMP/zed-api.log" >&2
+              exit 1
+            fi
+            sleep 1
+          done
+          cat "$RUNNER_TEMP/zed-api.log" >&2
+          exit 1
+
+      - name: Mint a short-lived registry administrator token
+        shell: bash
+        env:
+          DATABASE_URL: postgres://zed:zed@127.0.0.1:5432/zed
+          PUBLIC_BASE_URL: http://127.0.0.1:8080
+          STORAGE_BACKEND: local
+          STORAGE_LOCAL_DIR: ${{ runner.temp }}/zed-artifacts
+          ZED_VERIFY_TAGS: "off"
+        run: |
+          set -euo pipefail
+          output=$(zed-api-server.rs/target/release/zed-api-server create-token \
+            --name production-package-roundtrip \
+            --expires-in-days 1)
+          token=$(printf '%s\n' "$output" | tail -n 1)
+          case "$token" in
+            zpkg_*) ;;
+            *) printf '%s\n' "$output" >&2; exit 1 ;;
+          esac
+          echo "::add-mask::$token"
+          printf 'ZED_PKG_TOKEN=%s\n' "$token" >> "$GITHUB_ENV"
+
+      - name: Publish, retry, install, uninstall, and frozen-reinstall all 19 packages
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/production_package_roundtrip.py \
+            --ledger config/production-package-release.json \
+            --workspace "$RUNNER_TEMP/production-package-work" \
+            --evidence "$RUNNER_TEMP/production-package-evidence" \
+            --zed "$GITHUB_WORKSPACE/zed-cli/target/release/zed" \
+            --registry "$ZED_PKG_REGISTRY"
+
+      - name: Preserve registry diagnostics
+        if: always()
+        shell: bash
+        run: |
+          set +e
+          evidence="$RUNNER_TEMP/production-package-evidence"
+          mkdir -p "$evidence"
+          cp "$RUNNER_TEMP/zed-api.log" "$evidence/zed-api.log" 2>/dev/null
+          find "$RUNNER_TEMP/zed-artifacts" -type f -printf '%P\t%s\n' \
+            2>/dev/null | sort > "$evidence/artifact-files.tsv"
+          curl -fsS "$ZED_PKG_REGISTRY/healthz" \
+            > "$evidence/final-health.txt" 2>&1
+
+      - name: Upload bounded release evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: production-package-roundtrip-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/production-package-evidence
+          if-no-files-found: error
+          retention-days: 30
+          include-hidden-files: false
+
+      - name: Stop the registry
+        if: always()
+        shell: bash
+        run: |
+          if test -f "$RUNNER_TEMP/zed-api.pid"; then
+            kill "$(cat "$RUNNER_TEMP/zed-api.pid")" 2>/dev/null || true
+          fi
