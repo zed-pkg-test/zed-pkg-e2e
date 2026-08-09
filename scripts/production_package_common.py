@@ -34,6 +34,22 @@ class Package:
     def spec(self) -> str:
         return f'{self.package}@{self.version}'
 
+@dataclass(frozen=True)
+class RegistryPackage:
+    logical_package: str
+    org: str
+    name: str
+    version: str
+    target: str | None
+
+    @property
+    def package(self) -> str:
+        return f'{self.org}/{self.name}'
+
+    @property
+    def spec(self) -> str:
+        return f'{self.package}@{self.version}'
+
 @dataclass
 class CommandResult:
     command: list[str]
