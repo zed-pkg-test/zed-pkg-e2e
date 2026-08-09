@@ -2,7 +2,7 @@
   "schema": 1,
   "repository": "shared-auth/shared-auth-server.rs",
   "branch": "feat/zpkg-browser-handoff-20260809",
-  "expected_head": "c4bd51180660e3c640885ddf8ff392908a861a1c",
+  "expected_head": "6406936a3f979a5f545ce08fa0f1f989eb351dc3",
   "independent_test_repository": "shared-auth-test/server-api-contract-e2e",
   "independent_test_head": "f41cdf668bbedab9ed75d01266a2086fa87b9ed1"
 }
