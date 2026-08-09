@@ -6,9 +6,19 @@ import shutil
 import traceback
 from pathlib import Path
 from typing import Any
-from production_package_common import CertificationError, load_ledger, run
+from production_package_common import CertificationError, RegistryPackage, load_ledger, run
 from production_package_source import checkout_source, parse_manifest
 from production_package_registry import metadata_for, verify_install, write_evidence
+
+def _concrete_row(package: RegistryPackage) -> dict[str, Any]:
+    return {
+        'package': package.package,
+        'version': package.version,
+        'target': package.target,
+        'spec': package.spec,
+        'artifact': {},
+        'idempotent_artifact': {},
+    }
 
 def certify(args: argparse.Namespace) -> None:
     ledger_raw, packages = load_ledger(args.ledger)
@@ -24,27 +34,64 @@ def certify(args: argparse.Namespace) -> None:
     cli_env.update({'ZED_PKG_REGISTRY': args.registry.rstrip('/'), 'ZED_PKG_HOME': str(home), 'ZED_PKG_ALLOW_NO_MANIFEST': '1', 'ZED_PKG_INSTALL_MODE': 'copy'})
     if args.token:
         cli_env['ZED_PKG_TOKEN'] = args.token
-    report: dict[str, Any] = {'schema': 1, 'status': 'running', 'registry': args.registry.rstrip('/'), 'package_count': len(packages), 'registry_api_sha': ledger_raw.get('registry_api_sha'), 'zed_cli_sha': ledger_raw.get('zed_cli_sha'), 'packages': [], 'installed': [], 'frozen_reinstalled': []}
+    report: dict[str, Any] = {
+        'schema': 2,
+        'status': 'running',
+        'registry': args.registry.rstrip('/'),
+        'package_count': len(packages),
+        'logical_package_count': len(packages),
+        'registry_package_count': 0,
+        'registry_api_sha': ledger_raw.get('registry_api_sha'),
+        'zed_cli_sha': ledger_raw.get('zed_cli_sha'),
+        'packages': [],
+        'installed': [],
+        'frozen_reinstalled': [],
+    }
     try:
         run([str(args.zed), '--help'], env=cli_env, timeout=120)
         for org in sorted({package.org for package in packages}):
             run([str(args.zed), 'org', 'claim', org], env=cli_env, timeout=120)
         checkouts: dict[str, Path] = {}
+        concrete_by_logical: dict[str, tuple[RegistryPackage, ...]] = {}
+        all_concrete: list[RegistryPackage] = []
         for package in packages:
             source = checkout_source(package, sources)
-            parse_manifest(source, package)
+            _, concrete = parse_manifest(source, package)
             checkouts[package.package] = source
-            report['packages'].append({'package': package.package, 'version': package.version, 'source_sha': package.sha, 'tag': package.tag, 'dependencies': list(package.dependencies), 'source_url': package.source_url, 'publish': {}, 'idempotent_retry': {}, 'artifact': {}})
+            concrete_by_logical[package.package] = concrete
+            all_concrete.extend(concrete)
+            report['packages'].append({
+                'package': package.package,
+                'version': package.version,
+                'source_sha': package.sha,
+                'tag': package.tag,
+                'dependencies': list(package.dependencies),
+                'source_url': package.source_url,
+                'publish': {},
+                'idempotent_retry': {},
+                'registry_packages': [_concrete_row(item) for item in concrete],
+            })
+            report['registry_package_count'] = len(all_concrete)
             write_evidence(args.evidence, report)
+        coordinates = [item.package for item in all_concrete]
+        if len(coordinates) != len(set(coordinates)):
+            raise CertificationError('release graph contains duplicate concrete registry coordinates')
+        if len(all_concrete) < len(packages):
+            raise CertificationError('concrete registry package count cannot be smaller than logical source count')
         rows_by_package = {row['package']: row for row in report['packages']}
+        concrete_rows = {
+            row['package']: {item['package']: item for item in row['registry_packages']}
+            for row in report['packages']
+        }
         for package in packages:
             source = checkouts[package.package]
             before = run(['git', 'status', '--porcelain=v1', '--untracked-files=all'], cwd=source).stdout
             if before:
                 raise CertificationError(f'{package.package}: dirty before publish:\n{before}')
             result = run([str(args.zed), 'publish', '--allow-dirty', '--skip-vcs-checks'], cwd=source, env=cli_env, timeout=1800)
-            rows_by_package[package.package]['publish'] = {'returncode': result.returncode, 'duration_seconds': result.duration_seconds, 'stdout': result.stdout[-4000:], 'stderr': result.stderr[-4000:]}
-            rows_by_package[package.package]['artifact'] = metadata_for(args.registry, package, args.token)
+            rows_by_package[package.package]['publish'] = {'returncode': result.returncode, 'duration_seconds': result.duration_seconds, 'stdout': result.stdout[-12000:], 'stderr': result.stderr[-4000:]}
+            for concrete in concrete_by_logical[package.package]:
+                concrete_rows[package.package][concrete.package]['artifact'] = metadata_for(args.registry, concrete, args.token)
             write_evidence(args.evidence, report)
         for package in packages:
             source = checkouts[package.package]
@@ -52,18 +99,21 @@ def certify(args: argparse.Namespace) -> None:
                 if generated.exists():
                     shutil.rmtree(generated)
             result = run([str(args.zed), 'publish', '--allow-dirty', '--skip-vcs-checks'], cwd=source, env=cli_env, timeout=1800)
-            rows_by_package[package.package]['idempotent_retry'] = {'returncode': result.returncode, 'duration_seconds': result.duration_seconds, 'stdout': result.stdout[-4000:], 'stderr': result.stderr[-4000:]}
-            retry_artifact = metadata_for(args.registry, package, args.token)
-            if retry_artifact['sha256'] != rows_by_package[package.package]['artifact']['sha256']:
-                raise CertificationError(f'{package.package}: idempotent retry changed artifact digest')
+            rows_by_package[package.package]['idempotent_retry'] = {'returncode': result.returncode, 'duration_seconds': result.duration_seconds, 'stdout': result.stdout[-12000:], 'stderr': result.stderr[-4000:]}
+            for concrete in concrete_by_logical[package.package]:
+                row = concrete_rows[package.package][concrete.package]
+                retry_artifact = metadata_for(args.registry, concrete, args.token)
+                row['idempotent_artifact'] = retry_artifact
+                if retry_artifact['sha256'] != row['artifact']['sha256']:
+                    raise CertificationError(f'{concrete.package}: idempotent retry changed artifact digest')
             write_evidence(args.evidence, report)
-        specs = [package.spec for package in packages]
-        run([str(args.zed), 'install', *specs, '--skip-manifest'], cwd=consumer, env=cli_env, timeout=3600)
-        expected = {package.package for package in packages}
+        specs = [package.spec for package in all_concrete]
+        run([str(args.zed), 'install', *specs, '--skip-manifest', '--allow-ecosystem-mismatch'], cwd=consumer, env=cli_env, timeout=3600)
+        expected = {package.package for package in all_concrete}
         report['installed'] = verify_install(consumer, expected, 'initial install')
         write_evidence(args.evidence, report)
         run([str(args.zed), 'uninstall'], cwd=consumer, env=cli_env, timeout=1800)
-        run([str(args.zed), 'install', '--frozen', '--skip-manifest'], cwd=consumer, env=cli_env, timeout=3600)
+        run([str(args.zed), 'install', '--frozen', '--skip-manifest', '--allow-ecosystem-mismatch'], cwd=consumer, env=cli_env, timeout=3600)
         report['frozen_reinstalled'] = verify_install(consumer, expected, 'frozen reinstall')
         report['status'] = 'success'
         write_evidence(args.evidence, report)
