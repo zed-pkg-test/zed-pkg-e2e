@@ -1,0 +1,94 @@
+name: DEN-2777 exact main build diagnosis
+
+on:
+  pull_request:
+    paths:
+      - .github/workflows/den-2777-main-build-diagnosis.yml
+  workflow_dispatch:
+    inputs:
+      candidate:
+        description: Full immutable zed-pkg/zed-cli commit
+        required: false
+        default: fa11a4d9d0bfa338a7e65220527188cc535e5b59
+
+permissions:
+  contents: read
+
+concurrency:
+  group: den-2777-main-build-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  ZED_CLI_COMMIT: ${{ inputs.candidate || 'fa11a4d9d0bfa338a7e65220527188cc535e5b59' }}
+
+jobs:
+  diagnose:
+    name: compile / ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-15, windows-2025]
+    steps:
+      - name: Check out diagnosis harness
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+          show-progress: false
+
+      - name: Check out exact product candidate
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: zed-pkg/zed-cli
+          ref: ${{ env.ZED_CLI_COMMIT }}
+          path: product/zed-cli
+          fetch-depth: 1
+          persist-credentials: false
+          show-progress: false
+
+      - name: Verify immutable identity
+        run: |
+          set -euo pipefail
+          [[ "$ZED_CLI_COMMIT" =~ ^[0-9a-f]{40}$ ]]
+          test "$(git -C product/zed-cli rev-parse HEAD)" = "$ZED_CLI_COMMIT"
+
+      - name: Install Rust quality components
+        uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30
+        with:
+          toolchain: stable
+          components: rustfmt,clippy
+
+      - name: Capture exact compiler evidence
+        id: compile
+        working-directory: product/zed-cli
+        run: |
+          set +e
+          mkdir -p ../../artifacts
+          cargo fmt --all --check > ../../artifacts/fmt-${RUNNER_OS}.log 2>&1
+          fmt_status=$?
+          cargo check --locked --all-targets > ../../artifacts/check-${RUNNER_OS}.log 2>&1
+          check_status=$?
+          cargo test --locked --no-run > ../../artifacts/test-no-run-${RUNNER_OS}.log 2>&1
+          test_status=$?
+          cargo clippy --locked --all-targets -- -D warnings > ../../artifacts/clippy-${RUNNER_OS}.log 2>&1
+          clippy_status=$?
+          printf '{"candidate":"%s","os":"%s","fmt":%s,"check":%s,"test_no_run":%s,"clippy":%s}\n' \
+            "$ZED_CLI_COMMIT" "$RUNNER_OS" "$fmt_status" "$check_status" "$test_status" "$clippy_status" \
+            > ../../artifacts/status-${RUNNER_OS}.json
+          cat ../../artifacts/status-${RUNNER_OS}.json
+          exit "$check_status"
+
+      - name: Upload compiler evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: den-2777-${{ runner.os }}-${{ env.ZED_CLI_COMMIT }}
+          path: artifacts/*-${{ runner.os }}.*
+          if-no-files-found: error
+          retention-days: 14
