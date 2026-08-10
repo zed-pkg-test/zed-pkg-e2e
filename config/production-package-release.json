@@ -224,7 +224,7 @@
       "org": "zed-pkg",
       "package": "zed-pkg/zed-cli",
       "repo": "zed-cli",
-      "sha": "751358fe130e64b646844bc7d857c4cff215ca2d",
+      "sha": "1bf3d898bc17c4a5d82cf44188b78ffd44c507e4",
       "tag": null,
       "version": "0.1.0"
     }
@@ -232,5 +232,5 @@
   "purpose": "DEN-2788 exact-source API-only publish/install certification across GitHub organizations",
   "registry_api_sha": "17f2abdcf473dcfee9d24b19f531e26f8513425b",
   "schema": 1,
-  "zed_cli_sha": "751358fe130e64b646844bc7d857c4cff215ca2d"
+  "zed_cli_sha": "1bf3d898bc17c4a5d82cf44188b78ffd44c507e4"
 }
