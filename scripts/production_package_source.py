@@ -142,7 +142,16 @@ def _registry_packages(document: dict[str, Any], package: Package) -> tuple[Regi
         explicit_name = section.get('name')
         if explicit_name is not None and (not isinstance(explicit_name, str) or not explicit_name):
             raise CertificationError(f'{package.package}: target {target!r} has invalid name')
-        name = explicit_name or f'{package.name}-{target}'
+        is_root_repository = target == 'repository' and section.get('dir') == '.'
+        if is_root_repository:
+            if explicit_name is not None and explicit_name != package.name:
+                raise CertificationError(
+                    f'{package.package}: whole-repository target must use canonical package name '
+                    f'{package.name!r}, not {explicit_name!r}'
+                )
+            name = package.name
+        else:
+            name = explicit_name or f'{package.name}-{target}'
         if '/' in name:
             raise CertificationError(f'{package.package}: target {target!r} has invalid package name {name!r}')
         concrete.append(
