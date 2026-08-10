@@ -1,0 +1,112 @@
+name: zed-cli graph github production
+
+on:
+  workflow_dispatch:
+    inputs:
+      zed_cli_ref:
+        description: Exact zed-pkg/zed-cli branch, tag, or commit to certify
+        required: true
+        type: string
+      run_live_smoke:
+        description: Scan the live zed-pkg-test organization on Linux
+        required: true
+        default: false
+        type: boolean
+  repository_dispatch:
+    types:
+      - zed-cli-graph-github-candidate
+
+permissions:
+  contents: read
+
+concurrency:
+  group: zed-cli-graph-github-${{ inputs.zed_cli_ref || github.event.client_payload.zed_cli_ref || github.run_id }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+  ZED_CLI_REF: ${{ inputs.zed_cli_ref || github.event.client_payload.zed_cli_ref }}
+  RUN_LIVE_SMOKE: ${{ inputs.run_live_smoke || github.event.client_payload.run_live_smoke || false }}
+
+jobs:
+  production-conformance:
+    name: ${{ matrix.os }} / Rust production port
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-latest
+          - macos-latest
+          - windows-latest
+
+    steps:
+      - name: Reject a missing candidate ref
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "${ZED_CLI_REF}"
+
+      - name: Check out test authority
+        uses: actions/checkout@v4
+        with:
+          path: e2e
+          persist-credentials: false
+
+      - name: Check out exact zed-cli candidate
+        uses: actions/checkout@v4
+        with:
+          repository: zed-pkg/zed-cli
+          ref: ${{ env.ZED_CLI_REF }}
+          path: zed-cli
+          token: ${{ secrets.ZED_PKG_CROSS_ORG_READ_TOKEN || github.token }}
+          persist-credentials: false
+
+      - name: Record immutable candidate head
+        id: candidate
+        shell: bash
+        working-directory: zed-cli
+        run: |
+          set -euo pipefail
+          printf 'sha=%s\n' "$(git rev-parse HEAD)" >> "${GITHUB_OUTPUT}"
+          git status --porcelain=v1
+
+      - name: Install stable Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Restore Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: zed-cli
+          cache-on-failure: false
+
+      - name: Build and test the complete candidate
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test --manifest-path zed-cli/Cargo.toml --locked --all-targets --all-features
+          cargo build --manifest-path zed-cli/Cargo.toml --locked
+
+      - name: Verify command contract and deterministic formats
+        shell: bash
+        env:
+          EXPECTED_CANDIDATE_SHA: ${{ steps.candidate.outputs.sha }}
+          ZED_PKG_GITHUB_TOKEN: ${{ secrets.ZED_PKG_LIVE_SMOKE_TOKEN || github.token }}
+        run: |
+          set -euo pipefail
+          python e2e/harness/verify_zed_cli_graph_github_production.py \
+            --workspace zed-cli \
+            --run-live-smoke "${RUN_LIVE_SMOKE}" \
+            --live-org zed-pkg-test
+
+      - name: Upload bounded failure evidence
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: zed-cli-graph-github-${{ runner.os }}-${{ steps.candidate.outputs.sha }}
+          path: |
+            .graph-github-evidence/**
+          if-no-files-found: ignore
+          retention-days: 3
+          compression-level: 9
