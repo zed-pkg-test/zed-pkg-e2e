@@ -1,0 +1,98 @@
+name: shared-defs-zpkg-canary
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/shared-defs-zpkg-canary.yml"
+  push:
+    branches:
+      - canary/shared-defs-zpkg-f8dc29b-v2
+    paths:
+      - ".github/workflows/shared-defs-zpkg-canary.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: shared-defs-zpkg-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  SHARED_DEFS_REPOSITORY: ORESoftware/k8s-libs-and-shared-defs
+  SHARED_DEFS_SHA: f8dc29b8e8c2ab3ed1942d5c92ee5fd967946b21
+
+jobs:
+  certify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out the canary repository
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
+
+      - name: Check out the exact public candidate
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          repository: ${{ env.SHARED_DEFS_REPOSITORY }}
+          ref: ${{ env.SHARED_DEFS_SHA }}
+          path: candidate
+          persist-credentials: false
+          submodules: false
+          fetch-depth: 1
+
+      - name: Verify immutable source identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git -C candidate rev-parse HEAD)" = "$SHARED_DEFS_SHA"
+          test -f candidate/.zpkg.toml
+          test -f candidate/.zpkg.lock
+
+      - name: Install the pinned Node toolchain
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+
+      - name: Verify the root Zed package boundary
+        working-directory: candidate
+        run: node scripts/check-zed-package.mjs
+
+      - name: Verify segmented and assembled Postgres contracts
+        working-directory: candidate
+        run: |
+          node pg-defs/src/assemble.mjs --check
+          node pg-defs/src/parity.mjs --check
+          node pg-defs/src/generate.mjs --check
+
+      - name: Verify NATS and interface generated output
+        working-directory: candidate
+        run: |
+          node nats/subject-defs/src/generate.mjs --check
+          node interfaces/redis/src/generate.mjs --check
+          node interfaces/shared/src/generate.mjs --check
+
+      - name: Prove the canary is credential-free and non-publishing
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          workflow = Path('.github/workflows/shared-defs-zpkg-canary.yml').read_text()
+          assert 'permissions:\n  contents: read' in workflow
+          assert workflow.count('persist-credentials: false') == 2
+          for forbidden in (
+              'contents' + ': write',
+              'pull_request' + '_target:',
+              'git' + ' push',
+              'npm publish',
+              'cargo publish',
+              'ZED_PKG' + '_TOKEN',
+              'GITHUB_PAT',
+              'CLOUDFLARE' + '_API_TOKEN',
+              'AWS_SECRET' + '_ACCESS_KEY',
+          ):
+              assert forbidden not in workflow, forbidden
+          PY
