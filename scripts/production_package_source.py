@@ -142,11 +142,15 @@ def _registry_packages(document: dict[str, Any], package: Package) -> tuple[Regi
         explicit_name = section.get('name')
         if explicit_name is not None and (not isinstance(explicit_name, str) or not explicit_name):
             raise CertificationError(f'{package.package}: target {target!r} has invalid name')
-        is_root_repository = target == 'repository' and section.get('dir') == '.'
-        if is_root_repository:
+        # The CLI canonicalizes any target spanning the repository root (`dir = "."`)
+        # to the logical package coordinate, regardless of the target key. This covers
+        # both `[targets.repository]` packages and language-native roots such as
+        # zed-lock's `[targets.rust]` without inventing a `-rust` registry package.
+        is_root_spanning_target = section.get('dir') == '.'
+        if is_root_spanning_target:
             if explicit_name is not None and explicit_name != package.name:
                 raise CertificationError(
-                    f'{package.package}: whole-repository target must use canonical package name '
+                    f'{package.package}: repository-root target must use canonical package name '
                     f'{package.name!r}, not {explicit_name!r}'
                 )
             name = package.name
