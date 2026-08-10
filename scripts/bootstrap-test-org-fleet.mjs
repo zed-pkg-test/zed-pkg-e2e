@@ -3,6 +3,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
+import { hardenGeneratedIntegrationPolicy } from './test-org-fleet-integration-policy.mjs';
+
 const root = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
 const partsDir = path.join(root, 'scripts', 'bootstrap-test-org-fleet.parts');
 let source = fs.readdirSync(partsDir).sort().map((name) => fs.readFileSync(path.join(partsDir, name), 'utf8')).join('');
@@ -183,6 +185,7 @@ source = source.replace(
   writeTreePattern,
   `${gitPushWriteTreeSource}\n\nasync function ensurePullRequest`,
 );
+source = hardenGeneratedIntegrationPolicy(source);
 
 process.env.TEST_ORG_FLEET_REPO_ROOT = root;
 await import(`data:text/javascript;base64,${Buffer.from(source).toString('base64')}`);

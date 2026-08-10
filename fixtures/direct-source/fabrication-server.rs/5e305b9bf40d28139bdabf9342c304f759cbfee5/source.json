@@ -1,0 +1,29 @@
+{
+  "$schema": "zed-pkg-test/direct-source-snapshot/v1",
+  "exportMode": "connector-read-no-product-credentials",
+  "repository": "github.com/daedalus-fab/fabrication-server.rs",
+  "revision": "5e305b9bf40d28139bdabf9342c304f759cbfee5",
+  "sourcePath": "k8s",
+  "files": {
+    "k8s/deployment.yaml": {
+      "gitBlobSha1": "52875e0935950ba845e1fb04c9675deef795549b"
+    },
+    "k8s/externalsecret.yaml": {
+      "gitBlobSha1": "446a87798b16537de92ed7fbef5fa4de94a87d75"
+    },
+    "k8s/kustomization.yaml": {
+      "gitBlobSha1": "9d23570713e6760f97b41220add5afacf4403753"
+    },
+    "k8s/networkpolicy.yaml": {
+      "gitBlobSha1": "1be79509a0000a9ae33a5d9437fe781a6a44c79b"
+    },
+    "k8s/service.yaml": {
+      "gitBlobSha1": "1f4fd233b99ce2dd3260c9c7d76a96960bbe60d2"
+    }
+  },
+  "limitations": [
+    "This snapshot proves the exported manifest bytes and renderability.",
+    "It does not prove that a test-org GitHub token can read the private source repository.",
+    "Private repository reachability remains a separately provisioned GitHub App credential contract."
+  ]
+}

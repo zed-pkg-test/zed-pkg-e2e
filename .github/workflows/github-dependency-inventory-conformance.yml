@@ -1,0 +1,172 @@
+name: GitHub dependency inventory conformance
+
+on:
+  pull_request:
+    paths:
+      - ".gitattributes"
+      - ".github/workflows/github-dependency-inventory-conformance.yml"
+      - "docs/github-dependency-inventory-conformance.md"
+      - "fixtures/github-dependency-inventory/**"
+      - "harness/github_dependency_inventory.py"
+      - "harness/github_inventory_*.py"
+      - "harness/test_github_inventory_*.py"
+  push:
+    branches: [main]
+    paths:
+      - ".gitattributes"
+      - ".github/workflows/github-dependency-inventory-conformance.yml"
+      - "docs/github-dependency-inventory-conformance.md"
+      - "fixtures/github-dependency-inventory/**"
+      - "harness/github_dependency_inventory.py"
+      - "harness/github_inventory_*.py"
+      - "harness/test_github_inventory_*.py"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: github-dependency-inventory-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  conformance:
+    name: deterministic inventory / ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    env:
+      PYTHONDONTWRITEBYTECODE: "1"
+      PYTHONHASHSEED: "0"
+      PYTHONUTF8: "1"
+      SOURCE_DATE_EPOCH: "0"
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-15, windows-2022]
+
+    steps:
+      - name: Check out exact candidate
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          show-progress: false
+
+      - name: Install pinned Python runtime
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+
+      - name: Verify the dependency-free tool boundary
+        run: |
+          set -euo pipefail
+          python --version
+          python - <<'PY'
+          from pathlib import Path
+
+          paths = [Path("harness/github_dependency_inventory.py")]
+          paths += sorted(Path("harness").glob("github_inventory_*.py"))
+          paths += sorted(Path("harness").glob("test_github_inventory_*.py"))
+          for path in paths:
+              compile(path.read_text(encoding="utf-8"), str(path), "exec")
+          PY
+
+      - name: Run adversarial fixture and fake-server conformance
+        run: |
+          set -euo pipefail
+          python -m unittest discover \
+            -s harness \
+            -p 'test_*.py' \
+            -v
+
+      - name: Regenerate independent byte-identical graph artifacts
+        id: evidence
+        run: |
+          set -euo pipefail
+          first="$RUNNER_TEMP/github-inventory-first"
+          second="$RUNNER_TEMP/github-inventory-second"
+          evidence="$RUNNER_TEMP/github-inventory-evidence"
+          rm -rf "$first" "$second" "$evidence"
+          mkdir -p "$first" "$second" "$evidence"
+
+          for format in json dot mermaid; do
+            extension="$format"
+            if [[ "$format" == "mermaid" ]]; then extension="mmd"; fi
+            python harness/github_dependency_inventory.py \
+              --fixture fixtures/github-dependency-inventory/fixture.json \
+              --org ACME \
+              --repo acme/app \
+              --include zed,git-submodule,nix \
+              --format "$format" \
+              --output "$first/inventory.$extension"
+
+            python harness/github_dependency_inventory.py \
+              --fixture fixtures/github-dependency-inventory/fixture.json \
+              --repo ACME/App \
+              --repo acme/app \
+              --org acme \
+              --org ACME \
+              --include nix \
+              --include git-submodule,zed \
+              --format "$format" \
+              --output "$second/inventory.$extension"
+          done
+
+          python - "$first" "$second" "$evidence/inventory.json" <<'PY'
+          import hashlib
+          import json
+          import sys
+          from pathlib import Path
+
+          first, second, evidence = map(Path, sys.argv[1:])
+          golden = Path("fixtures/github-dependency-inventory/golden")
+          rows = []
+          for name in ("inventory.json", "inventory.dot", "inventory.mmd"):
+              left = (first / name).read_bytes()
+              right = (second / name).read_bytes()
+              expected = (golden / name).read_bytes()
+              if left != right:
+                  raise SystemExit(f"independent {name} renders differ")
+              if left != expected:
+                  raise SystemExit(f"generated {name} differs from checked-in golden")
+              rows.append({
+                  "path": name,
+                  "bytes": len(left),
+                  "sha256": hashlib.sha256(left).hexdigest(),
+              })
+          document = {
+              "schema": "zed-pkg-test/github-dependency-inventory-evidence/v1",
+              "source_date_epoch": 0,
+              "files": rows,
+          }
+          evidence.write_text(
+              json.dumps(document, sort_keys=True, separators=(",", ":")) + "\n",
+              encoding="utf-8",
+          )
+          print(json.dumps(document, indent=2, sort_keys=True))
+          PY
+
+          printf 'path=%s\n' "$evidence" >> "$GITHUB_OUTPUT"
+
+      - name: Prove the source checkout stayed immutable
+        run: |
+          set -euo pipefail
+          git diff --exit-code
+          status="$(git status --porcelain=v1 --untracked-files=all)"
+          if [[ -n "$status" ]]; then
+            printf '%s\n' "$status" >&2
+            exit 1
+          fi
+
+      - name: Upload bounded conformance evidence
+        if: ${{ always() && steps.evidence.outputs.path != '' }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: github-dependency-inventory-${{ runner.os }}-${{ github.event.pull_request.head.sha || github.sha }}
+          path: ${{ steps.evidence.outputs.path }}
+          if-no-files-found: error
+          retention-days: 7
+          include-hidden-files: false

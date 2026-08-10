@@ -28,6 +28,7 @@ on:
           - file-tunnel-test
           - shared-auth-test
           - hypesiege-test
+          - hacker-house-medellin-test
           - streempilot-test
       repository:
         description: Optional repository-name glob, for example clients-*-consumer
@@ -76,12 +77,12 @@ jobs:
             exit 1
           fi
 
-          all='["zed-pkg-test","3fa-app-test","declarative-migrations-test","cliptown-test","claritas-viz-test","embedded-alerts-test","evento-globolo-test","fiducia-cloud-test","memebank-test","opto-sync-test","quaestor-ledger-test","sonus-auris-test","messaging-intel-test","scintilla-run-test","file-tunnel-test","shared-auth-test","hypesiege-test","streempilot-test"]'
+          all='["zed-pkg-test","3fa-app-test","declarative-migrations-test","cliptown-test","claritas-viz-test","embedded-alerts-test","evento-globolo-test","fiducia-cloud-test","memebank-test","opto-sync-test","quaestor-ledger-test","sonus-auris-test","messaging-intel-test","scintilla-run-test","file-tunnel-test","shared-auth-test","hypesiege-test","hacker-house-medellin-test","streempilot-test"]'
           case "$SELECTED_ORGANIZATION" in
             all)
               selected="$all"
               ;;
-            zed-pkg-test|3fa-app-test|declarative-migrations-test|cliptown-test|claritas-viz-test|embedded-alerts-test|evento-globolo-test|fiducia-cloud-test|memebank-test|opto-sync-test|quaestor-ledger-test|sonus-auris-test|messaging-intel-test|scintilla-run-test|file-tunnel-test|shared-auth-test|hypesiege-test|streempilot-test)
+            zed-pkg-test|3fa-app-test|declarative-migrations-test|cliptown-test|claritas-viz-test|embedded-alerts-test|evento-globolo-test|fiducia-cloud-test|memebank-test|opto-sync-test|quaestor-ledger-test|sonus-auris-test|messaging-intel-test|scintilla-run-test|file-tunnel-test|shared-auth-test|hypesiege-test|hacker-house-medellin-test|streempilot-test)
               selected="[\"$SELECTED_ORGANIZATION\"]"
               ;;
             *)
@@ -114,56 +115,6 @@ jobs:
           node --check scripts/validate-test-org-fleet.mjs
           node scripts/validate-test-org-fleet.mjs
           node --test tests/test-org-fleet.test.mjs tests/git-transport-worktree.test.mjs tests/fleet-recovery-control.test.mjs
-
-      - name: Select a secret-backed credential
-        id: auth
-        shell: bash
-        env:
-          REQUESTED_AUTHENTICATION: ${{ inputs.authentication }}
-          STORED_FLEET_PAT: ${{ secrets.FLEET_GH_TOKEN }}
-          FLEET_APP_CLIENT_ID: ${{ vars.FLEET_APP_CLIENT_ID }}
-          FLEET_APP_PRIVATE_KEY: ${{ secrets.FLEET_APP_PRIVATE_KEY }}
-        run: |
-          set -euo pipefail
-
-          has_pat=false
-          has_app=false
-          [[ -n "$STORED_FLEET_PAT" ]] && has_pat=true
-          [[ -n "$FLEET_APP_CLIENT_ID" && -n "$FLEET_APP_PRIVATE_KEY" ]] && has_app=true
-
-          case "$REQUESTED_AUTHENTICATION" in
-            auto)
-              if [[ "$has_pat" == true ]]; then
-                selected=pat
-              elif [[ "$has_app" == true ]]; then
-                selected=github-app
-              else
-                echo "::error::Configure FLEET_GH_TOKEN or both FLEET_APP_CLIENT_ID and FLEET_APP_PRIVATE_KEY"
-                exit 1
-              fi
-              ;;
-            pat)
-              if [[ "$has_pat" != true ]]; then
-                echo "::error::authentication=pat requires the FLEET_GH_TOKEN Actions secret"
-                exit 1
-              fi
-              selected=pat
-              ;;
-            github-app)
-              if [[ "$has_app" != true ]]; then
-                echo "::error::authentication=github-app requires FLEET_APP_CLIENT_ID and FLEET_APP_PRIVATE_KEY"
-                exit 1
-              fi
-              selected=github-app
-              ;;
-            *)
-              echo "::error::Unsupported authentication mode: $REQUESTED_AUTHENTICATION"
-              exit 1
-              ;;
-          esac
-
-          printf 'mode=%s\n' "$selected" >> "$GITHUB_OUTPUT"
-          echo "Using $selected authentication for ${{ matrix.organization }}"
 
       - name: Select a secret-backed credential
         id: auth

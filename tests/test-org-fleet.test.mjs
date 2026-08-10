@@ -26,7 +26,7 @@ const interruptedOrganizations = [
 ];
 
 test('fleet contains the intended organization pairs and never r2g', () => {
-  assert.equal(manifest.pairs.length, 18);
+  assert.equal(manifest.pairs.length, 19);
   const names = new Set(manifest.pairs.flatMap((pair) => [pair.sourceOrg.toLowerCase(), pair.testOrg.toLowerCase()]));
   assert.equal(names.has('r2g'), false);
   assert.equal(names.has('r2g-test'), false);
@@ -54,9 +54,9 @@ test('validator succeeds and reports the complete fleet', () => {
   const result = childProcess.spawnSync(process.execPath, [path.join(root, 'scripts', 'validate-test-org-fleet.mjs'), '--json'], { cwd: root, encoding: 'utf8' });
   assert.equal(result.status, 0, result.stderr);
   const summary = JSON.parse(result.stdout);
-  assert.equal(summary.pairs, 18);
-  assert.equal(summary.createRepositories, 301);
-  assert.equal(summary.governanceRepositories, 18);
+  assert.equal(summary.pairs, 19);
+  assert.equal(summary.createRepositories, 319);
+  assert.equal(summary.governanceRepositories, 19);
   assert.equal(summary.existingRepositories, 22);
   assert.equal(summary.errors, 0);
 });
@@ -66,10 +66,10 @@ test('bootstrap dry run is deterministic and write-free', () => {
   assert.equal(result.status, 0, result.stderr);
   const summary = JSON.parse(result.stdout);
   assert.equal(summary.mode, 'dry-run');
-  assert.equal(summary.selectedOrganizations, 18);
-  assert.equal(summary.selectedRepositories, 301);
-  assert.equal(summary.governanceRepositories, 18);
-  assert.equal(summary.planned, 319);
+  assert.equal(summary.selectedOrganizations, 19);
+  assert.equal(summary.selectedRepositories, 319);
+  assert.equal(summary.governanceRepositories, 19);
+  assert.equal(summary.planned, 338);
   assert.equal(summary.created, 0);
   assert.equal(summary.committed, 0);
   assert.equal(summary.pullRequests, 0);
@@ -124,10 +124,10 @@ test('generated harness branches use authenticated git transport without staging
 
   assert.match(launcher, /spawnSync\('git'/);
   assert.match(launcher, /GIT_ASKPASS_REQUIRE: 'force'/);
-  assert.match(launcher, /const askpassDirectory = fs\.mkdtempSync\(path\.join\(os\.tmpdir\(\), 'test-org-fleet-askpass-'\)\)/);
-  assert.match(launcher, /const askpass = path\.join\(askpassDirectory, 'git-askpass\.sh'\)/);
+  assert.match(launcher, /const credentialDirectory = fs\.mkdtempSync\(path\.join\(os\.tmpdir\(\), 'test-org-fleet-credentials-'\)\)/);
+  assert.match(launcher, /const askpass = path\.join\(credentialDirectory, 'git-askpass\.sh'\)/);
   assert.doesNotMatch(launcher, /const askpass = path\.join\(worktree, 'git-askpass\.sh'\)/);
-  assert.match(launcher, /fs\.rmSync\(askpassDirectory, \{ recursive: true, force: true \}\)/);
+  assert.match(launcher, /fs\.rmSync\(credentialDirectory, \{ recursive: true, force: true \}\)/);
   assert.match(launcher, /\['push', '--quiet', 'origin'/);
   assert.match(launcher, /update-index/);
   assert.match(launcher, /--cacheinfo/);
@@ -175,4 +175,41 @@ test('one-time handoff persists only ciphertext and dispatches the secret-backed
   assert.match(workflow, /-f confirm=APPLY_TEST_FLEET/);
   assert.match(workflow, /github\.repository == 'zed-pkg-test\/zed-pkg-e2e'/);
   assert.doesNotMatch(workflow, /workflow_dispatch:/);
+});
+
+
+test('Hacker House Medellín uses synthetic, privacy-safe product coverage', () => {
+  const pair = manifest.pairs.find((candidate) => candidate.testOrg === 'hacker-house-medellin-test');
+  assert.ok(pair);
+  assert.equal(pair.sourceOrg, 'hacker-house-medellin');
+  assert.equal(pair.defaultVisibility, 'private');
+  assert.equal(pair.repositories.length, 18);
+  const names = new Set(pair.repositories.map((repository) => repository.name));
+  for (const required of [
+    'mash-web-e2e',
+    'leptos-web-e2e',
+    'dioxus-web-e2e',
+    'api-contract-e2e',
+    'websocket-contract-e2e',
+    'cli-contract-e2e',
+    'sync-offline-e2e',
+    'infra-compose-e2e',
+    'postgres-supabase-e2e',
+    'booking-race-e2e',
+    'tenant-isolation-e2e',
+    'payment-idempotency-e2e',
+    'access-control-lifecycle-e2e',
+    'notification-reconnect-e2e',
+    'performance-smoke-e2e',
+    'mcp-contract-e2e',
+    'clients-rust-consumer',
+    'clients-typescript-consumer',
+  ]) assert.equal(names.has(required), true, required);
+  const serializedPair = JSON.stringify(pair);
+  assert.equal(credentialLiteral.test(serializedPair), false);
+  assert.doesNotMatch(serializedPair, /(?:resident identity document|door credential|payment card|private message|real occupancy record)/i);
+  for (const repository of pair.repositories) {
+    assert.equal(repository.sources.every((source) => /^[^/]+\/[^/]+$/.test(source)), true);
+    assert.equal(repository.focus.length >= 3, true);
+  }
 });

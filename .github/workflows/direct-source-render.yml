@@ -1,0 +1,158 @@
+name: exact direct-source snapshot Kustomize render
+
+on:
+  pull_request:
+    paths:
+      - .github/workflows/direct-source-render.yml
+      - scripts/install_pinned_kustomize.py
+      - scripts/direct_source_render_canary.py
+      - scripts/check_snapshot_endpoint_policy.py
+      - scripts/test_snapshot_endpoint_policy.py
+      - docs/direct-source-render.md
+      - fixtures/direct-source/fabrication-server.rs/**
+  workflow_dispatch:
+    inputs:
+      cluster_commit:
+        description: Exact ORESoftware/k8s-cluster catalog candidate
+        required: false
+        default: 0c71eed05f8be50ac22ebe73715ded4a871234a8
+        type: string
+      child_commit:
+        description: Exact private source commit represented by the snapshot
+        required: false
+        default: cea4a3c772012e1f2f87050bac24e911b8e2e577
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: direct-source-render-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  K8S_CLUSTER_COMMIT: ${{ inputs.cluster_commit || '0c71eed05f8be50ac22ebe73715ded4a871234a8' }}
+  FABRICATION_SERVER_COMMIT: ${{ inputs.child_commit || 'cea4a3c772012e1f2f87050bac24e911b8e2e577' }}
+  SOURCE_SNAPSHOT: fixtures/direct-source/fabrication-server.rs/cea4a3c772012e1f2f87050bac24e911b8e2e577
+
+jobs:
+  render:
+    name: direct source snapshot render / ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-15, windows-2025]
+
+    steps:
+      - name: Check out independent test harness and source snapshot
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+          show-progress: false
+
+      - name: Check out exact cluster catalog without child worktrees
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ORESoftware/k8s-cluster
+          ref: ${{ env.K8S_CLUSTER_COMMIT }}
+          path: product/k8s-cluster
+          fetch-depth: 1
+          submodules: false
+          persist-credentials: false
+          show-progress: false
+
+      - name: Install Python 3.12
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.12'
+
+      - name: Verify immutable cluster checkout and all test syntax
+        run: |
+          set -euo pipefail
+          [[ "$K8S_CLUSTER_COMMIT" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$FABRICATION_SERVER_COMMIT" =~ ^[0-9a-f]{40}$ ]]
+          test "$(git -C product/k8s-cluster rev-parse HEAD)" = "$K8S_CLUSTER_COMMIT"
+          test -f "$SOURCE_SNAPSHOT/source.json"
+          python -m py_compile \
+            scripts/install_pinned_kustomize.py \
+            scripts/direct_source_render_canary.py \
+            scripts/check_snapshot_endpoint_policy.py \
+            scripts/test_snapshot_endpoint_policy.py \
+            "$SOURCE_SNAPSHOT/scripts/ci/check_k8s_network_contract.py" \
+            "$SOURCE_SNAPSHOT/scripts/ci/test_check_k8s_network_contract.py"
+          python scripts/test_snapshot_endpoint_policy.py
+          (
+            cd "$SOURCE_SNAPSHOT"
+            python scripts/ci/test_check_k8s_network_contract.py
+            python scripts/ci/check_k8s_network_contract.py
+          )
+          rm -rf scripts/__pycache__ "$SOURCE_SNAPSHOT/scripts/ci/__pycache__"
+
+      - name: Install checksum-pinned Kustomize v5.8.1
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts
+          kustomize="$(python scripts/install_pinned_kustomize.py \
+            --destination "$RUNNER_TEMP/pinned-kustomize" \
+            --metadata "artifacts/kustomize-install-${RUNNER_OS}-${RUNNER_ARCH}.json")"
+          test -f "$kustomize"
+          echo "KUSTOMIZE_BINARY=$kustomize" >> "$GITHUB_ENV"
+
+      - name: Verify snapshot endpoint and NetworkPolicy parity independently
+        run: |
+          set -euo pipefail
+          python scripts/check_snapshot_endpoint_policy.py \
+            --deployment "$SOURCE_SNAPSHOT/k8s/deployment.yaml" \
+            --network-policy "$SOURCE_SNAPSHOT/k8s/networkpolicy.yaml" \
+            --evidence "artifacts/snapshot-endpoint-policy-${RUNNER_OS}-${RUNNER_ARCH}.json"
+
+      - name: Verify catalog provenance and render exact source snapshot twice
+        run: |
+          set -euo pipefail
+          python scripts/direct_source_render_canary.py \
+            --cluster product/k8s-cluster \
+            --snapshot "$SOURCE_SNAPSHOT" \
+            --source-metadata "$SOURCE_SNAPSHOT/source.json" \
+            --cluster-commit "$K8S_CLUSTER_COMMIT" \
+            --child-commit "$FABRICATION_SERVER_COMMIT" \
+            --kustomize "$KUSTOMIZE_BINARY" \
+            --kustomize-metadata "artifacts/kustomize-install-${RUNNER_OS}-${RUNNER_ARCH}.json" \
+            --rendered "artifacts/fabrication-render-${RUNNER_OS}-${RUNNER_ARCH}.yaml" \
+            --evidence "artifacts/direct-source-render-${RUNNER_OS}-${RUNNER_ARCH}.json"
+          rm -rf scripts/__pycache__
+
+      - name: Require pristine cluster and harness checkouts
+        run: |
+          set -euo pipefail
+          git -C product/k8s-cluster diff --exit-code
+          git -C product/k8s-cluster diff --cached --exit-code
+          cluster_status="$(git -C product/k8s-cluster status --porcelain --untracked-files=all)"
+          if [[ -n "$cluster_status" ]]; then
+            printf 'unexpected cluster drift:\n%s\n' "$cluster_status" >&2
+            exit 1
+          fi
+          harness_status="$(git status --porcelain --untracked-files=all | grep -vE '^\?\? (artifacts|product)/' || true)"
+          if [[ -n "$harness_status" ]]; then
+            printf 'unexpected harness drift:\n%s\n' "$harness_status" >&2
+            exit 1
+          fi
+
+      - name: Upload exact-source snapshot render evidence
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: direct-source-snapshot-render-${{ runner.os }}-${{ runner.arch }}-${{ env.K8S_CLUSTER_COMMIT }}-${{ env.FABRICATION_SERVER_COMMIT }}
+          path: |
+            artifacts/kustomize-install-${{ runner.os }}-${{ runner.arch }}.json
+            artifacts/snapshot-endpoint-policy-${{ runner.os }}-${{ runner.arch }}.json
+            artifacts/direct-source-render-${{ runner.os }}-${{ runner.arch }}.json
+            artifacts/fabrication-render-${{ runner.os }}-${{ runner.arch }}.yaml
+          if-no-files-found: error
+          retention-days: 14
+          include-hidden-files: false

@@ -4,17 +4,25 @@ This suite independently certifies deterministic, conflict-safe projection from 
 
 `zed-pkg` is an independent multi-language package manager and is unrelated to the Zed editor. Here, `zed` refers only to the `zed-pkg` CLI.
 
-## Implementation graph
+## Immutable implementation candidate
 
-- Base exporter: `zed-pkg/zed-cli#113`
-- Stacked ownership/security hardening: `zed-pkg/zed-cli#115`
-- Independent black-box harness: `scripts/mise_export_boundaries.py`
+Canonical product PR: `zed-pkg/zed-cli#131`.
 
-The certification workflow will pin the final immutable implementation commit after #115 is merged into the #113 feature branch. It will never follow a mutable branch.
+Pinned product head:
+
+```text
+3434716591e048d0a769bafd47353d2953e89e48
+```
+
+The product branch was semantically merged with current `main` head `751358fe130e64b646844bc7d857c4cff215ca2d`. Current submodule CLI and project-lock behavior were adopted verbatim, including the independently merged Windows lock-contention normalization; `src/main.rs` retains only the already-tested exporter import and dispatch arms inside the current main-line recovery and locking flow. The exporter remains a ten-file source, test, contract, and documentation delta with no materializer or synchronization workflow.
+
+The public Rust API enforces the reserved exporter-state source boundary before delegating to the implementation. This protects the CLI, external Rust callers, portable case aliases, and in-project symlink aliases through one shared guard.
+
+The certification workflow pins the full immutable product head above and never follows a mutable branch during a run.
 
 ## Certified behavior
 
-The harness runs the real CLI with an empty `PATH` and proves:
+The harnesses run the real CLI with an empty `PATH` and prove:
 
 - print mode is deterministic and read-only;
 - `--write` creates generated TOML plus typed ownership state;
@@ -22,6 +30,11 @@ The harness runs the real CLI with an empty `PATH` and proves:
 - repeated writes are idempotent;
 - hand-edited owned files are not overwritten;
 - differing unowned files are not adopted or overwritten;
+- an existing generated output cannot silently transfer ownership to a different plan, even when both plans currently render byte-identical TOML;
+- a stale or corrupted recorded output digest is rejected rather than silently repaired;
+- ownership-state failures leave both the generated output and state file unchanged;
+- the public Rust API and real CLI reject the reserved exporter-state file as the plan source;
+- the public API rejects a symlink to the reserved exporter-state file on Unix;
 - safe missing output parent directories can be created transactionally;
 - output cannot alias its input plan, including case-only aliases relevant to Windows;
 - output and input cannot target the reserved export-state path;
@@ -32,9 +45,19 @@ The harness runs the real CLI with an empty `PATH` and proves:
 
 Both successful and failed commands are checked for unintended project mutation.
 
+## Three-platform gate
+
+The permanent workflow runs on:
+
+- Ubuntu 24.04;
+- macOS 15; and
+- Windows Server 2025.
+
+Each platform requires formatting, focused exporter unit tests, the public-API boundary target, both real CLI test targets, all-target Clippy with warnings denied, a locked release build, and both black-box harnesses. An aggregate gate requires every platform to succeed. All ordinary repository-wide E2E workflows remain merge gates on the same certification head.
+
 ## Deliberate boundary
 
-This certifies deterministic manager configuration export and ownership safety. It does not claim:
+This certifies deterministic manager-configuration export and ownership safety. It does not claim:
 
 - complete current `mise.lock` export;
 - native `EnvironmentLock` translation;
@@ -42,15 +65,15 @@ This certifies deterministic manager configuration export and ownership safety. 
 - execution of mise tasks, hooks, templates, plugins, or environment expressions; or
 - installation of runtimes.
 
-The current-lock contract remains DEN-1461. More sophisticated merge planning remains separate follow-up work under DEN-1462.
+The complete current manager-lock identity contract is separately merged and certified through DEN-1461. More sophisticated manager merge planning and lock-aware round trips remain separate follow-up work under DEN-1462.
 
 ## Promotion gate
 
 Promotion requires:
 
-1. a full 40-character final CLI pin;
+1. the workflow pin matching final immutable head `3434716591e048d0a769bafd47353d2953e89e48` of `zed-pkg/zed-cli#131`;
 2. Ubuntu 24.04, macOS 15, and Windows Server 2025 success;
-3. formatting, focused unit tests, real CLI tests, a locked release build, and all-target Clippy with warnings denied;
-4. this black-box harness passing on all platforms, with symlink assertions skipped only where the host cannot create symlinks;
+3. formatting, focused unit tests, the public API target, real CLI tests, a locked release build, and all-target Clippy with warnings denied;
+4. both black-box harnesses passing on all platforms, with symlink assertions skipped only where the host cannot create symlinks;
 5. ordinary lifecycle, recursive-install, browser, install-boundary, and runtime-mise workflows remaining green; and
 6. exact implementation, certification, and merge commits recorded in DEN-1462 and the canonical mise interoperability policy.
