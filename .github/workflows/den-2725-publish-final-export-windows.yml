@@ -1,0 +1,100 @@
+name: DEN-2725 publish verified final replay export on Windows
+
+on:
+  push:
+    branches:
+      - agent/den-2725-publish-final-export
+
+permissions:
+  actions: read
+  contents: write
+
+env:
+  SOURCE_RUN_ID: '31243116442'
+  SOURCE_ARTIFACT: gitops-dispatch-replay-Linux-X64-1c94813c6b59c7621c1256d7c55246e7f06f44b7-0246a3af901b65ca6724d936c7f3232c9f72fcd7
+  ROOT_DISPATCH_COMMIT: 1c94813c6b59c7621c1256d7c55246e7f06f44b7
+  MAIN_COMMIT: 0246a3af901b65ca6724d936c7f3232c9f72fcd7
+  EXPECTED_TREE: 99ab08e3142c2a52d2c97482134e99fae3811b43
+
+jobs:
+  publish:
+    runs-on: windows-2025
+    timeout-minutes: 10
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Check out export publisher with scoped token
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: agent/den-2725-publish-final-export
+          fetch-depth: 0
+          persist-credentials: true
+          show-progress: false
+
+      - name: Check out exact source commit for hidden package manifest
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: zed-pkg/zed-cli
+          ref: ${{ env.ROOT_DISPATCH_COMMIT }}
+          path: product/zed-cli
+          fetch-depth: 1
+          persist-credentials: false
+          show-progress: false
+
+      - name: Download and verify the green Linux replay artifact
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh run download "$SOURCE_RUN_ID" \
+            --repo zed-pkg-test/zed-pkg-e2e \
+            --name "$SOURCE_ARTIFACT" \
+            --dir /tmp/replay
+          test "$(jq -r .mainCommit /tmp/replay/corrected/replay-metadata.json)" = "$MAIN_COMMIT"
+          test "$(jq -r .rootDispatchCommit /tmp/replay/corrected/replay-metadata.json)" = "$ROOT_DISPATCH_COMMIT"
+          test "$(jq -r .treeSha /tmp/replay/corrected/replay-metadata.json)" = "$EXPECTED_TREE"
+          cp product/zed-cli/.zpkg.toml /tmp/replay/corrected/.zpkg.toml
+          (cd /tmp/replay && sha256sum -c corrected/SHA256SUMS)
+
+      - name: Build the immutable export payload
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/export/{docs,scripts,src,tests,evidence}
+          cp /tmp/replay/corrected/.zpkg.toml /tmp/export/
+          cp /tmp/replay/corrected/docs/gitops-validator.md /tmp/export/docs/
+          cp /tmp/replay/corrected/scripts/validate-zed-package-graph.sh /tmp/export/scripts/
+          cp /tmp/replay/corrected/src/completion.rs /tmp/export/src/
+          cp /tmp/replay/corrected/src/external_subcommands.rs /tmp/export/src/
+          cp /tmp/replay/corrected/src/lib.rs /tmp/export/src/
+          cp /tmp/replay/corrected/src/main.rs /tmp/export/src/
+          cp /tmp/replay/corrected/tests/external_gitops_dispatch.rs /tmp/export/tests/
+          cp /tmp/replay/corrected/replay-metadata.json /tmp/export/evidence/
+          cp /tmp/replay/corrected/SHA256SUMS /tmp/export/evidence/
+          cp /tmp/replay/corrected/den-2725-final-replay.patch /tmp/export/evidence/
+          cp /tmp/replay/artifacts/*.json /tmp/export/evidence/
+          printf '%s\n' \
+            '# DEN-2725 verified final replay export' \
+            '' \
+            "Source run: $SOURCE_RUN_ID" \
+            "Root-dispatch commit: $ROOT_DISPATCH_COMMIT" \
+            "Current-main commit: $MAIN_COMMIT" \
+            "Verified product tree: $EXPECTED_TREE" \
+            '' \
+            'Only the eight product files at the repository root are intended for import. Evidence is retained under `evidence/`.' \
+            > /tmp/export/README.md
+
+      - name: Publish the export branch without affecting product history
+        run: |
+          set -euo pipefail
+          rm -rf product
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git checkout --orphan agent/den-2725-final-export
+          git rm -rf .
+          find . -mindepth 1 -maxdepth 1 ! -name .git -exec rm -rf {} +
+          cp -a /tmp/export/. .
+          chmod +x scripts/validate-zed-package-graph.sh
+          git add -A
+          git commit -m 'test(DEN-2725): publish verified final replay tree'
+          git push --force origin HEAD:refs/heads/agent/den-2725-final-export
