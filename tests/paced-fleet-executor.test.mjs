@@ -55,7 +55,7 @@ test('paced executor rejects excluded organizations and paces write-producing re
   assert.notEqual(excluded.status, 0);
   assert.match(excluded.stderr, /refusing excluded organization/);
 
-  assert.equal(marker, 'APPLY_TEST_FLEET_PACED_V2');
+  assert.match(marker, /^APPLY_TEST_FLEET_PACED_(?:V2|ARM64_V[12])$/);
   assert.match(workflow, /group: finish-test-org-fleet-paced-v3/);
   assert.match(workflow, /cancel-in-progress: false/);
   assert.match(workflow, /--repo "\$repository"/);

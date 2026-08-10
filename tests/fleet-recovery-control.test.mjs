@@ -31,11 +31,11 @@ test('one-time cancellation stops both superseded writers and nothing else', () 
   assert.equal(credentialLiteral.test(workflow), false);
 });
 
-test('v2 dispatcher waits for stale writers and launches one PAT-backed all-org apply', () => {
+test('v3 dispatcher waits for stale writers and launches one PAT-backed all-org apply', () => {
   const workflow = read('.github/workflows/dispatch-test-org-fleet-once.yml');
   const marker = read('bootstrap/execute-test-org-fleet-v2.once').trim();
 
-  assert.equal(marker, 'APPLY_TEST_FLEET_V2');
+  assert.equal(marker, 'APPLY_TEST_FLEET_V3');
   assert.match(workflow, /bootstrap\/execute-test-org-fleet-v2\.once/);
   assert.match(workflow, /STALE_RUN_IDS: "30972717804 30973196337"/);
   assert.match(workflow, /Wait for superseded fleet writers to stop/);

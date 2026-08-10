@@ -35,7 +35,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test "$(tr -d '\r\n' < bootstrap/execute-test-org-fleet-v2.once)" = "APPLY_TEST_FLEET_V2"
+          test "$(tr -d '\r\n' < bootstrap/execute-test-org-fleet-v2.once)" = "APPLY_TEST_FLEET_V3"
 
       - name: Wait for superseded fleet writers to stop
         shell: bash

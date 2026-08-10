@@ -25,10 +25,6 @@ function git(cwd, ...arguments_) {
   return result.stdout.trim();
 }
 
-function git(cwd, ...args) {
-  return childProcess.execFileSync('git', args, { cwd, encoding: 'utf8' }).trim();
-}
-
 test('git credential helper never dirties a generated repository worktree', () => {
   assert.match(launcher, /const worktree = fs\.mkdtempSync\(path\.join\(os\.tmpdir\(\), 'test-org-fleet-worktree-'\)\)/);
   assert.match(launcher, /const credentialDirectory = fs\.mkdtempSync\(path\.join\(os\.tmpdir\(\), 'test-org-fleet-credentials-'\)\)/);
