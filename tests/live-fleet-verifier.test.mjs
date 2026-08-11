@@ -18,17 +18,17 @@ test('live verifier parses and derives the complete non-r2g fleet', () => {
   assert.equal(syntax.status, 0, syntax.stderr);
 
   const specialized = manifest.pairs.reduce((total, pair) => total + pair.repositories.length, 0);
-  assert.equal(manifest.pairs.length, 18);
-  assert.equal(specialized, 301);
-  assert.equal(specialized + manifest.pairs.length, 319);
+  assert.equal(manifest.pairs.length, 19);
+  assert.equal(specialized, 322);
+  assert.equal(specialized + manifest.pairs.length, 341);
   assert.equal(
     manifest.pairs.some((pair) => ['r2g', 'r2g-test'].includes(pair.testOrg.toLowerCase())),
     false,
   );
 
-  assert.match(verifier, /expectedSpecialized !== 301/);
-  assert.match(verifier, /expectedGovernance !== 18/);
-  assert.match(verifier, /expected\.length !== 319/);
+  assert.match(verifier, /expectedSpecialized !== 322/);
+  assert.match(verifier, /expectedGovernance !== 19/);
+  assert.match(verifier, /expected\.length !== 341/);
   assert.match(verifier, /git\/ref\/heads/);
   assert.match(verifier, /pulls\?state=open&per_page=100/);
   assert.match(verifier, /missingOpenPullRequests/);
