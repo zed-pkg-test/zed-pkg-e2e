@@ -24,18 +24,26 @@ on:
   pull_request:
     paths:
       - ".github/workflows/verify-live-test-org-fleet.yml"
+      - "bootstrap/test-org-fleet.extensions.json"
+      - "scripts/fleet-manifest-extensions.mjs"
       - "scripts/verify-live-test-org-fleet.mjs"
       - "scripts/validate-test-org-fleet.mjs"
       - "scripts/read-fleet-manifest.mjs"
+      - "tests/fleet-manifest-extensions.test.mjs"
+      - "tests/quaestor-fleet-extension.test.mjs"
       - "tests/live-fleet-verifier.test.mjs"
       - "tests/workflow-trigger-references.test.mjs"
   push:
     branches: [main]
     paths:
       - ".github/workflows/verify-live-test-org-fleet.yml"
+      - "bootstrap/test-org-fleet.extensions.json"
+      - "scripts/fleet-manifest-extensions.mjs"
       - "scripts/verify-live-test-org-fleet.mjs"
       - "scripts/validate-test-org-fleet.mjs"
       - "scripts/read-fleet-manifest.mjs"
+      - "tests/fleet-manifest-extensions.test.mjs"
+      - "tests/quaestor-fleet-extension.test.mjs"
       - "tests/live-fleet-verifier.test.mjs"
       - "tests/workflow-trigger-references.test.mjs"
   workflow_dispatch:
@@ -65,7 +73,7 @@ jobs:
         run: |
           set -euo pipefail
           node --check scripts/verify-live-test-org-fleet.mjs
-          node --test tests/live-fleet-verifier.test.mjs
+          node --test tests/live-fleet-verifier.test.mjs tests/fleet-manifest-extensions.test.mjs tests/quaestor-fleet-extension.test.mjs
           node scripts/validate-test-org-fleet.mjs
 
       - name: Prove every workflow_run trigger in this repository resolves
@@ -77,7 +85,7 @@ jobs:
   verify-live:
     name: Verify all repositories, default branches, and open PRs
     needs: contract
-    # The live fleet is the state of 18 external organizations, not a property
+    # The live fleet is the state of 19 external organizations, not a property
     # of a pull request diff, and `secrets.FLEET_GH_TOKEN` is not exposed to
     # pull_request runs from forks. Live verification therefore runs on the
     # authoritative events — a completed fleet writer, a push to main, or a
@@ -131,9 +139,9 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
           if [[ "$status" -ne 0 ]]; then
-            echo '::error::The live fleet does not yet satisfy the exact 319-repository/PR contract.'
+            echo '::error::The live fleet does not yet satisfy the exact 341-repository/PR contract.'
             jq '.failures | with_entries(.value |= .[0:25])' "$report"
             exit "$status"
           fi
 
-          echo 'All 301 specialized repositories, all 18 governance repositories, their default branches, and open pull requests were verified.' >> "$GITHUB_STEP_SUMMARY"
+          echo 'All 322 specialized repositories, all 19 governance repositories, their default branches, and open pull requests were verified.' >> "$GITHUB_STEP_SUMMARY"
