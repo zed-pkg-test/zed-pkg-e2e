@@ -9,11 +9,12 @@ function replaceOnce(source, before, after, label) {
 }
 
 /**
- * Apply source-certification semantics to the generated test-org harness.
+ * Apply source-access semantics to the generated test-org harness.
  *
- * The large generator is stored as split source parts. Keeping this policy in a
- * small imported module makes the security boundary reviewable and unit-testable
- * without rewriting the generated fleet payload.
+ * The generic generated workflow can prove that its protected credential gate
+ * and generated plan ran. It cannot certify arbitrary product source without a
+ * product-specific executable overlay, so its status remains explicitly not
+ * certified even after a successful access/plan run.
  */
 export function hardenGeneratedIntegrationPolicy(input) {
   let source = input;
@@ -47,7 +48,7 @@ export function hardenGeneratedIntegrationPolicy(input) {
   const readmeBefore =
     'Full integration is intentionally release-gated until required source repositories and organization read credentials are present.';
   const readmeAfter =
-    'Product-specific files outside the generated file set are preserved and must add executable assertions without weakening the base contract. Full integration is intentionally release-gated until required source repositories and organization read credentials are present. A skipped integration job is not source certification; inspect the source-integration status artifact.';
+    'Product-specific files outside the generated file set are preserved and must add executable assertions without weakening the base contract. Full integration is intentionally release-gated until required source repositories and organization read credentials are present. The generic protected lane reports source-access status only; source certification requires a product-specific executable overlay. A skipped integration job is not source certification.';
   source = replaceOnce(
     source,
     readmeBefore,
@@ -72,7 +73,7 @@ export function hardenGeneratedIntegrationPolicy(input) {
     '        run: |\\n',
     '          set -euo pipefail\\n',
     '          test -n "$TEST_FLEET_READ_TOKEN"\\n',
-    "          printf 'protected source integration enabled\\\\n'\\n",
+    "          printf 'protected source access enabled\\\\n'\\n",
     '      - name: Check out source pins and submodules\\n',
   ].join('');
   source = replaceOnce(
@@ -98,7 +99,7 @@ export function hardenGeneratedIntegrationPolicy(input) {
     '          echo "Add product-specific executable fixtures here without weakening the generated contract."\\n',
     '\\n',
     '  certification-status:\\n',
-    '    name: Record protected source certification status\\n',
+    '    name: Record protected source access status\\n',
     '    if: always()\\n',
     '    needs: integration\\n',
     '    runs-on: ubuntu-24.04\\n',
@@ -114,15 +115,16 @@ export function hardenGeneratedIntegrationPolicy(input) {
     "          const result = process.env.RESULT || 'unknown';\\n",
     "          const enabled = process.env.ENABLED === 'true';\\n",
     "          const executed = result !== 'skipped';\\n",
-    "          const certified = result === 'success';\\n",
+    "          const sourceAccessPassed = result === 'success';\\n",
     '          const report = {\\n',
-    '            schemaVersion: 1,\\n',
+    '            schemaVersion: 2,\\n',
     '            enabled,\\n',
     '            executed,\\n',
-    '            certified,\\n',
+    '            sourceAccessPassed,\\n',
+    '            certified: false,\\n',
     '            result,\\n',
-    "            reason: certified ? 'protected-source-integration-passed'\\n",
-    "              : executed ? 'protected-source-integration-did-not-pass'\\n",
+    "            reason: sourceAccessPassed ? 'protected-source-access-passed-product-certification-required'\\n",
+    "              : executed ? 'protected-source-access-did-not-pass'\\n",
     "                : 'protected-source-integration-not-enabled',\\n",
     '          };\\n',
     "          fs.writeFileSync('source-integration-status.json', JSON.stringify(report, null, 2) + '\\\\n');\\n",
@@ -141,7 +143,7 @@ export function hardenGeneratedIntegrationPolicy(input) {
     source,
     tailBefore,
     tailAfter,
-    'protected integration certification status',
+    'protected integration source-access status',
   );
 
   return source;
