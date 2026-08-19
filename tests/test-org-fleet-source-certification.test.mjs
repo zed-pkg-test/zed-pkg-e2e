@@ -22,7 +22,7 @@ function hardened() {
   return hardenGeneratedIntegrationPolicy(generatedSource);
 }
 
-test('generated plans distinguish snapshot validation from protected source certification', () => {
+test('generated plans distinguish snapshots, source access, and product certification', () => {
   const source = hardened();
   assert.match(source, /protectedSourceIntegration: true/);
   assert.match(
@@ -30,6 +30,8 @@ test('generated plans distinguish snapshot validation from protected source cert
     /protectedSourceIntegrationStatus: 'not-executed-unless-protected-lane-runs'/,
   );
   assert.match(source, /productOverlayPreserved: true/);
+  assert.match(source, /generic protected lane reports source-access status only/);
+  assert.match(source, /source certification requires a product-specific executable overlay/);
   assert.match(source, /A skipped integration job is not source certification/);
 });
 
@@ -44,13 +46,16 @@ test('generated integration never falls back to the repository GITHUB_TOKEN', ()
   assert.match(source, /persist-credentials: false/);
 });
 
-test('generated status artifact records skipped as not executed and not certified', () => {
+test('generic status artifact can report source access but never product certification', () => {
   const source = hardened();
-  assert.match(source, /name: Record protected source certification status/);
+  assert.match(source, /name: Record protected source access status/);
   assert.match(source, /if: always\(\)/);
   assert.match(source, /needs: integration/);
   assert.match(source, /const executed = result !== 'skipped'/);
-  assert.match(source, /const certified = result === 'success'/);
+  assert.match(source, /const sourceAccessPassed = result === 'success'/);
+  assert.match(source, /certified: false/);
+  assert.doesNotMatch(source, /const certified = result === 'success'/);
+  assert.match(source, /protected-source-access-passed-product-certification-required/);
   assert.match(source, /protected-source-integration-not-enabled/);
   assert.match(source, /source-integration-status-/);
   assert.match(
@@ -89,6 +94,9 @@ test('source certification documentation preserves the security and evidence mea
   );
   assert.match(sourceCertificationDocumentation, /must not fall back to `github\.token`/);
   assert.match(sourceCertificationDocumentation, /Product-specific overlays are preserved/);
+  assert.match(sourceCertificationDocumentation, /generic generated lane/i);
+  assert.match(sourceCertificationDocumentation, /source access/i);
+  assert.match(sourceCertificationDocumentation, /product-specific executable/i);
   assert.match(sourceCertificationDocumentation, /`executed`/);
   assert.match(sourceCertificationDocumentation, /`certified`/);
   assert.match(sourceCertificationDocumentation, /Never choose an entire conflict side/);
