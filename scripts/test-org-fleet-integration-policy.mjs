@@ -9,7 +9,7 @@ function replaceOnce(source, before, after, label) {
 }
 
 /**
- * Apply source-access semantics to the generated test-org harness.
+ * Apply source-access and execution semantics to the generated test-org harness.
  *
  * The generic generated workflow can prove that its protected credential gate
  * and generated plan ran. It cannot certify arbitrary product source without a
@@ -54,6 +54,36 @@ export function hardenGeneratedIntegrationPolicy(input) {
     readmeBefore,
     readmeAfter,
     'generated README integration boundary',
+  );
+
+  const concurrencyBefore = [
+    'name: gated integration\\n\\n',
+    'on:\\n',
+    '  workflow_dispatch:\\n',
+    '  schedule:\\n',
+    "    - cron: '17 8 * * *'\\n\\n",
+    'permissions:\\n',
+    '  contents: read\\n\\n',
+    'jobs:\\n',
+  ].join('');
+  const concurrencyAfter = [
+    'name: gated integration\\n\\n',
+    'on:\\n',
+    '  workflow_dispatch:\\n',
+    '  schedule:\\n',
+    "    - cron: '17 8 * * *'\\n\\n",
+    'permissions:\\n',
+    '  contents: read\\n\\n',
+    'concurrency:\\n',
+    '  group: \\${{ github.workflow }}-\\${{ github.ref }}\\n',
+    '  cancel-in-progress: true\\n\\n',
+    'jobs:\\n',
+  ].join('');
+  source = replaceOnce(
+    source,
+    concurrencyBefore,
+    concurrencyAfter,
+    'generated integration concurrency',
   );
 
   source = replaceOnce(
