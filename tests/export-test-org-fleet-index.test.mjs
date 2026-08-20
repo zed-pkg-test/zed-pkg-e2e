@@ -16,15 +16,15 @@ function loadIndex() {
   return JSON.parse(result.stdout);
 }
 
-test('exports the exact live 360-repository portfolio', () => {
+test('exports the exact live 363-repository portfolio', () => {
   const index = loadIndex();
   assert.equal(index.schemaVersion, 1);
   assert.equal(index.pairCount, 19);
   assert.equal(index.retainedRepositoryCount, 22);
-  assert.equal(index.specializedRepositoryCount, 319);
+  assert.equal(index.specializedRepositoryCount, 322);
   assert.equal(index.governanceRepositoryCount, 19);
-  assert.equal(index.managedRepositoryCount, 338);
-  assert.equal(index.expectedRepositoryCount, 360);
+  assert.equal(index.managedRepositoryCount, 341);
+  assert.equal(index.expectedRepositoryCount, 363);
   assert.deepEqual(index.excludedOrganizations.sort(), ['r2g', 'r2g-test']);
 });
 
@@ -56,4 +56,5 @@ test('keeps the canonical high-depth product counts stable', () => {
   assert.equal(byName.get('file-tunnel-test').specializedCount, 17);
   assert.equal(byName.get('hacker-house-medellin-test').specializedCount, 18);
   assert.equal(byName.get('streempilot-test').specializedCount, 20);
+  assert.equal(byName.get('quaestor-ledger-test').specializedCount, 19);
 });

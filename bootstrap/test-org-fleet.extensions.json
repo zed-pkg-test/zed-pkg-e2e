@@ -1,0 +1,64 @@
+{
+  "schemaVersion": 1,
+  "description": "Auditable additive repositories that extend the deterministic compressed fleet manifest.",
+  "pairs": [
+    {
+      "sourceOrg": "quaestor-ledger",
+      "testOrg": "quaestor-ledger-test",
+      "repositories": [
+        {
+          "name": "tenant-isolation-e2e",
+          "state": "create",
+          "profile": "security-e2e",
+          "sources": [
+            "quaestor-ledger/quaestor-ledger-server.rs",
+            "quaestor-ledger/quaestor-web-server.rs",
+            "shared-auth/shared-auth-server.rs"
+          ],
+          "focus": [
+            "cross-tenant read rejection",
+            "cross-tenant write rejection",
+            "JWT and Supabase tenant-claim mismatch",
+            "tenant-scoped idempotency namespaces",
+            "audit-event ownership and redaction"
+          ],
+          "imports": []
+        },
+        {
+          "name": "webhook-auth-replay-e2e",
+          "state": "create",
+          "profile": "security-e2e",
+          "sources": [
+            "quaestor-ledger/quaestor-ledger-server.rs",
+            "quaestor-ledger/quaestor-executor"
+          ],
+          "focus": [
+            "HMAC signature verification",
+            "timestamp skew rejection",
+            "nonce and event replay rejection",
+            "payload tamper rejection",
+            "redacted webhook audit evidence"
+          ],
+          "imports": []
+        },
+        {
+          "name": "migration-recovery-e2e",
+          "state": "create",
+          "profile": "database-e2e",
+          "sources": [
+            "quaestor-ledger/quaestor-ledger-server.rs",
+            "quaestor-ledger/quaestor-infra"
+          ],
+          "focus": [
+            "forward and backward migration safety",
+            "backup restore verification",
+            "point-in-time recovery",
+            "closed-period durability",
+            "tenant and audit integrity after recovery"
+          ],
+          "imports": []
+        }
+      ]
+    }
+  ]
+}
