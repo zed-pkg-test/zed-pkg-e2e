@@ -20,7 +20,7 @@ env:
   ORM_API_SHA: c3d486a1519381276fbec02aa25247f542924443
   ORM_WEB_SHA: 34333b5ea5c0ee7862bfe0366fe9fa2b1c4bd210
   API_SHA: 0ab2e31bfedf102dc61a11f6b246e01f30dda49d
-  WEB_SHA: c6d891b30d0360b366b357a7be4e4e1c296db317
+  WEB_SHA: 5b486e1b6956ef63ef49f6391dbec13274b8165d
   WEB_MAIN_PARENT: 8889cc4978d732e843866085556ef330bf008721
   DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/postgres
 
@@ -66,7 +66,7 @@ jobs:
           path: zed-api-server.rs
           persist-credentials: false
 
-      - name: Checkout exact web candidate
+      - name: Checkout exact web production tree
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           repository: zed-pkg/zed-web-server.rs
