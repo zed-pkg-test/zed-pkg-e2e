@@ -1,0 +1,326 @@
+name: DEN-3524 production dependency-graph chain
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/den-3524-production-chain.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: den-3524-production-chain-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  SCHEMA_SHA: a1fb823890d4a36dfab67c311f0d728d7b22c1c9
+  SCHEMA_REGISTRY_BLOB: c0869ca29c10e1c77bd9d9b8236fc61eac826ab9
+  SCHEMA_VISIBILITY_BLOB: 8612f037dce7de6d7db66ee96db7996b33b32ea9
+  ORM_API_SHA: c3d486a1519381276fbec02aa25247f542924443
+  ORM_WEB_SHA: 34333b5ea5c0ee7862bfe0366fe9fa2b1c4bd210
+  API_SHA: 0ab2e31bfedf102dc61a11f6b246e01f30dda49d
+  WEB_SHA: c6d891b30d0360b366b357a7be4e4e1c296db317
+  WEB_MAIN_PARENT: 8889cc4978d732e843866085556ef330bf008721
+  DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/postgres
+
+jobs:
+  certify:
+    name: schema → ORM → API → web exact-head certification
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d postgres"
+          --health-interval 3s
+          --health-timeout 3s
+          --health-retries 30
+
+    steps:
+      - name: Checkout certification authority
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          path: zed-pkg-e2e
+          persist-credentials: false
+
+      - name: Checkout exact ORM release graph
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          repository: zed-pkg/zed-lib-core
+          ref: ${{ env.ORM_WEB_SHA }}
+          path: zed-lib-core
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Checkout exact API production tree
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          repository: zed-pkg/zed-api-server.rs
+          ref: ${{ env.API_SHA }}
+          path: zed-api-server.rs
+          persist-credentials: false
+
+      - name: Checkout exact web candidate
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          repository: zed-pkg/zed-web-server.rs
+          ref: ${{ env.WEB_SHA }}
+          path: zed-web-server.rs
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Verify immutable commit and blob provenance
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git -C zed-lib-core rev-parse HEAD)" = "$ORM_WEB_SHA"
+          test "$(git -C zed-api-server.rs rev-parse HEAD)" = "$API_SHA"
+          test "$(git -C zed-web-server.rs rev-parse HEAD)" = "$WEB_SHA"
+
+          git -C zed-lib-core cat-file -e "${ORM_API_SHA}^{commit}"
+          git -C zed-lib-core merge-base --is-ancestor "$ORM_API_SHA" "$ORM_WEB_SHA"
+          git -C zed-web-server.rs cat-file -e "${WEB_MAIN_PARENT}^{commit}"
+          git -C zed-web-server.rs merge-base --is-ancestor "$WEB_MAIN_PARENT" "$WEB_SHA"
+
+          test "$(git -C zed-lib-core rev-parse "${ORM_API_SHA}:src/rust-orm/sql/registry.sql")" = "$SCHEMA_REGISTRY_BLOB"
+          test "$(git -C zed-lib-core rev-parse "${ORM_API_SHA}:src/rust-orm/sql/2026-08-11-public-visibility-is-permanent.sql")" = "$SCHEMA_VISIBILITY_BLOB"
+          test "$(git -C zed-lib-core rev-parse "${ORM_WEB_SHA}:src/rust-orm/sql/registry.sql")" = "$SCHEMA_REGISTRY_BLOB"
+          test "$(git -C zed-lib-core rev-parse "${ORM_WEB_SHA}:src/rust-orm/sql/2026-08-11-public-visibility-is-permanent.sql")" = "$SCHEMA_VISIBILITY_BLOB"
+
+      - name: Verify schema, ORM, API, and web pin chain
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p evidence
+          git -C zed-lib-core show "${ORM_API_SHA}:shared-defs.lock.json" > evidence/orm-api-shared-defs.lock.json
+          git -C zed-lib-core show "${ORM_WEB_SHA}:shared-defs.lock.json" > evidence/orm-web-shared-defs.lock.json
+
+          python3 - <<'PY'
+          import json
+          import os
+          import pathlib
+          import tomllib
+
+          root = pathlib.Path('.')
+          expected = {
+              'revision': os.environ['SCHEMA_SHA'],
+              'registry_blob_sha': os.environ['SCHEMA_REGISTRY_BLOB'],
+              'visibility_immutability_revision': os.environ['SCHEMA_SHA'],
+              'visibility_immutability_blob_sha': os.environ['SCHEMA_VISIBILITY_BLOB'],
+          }
+          for name in ('orm-api-shared-defs.lock.json', 'orm-web-shared-defs.lock.json'):
+              lock = json.loads((root / 'evidence' / name).read_text())
+              for key, value in expected.items():
+                  assert lock[key] == value, (name, key, lock[key], value)
+              assert lock['vendored_copy'] == 'src/rust-orm/sql/registry.sql'
+              assert lock['vendored_visibility_immutability_migration'] == (
+                  'src/rust-orm/sql/2026-08-11-public-visibility-is-permanent.sql'
+              )
+
+          api_manifest = tomllib.loads((root / 'zed-api-server.rs' / 'Cargo.toml').read_text())
+          api_spec = api_manifest['dependencies']['zed-orm-core']
+          assert api_spec['git'] == 'https://github.com/zed-pkg/zed-lib-core.git'
+          assert api_spec['rev'] == os.environ['ORM_API_SHA']
+          assert set(api_spec['features']) == {'read-write', 'migrate'}
+          api_lock = (root / 'zed-api-server.rs' / 'Cargo.lock').read_text()
+          assert (
+              f"git+https://github.com/zed-pkg/zed-lib-core.git?rev={os.environ['ORM_API_SHA']}#"
+              f"{os.environ['ORM_API_SHA']}"
+          ) in api_lock
+
+          web_manifest = tomllib.loads((root / 'zed-web-server.rs' / 'Cargo.toml').read_text())
+          web_spec = web_manifest['dependencies']['zed-orm-core']
+          assert web_spec['git'] == 'https://github.com/zed-pkg/zed-lib-core.git'
+          assert web_spec['rev'] == os.environ['ORM_WEB_SHA']
+          assert 'features' not in web_spec, 'web must retain the default read-only ORM surface'
+          web_lock = (root / 'zed-web-server.rs' / 'Cargo.lock').read_text()
+          assert (
+              f"git+https://github.com/zed-pkg/zed-lib-core.git?rev={os.environ['ORM_WEB_SHA']}#"
+              f"{os.environ['ORM_WEB_SHA']}"
+          ) in web_lock
+
+          for workflow in (
+              root / 'zed-web-server.rs' / '.github' / 'workflows' / 'ci.yml',
+              root / 'zed-web-server.rs' / '.github' / 'workflows' / 'publish-container.yml',
+          ):
+              content = workflow.read_text()
+              assert f"ZED_LIB_CORE_SHA: {os.environ['ORM_WEB_SHA']}" in content
+          PY
+
+          git -C zed-lib-core show "${ORM_API_SHA}:src/rust-orm/sql/2026-08-11-public-visibility-is-permanent.sql" \
+            | grep -Fq "using errcode = 'ZD003'"
+          git -C zed-lib-core show "${ORM_WEB_SHA}:src/rust-orm/sql/2026-08-11-public-visibility-is-permanent.sql" \
+            | grep -Fq "using errcode = 'ZD003'"
+
+      - name: Prove the exact vendored migration on PostgreSQL 17
+        shell: bash
+        run: |
+          set -euo pipefail
+          git -C zed-lib-core show "${ORM_API_SHA}:src/rust-orm/sql/registry.sql" \
+            | psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -q
+          for _ in 1 2; do
+            git -C zed-lib-core show "${ORM_API_SHA}:src/rust-orm/sql/2026-08-11-public-visibility-is-permanent.sql" \
+              | psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -q
+          done
+
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 <<'SQL'
+          do $$
+          declare
+            org_id uuid;
+            public_id uuid;
+            promotable_id uuid;
+            old_private_id uuid;
+            popular_private_id uuid;
+          begin
+            insert into zed_orgs (slug, name)
+            values ('den-3524-cert', 'DEN-3524 certification')
+            returning id into org_id;
+
+            insert into zed_packages (org_id, name, visibility)
+            values (org_id, 'public-package', 'public')
+            returning id into public_id;
+
+            begin
+              update zed_packages set visibility = 'private' where id = public_id;
+              raise exception 'public to private unexpectedly succeeded';
+            exception when sqlstate 'ZD003' then
+              null;
+            end;
+
+            begin
+              update zed_packages set visibility = 'internal' where id = public_id;
+              raise exception 'public to internal unexpectedly succeeded';
+            exception when sqlstate 'ZD003' then
+              null;
+            end;
+
+            if (select visibility from zed_packages where id = public_id) <> 'public' then
+              raise exception 'failed ZD003 transitions changed durable visibility';
+            end if;
+
+            insert into zed_packages (org_id, name, visibility, download_count)
+            values (org_id, 'promotable-package', 'private', 0)
+            returning id into promotable_id;
+            update zed_packages set visibility = 'public' where id = promotable_id;
+            if (select visibility from zed_packages where id = promotable_id) <> 'public' then
+              raise exception 'valid private to public promotion failed';
+            end if;
+
+            insert into zed_packages (org_id, name, visibility, created_at)
+            values (org_id, 'old-private-package', 'private', now() - interval '11 days')
+            returning id into old_private_id;
+            begin
+              update zed_packages set visibility = 'public' where id = old_private_id;
+              raise exception 'old private package unexpectedly became public';
+            exception when sqlstate 'ZD001' then
+              null;
+            end;
+
+            insert into zed_packages (org_id, name, visibility, download_count)
+            values (org_id, 'popular-private-package', 'private', 51)
+            returning id into popular_private_id;
+            begin
+              update zed_packages set visibility = 'public' where id = popular_private_id;
+              raise exception 'popular private package unexpectedly became public';
+            exception when sqlstate 'ZD002' then
+              null;
+            end;
+          end;
+          $$;
+
+          select case
+            when p.proname = 'zed_enforce_package_visibility_transition'
+             and t.tgname = 'zed_packages_visibility_guard'
+            then 'visibility trigger bound to certified function'
+            else 'unexpected trigger binding'
+          end as certification
+          from pg_trigger t
+          join pg_proc p on p.oid = t.tgfoid
+          where t.tgname = 'zed_packages_visibility_guard';
+          SQL
+
+      - name: Publish machine-readable exact-head evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json
+          import os
+          import pathlib
+          import subprocess
+
+          def sha(path: str) -> str:
+              return subprocess.check_output(['git', '-C', path, 'rev-parse', 'HEAD'], text=True).strip()
+
+          evidence = {
+              'schema': {
+                  'repository': 'ORESoftware/k8s-libs-and-shared-defs',
+                  'commit': os.environ['SCHEMA_SHA'],
+                  'registry_blob': os.environ['SCHEMA_REGISTRY_BLOB'],
+                  'visibility_migration_blob': os.environ['SCHEMA_VISIBILITY_BLOB'],
+                  'access': 'verified through exact public ORM vendored blobs; private source is not mirrored',
+              },
+              'orm': {
+                  'repository': 'zed-pkg/zed-lib-core',
+                  'api_revision': os.environ['ORM_API_SHA'],
+                  'web_revision': os.environ['ORM_WEB_SHA'],
+                  'checked_out_revision': sha('zed-lib-core'),
+                  'api_revision_is_ancestor_of_web_revision': True,
+              },
+              'api': {
+                  'repository': 'zed-pkg/zed-api-server.rs',
+                  'commit': sha('zed-api-server.rs'),
+                  'orm_revision': os.environ['ORM_API_SHA'],
+                  'orm_features': ['read-write', 'migrate'],
+              },
+              'web': {
+                  'repository': 'zed-pkg/zed-web-server.rs',
+                  'commit': sha('zed-web-server.rs'),
+                  'main_parent': os.environ['WEB_MAIN_PARENT'],
+                  'orm_revision': os.environ['ORM_WEB_SHA'],
+                  'orm_surface': 'read-only default',
+              },
+              'postgresql': {
+                  'version': 17,
+                  'migration_replays': 2,
+                  'public_to_private': 'rejected with ZD003',
+                  'public_to_internal': 'rejected with ZD003',
+                  'valid_private_to_public': 'accepted',
+                  'old_private_to_public': 'rejected with ZD001',
+                  'popular_private_to_public': 'rejected with ZD002',
+              },
+              'github': {
+                  'repository': os.environ.get('GITHUB_REPOSITORY'),
+                  'run_id': os.environ.get('GITHUB_RUN_ID'),
+                  'run_attempt': os.environ.get('GITHUB_RUN_ATTEMPT'),
+                  'source_sha': os.environ.get('GITHUB_SHA'),
+              },
+          }
+          target = pathlib.Path('evidence/den-3524-production-chain.json')
+          target.write_text(json.dumps(evidence, indent=2, sort_keys=True) + '\n')
+          summary = pathlib.Path(os.environ['GITHUB_STEP_SUMMARY'])
+          with summary.open('a') as stream:
+              stream.write('## DEN-3524 exact-head production chain\n\n')
+              stream.write(f"- Schema: `{os.environ['SCHEMA_SHA']}`\n")
+              stream.write(f"- ORM for API: `{os.environ['ORM_API_SHA']}`\n")
+              stream.write(f"- ORM for web: `{os.environ['ORM_WEB_SHA']}`\n")
+              stream.write(f"- API: `{os.environ['API_SHA']}`\n")
+              stream.write(f"- Web: `{os.environ['WEB_SHA']}`\n")
+              stream.write('- PostgreSQL 17: ZD001/ZD002/ZD003 transition matrix passed\n')
+          PY
+          cat evidence/den-3524-production-chain.json
+
+      - name: Upload exact-head evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: den-3524-production-chain-${{ github.run_id }}
+          path: evidence/den-3524-production-chain.json
+          if-no-files-found: error
+          retention-days: 30
