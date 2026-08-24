@@ -92,7 +92,9 @@ and the explicitly checked-out sibling both use
 `8428bc574111fa148e590c8350c7855035ce2046`, which contains the canonical
 whole-repository target identity contract. Keeping those two interface pins
 identical prevents the test harness from compiling one contract while
-reporting evidence for another.
+reporting evidence for another. The candidate smoke workflow uses the same
+product pair and rejects drift from `.zed-cli-ref` before it builds or runs any
+fixture.
 
 Record the smoke workflow run and any later lifecycle, browser, and
 install-boundary runs on the owning Linear issue. A smoke failure must be
