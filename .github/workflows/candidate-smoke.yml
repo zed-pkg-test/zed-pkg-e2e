@@ -12,7 +12,7 @@ on:
       zed_cli_ref:
         description: Exact 40-character zed-pkg/zed-cli commit to test
         required: false
-        default: 3a91d64abf1fc0bdee6eab2ff804113b1429849f
+        default: d8763b8dcc3bd5c5b6b4b1d13519065a6a2cb99a
         type: string
       harness_ref:
         description: Exact 40-character zed-pkg-test/zed-pkg-e2e commit
@@ -22,7 +22,7 @@ on:
         description: JSON array of pinned fixture repository/ref objects
         required: false
         default: >-
-          [{"repo":"node-lib","ref":"2d41e658a382fdff27ef87a0db24dbaff280a685"},{"repo":"node-app","ref":"ef794674647b3620e711f4f855865f8ad3340498"},{"repo":"rust-lib","ref":"f2534ffafbc4f7e900075dfc8e48b9259aced2fe"},{"repo":"rust-app","ref":"38b0a5425176a53621d1c07be791701dbd30eefe"},{"repo":"go-lib","ref":"e09dec6790a60ba75d5d338eece1068a4b8454b1"},{"repo":"go-app","ref":"8e035feb84cf80a294e631bda4ea7a44b1c4d7cf"},{"repo":"python-lib","ref":"b2db8ce2962fbaae690db7a9dabd14eb1d0362de"},{"repo":"python-app","ref":"a0c58cc6942a8cd30ad5eb318b9ada2fa9b2edb1"},{"repo":"polyglot-lib","ref":"e62ceb6337324a294d4fc861692a267ff0db97d0"},{"repo":"workspace-monorepo","ref":"72c47a51887733b9035bac1a3efdbf92880ef791"},{"repo":"multiversion-lib","ref":"ba9ee7269559a122f2b58fb89f134aaa4b7d0aee"},{"repo":"awkward-lib","ref":"3e24f62ef4df5d8bfc6e63df07d28eaf1f4dac9e"},{"repo":"submodule-consumer","ref":"bc193f9d805e286c95e9b0c49580c5171224e45c"},{"repo":"subtree-consumer","ref":"3da0c249e481104a8c9058e6107dd47f8a80b10f"},{"repo":"shared-schema","ref":"c3fe49a621337be58b16717fb1acb57139a29b45"}]
+          [{"repo":"node-lib","ref":"2d41e658a382fdff27ef87a0db24dbaff280a685"},{"repo":"node-app","ref":"ef794674647b3620e711f4f855865f8ad3340498"},{"repo":"rust-lib","ref":"f2534ffafbc4f7e900075dfc8e48b9259aced2fe"},{"repo":"rust-app","ref":"38b0a5425176a53621d1c07be791701dbd30eefe"},{"repo":"go-lib","ref":"e09dec6790a60ba75d5d338eece1068a4b8454b1"},{"repo":"go-app","ref":"8e035feb84cf80a294e631bda4ea7a44b1c4d7cf"},{"repo":"python-lib","ref":"b2db8ce2962fbaae690db7a9dabd14eb1d0362de"},{"repo":"python-app","ref":"a0c58cc6942a8cd30ad5eb318b9ada2fa9b2edb1"},{"repo":"polyglot-lib","ref":"e62ceb6337324a294d4fc861692a267ff0db97d0"},{"repo":"workspace-monorepo","ref":"72c47a51887733b9035bac1a3efdbf92880ef791"},{"repo":"multiversion-lib","ref":"ba9ee7269559a122f2b58fb89f134aaa4b7d0aee"},{"repo":"awkward-lib","ref":"6ccc922f4cb27b4a3de5f0e113c4bbf20d736300"},{"repo":"submodule-consumer","ref":"bc193f9d805e286c95e9b0c49580c5171224e45c"},{"repo":"subtree-consumer","ref":"3da0c249e481104a8c9058e6107dd47f8a80b10f"},{"repo":"shared-schema","ref":"90d976b2d1d97f2e1c301eac35f88574e7aeee4d"}]
         type: string
   workflow_call:
     inputs:
@@ -38,7 +38,7 @@ on:
         description: JSON array of pinned fixture repository/ref objects
         required: false
         default: >-
-          [{"repo":"node-lib","ref":"2d41e658a382fdff27ef87a0db24dbaff280a685"},{"repo":"node-app","ref":"ef794674647b3620e711f4f855865f8ad3340498"},{"repo":"rust-lib","ref":"f2534ffafbc4f7e900075dfc8e48b9259aced2fe"},{"repo":"rust-app","ref":"38b0a5425176a53621d1c07be791701dbd30eefe"},{"repo":"go-lib","ref":"e09dec6790a60ba75d5d338eece1068a4b8454b1"},{"repo":"go-app","ref":"8e035feb84cf80a294e631bda4ea7a44b1c4d7cf"},{"repo":"python-lib","ref":"b2db8ce2962fbaae690db7a9dabd14eb1d0362de"},{"repo":"python-app","ref":"a0c58cc6942a8cd30ad5eb318b9ada2fa9b2edb1"},{"repo":"polyglot-lib","ref":"e62ceb6337324a294d4fc861692a267ff0db97d0"},{"repo":"workspace-monorepo","ref":"72c47a51887733b9035bac1a3efdbf92880ef791"},{"repo":"multiversion-lib","ref":"ba9ee7269559a122f2b58fb89f134aaa4b7d0aee"},{"repo":"awkward-lib","ref":"3e24f62ef4df5d8bfc6e63df07d28eaf1f4dac9e"},{"repo":"submodule-consumer","ref":"bc193f9d805e286c95e9b0c49580c5171224e45c"},{"repo":"subtree-consumer","ref":"3da0c249e481104a8c9058e6107dd47f8a80b10f"},{"repo":"shared-schema","ref":"c3fe49a621337be58b16717fb1acb57139a29b45"}]
+          [{"repo":"node-lib","ref":"2d41e658a382fdff27ef87a0db24dbaff280a685"},{"repo":"node-app","ref":"ef794674647b3620e711f4f855865f8ad3340498"},{"repo":"rust-lib","ref":"f2534ffafbc4f7e900075dfc8e48b9259aced2fe"},{"repo":"rust-app","ref":"38b0a5425176a53621d1c07be791701dbd30eefe"},{"repo":"go-lib","ref":"e09dec6790a60ba75d5d338eece1068a4b8454b1"},{"repo":"go-app","ref":"8e035feb84cf80a294e631bda4ea7a44b1c4d7cf"},{"repo":"python-lib","ref":"b2db8ce2962fbaae690db7a9dabd14eb1d0362de"},{"repo":"python-app","ref":"a0c58cc6942a8cd30ad5eb318b9ada2fa9b2edb1"},{"repo":"polyglot-lib","ref":"e62ceb6337324a294d4fc861692a267ff0db97d0"},{"repo":"workspace-monorepo","ref":"72c47a51887733b9035bac1a3efdbf92880ef791"},{"repo":"multiversion-lib","ref":"ba9ee7269559a122f2b58fb89f134aaa4b7d0aee"},{"repo":"awkward-lib","ref":"6ccc922f4cb27b4a3de5f0e113c4bbf20d736300"},{"repo":"submodule-consumer","ref":"bc193f9d805e286c95e9b0c49580c5171224e45c"},{"repo":"subtree-consumer","ref":"3da0c249e481104a8c9058e6107dd47f8a80b10f"},{"repo":"shared-schema","ref":"90d976b2d1d97f2e1c301eac35f88574e7aeee4d"}]
         type: string
 
 permissions:
@@ -55,9 +55,9 @@ defaults:
 env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: "1"
-  ZED_CLI_REF: ${{ inputs.zed_cli_ref || '3a91d64abf1fc0bdee6eab2ff804113b1429849f' }}
+  ZED_CLI_REF: ${{ inputs.zed_cli_ref || 'd8763b8dcc3bd5c5b6b4b1d13519065a6a2cb99a' }}
   HARNESS_REF: ${{ inputs.harness_ref || github.event.pull_request.head.sha || github.sha }}
-  ZED_INTERFACES_REF: dc0e0a0620b9462817950b552d3d334a184b1cb1
+  ZED_INTERFACES_REF: 8428bc574111fa148e590c8350c7855035ce2046
 
 jobs:
   contract:
@@ -68,16 +68,24 @@ jobs:
       fixtures: ${{ steps.validate.outputs.fixtures }}
       fixture_refs: ${{ steps.validate.outputs.fixture_refs }}
     steps:
+      - name: Check out the reviewed harness baseline
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+          show-progress: false
+
       - name: Validate exact refs and fixture matrix
         id: validate
         env:
           FIXTURES_JSON: >-
-            ${{ inputs.fixtures_json || '[{"repo":"node-lib","ref":"2d41e658a382fdff27ef87a0db24dbaff280a685"},{"repo":"node-app","ref":"ef794674647b3620e711f4f855865f8ad3340498"},{"repo":"rust-lib","ref":"f2534ffafbc4f7e900075dfc8e48b9259aced2fe"},{"repo":"rust-app","ref":"38b0a5425176a53621d1c07be791701dbd30eefe"},{"repo":"go-lib","ref":"e09dec6790a60ba75d5d338eece1068a4b8454b1"},{"repo":"go-app","ref":"8e035feb84cf80a294e631bda4ea7a44b1c4d7cf"},{"repo":"python-lib","ref":"b2db8ce2962fbaae690db7a9dabd14eb1d0362de"},{"repo":"python-app","ref":"a0c58cc6942a8cd30ad5eb318b9ada2fa9b2edb1"},{"repo":"polyglot-lib","ref":"e62ceb6337324a294d4fc861692a267ff0db97d0"},{"repo":"workspace-monorepo","ref":"72c47a51887733b9035bac1a3efdbf92880ef791"},{"repo":"multiversion-lib","ref":"ba9ee7269559a122f2b58fb89f134aaa4b7d0aee"},{"repo":"awkward-lib","ref":"3e24f62ef4df5d8bfc6e63df07d28eaf1f4dac9e"},{"repo":"submodule-consumer","ref":"bc193f9d805e286c95e9b0c49580c5171224e45c"},{"repo":"subtree-consumer","ref":"3da0c249e481104a8c9058e6107dd47f8a80b10f"},{"repo":"shared-schema","ref":"c3fe49a621337be58b16717fb1acb57139a29b45"}]' }}
+            ${{ inputs.fixtures_json || '[{"repo":"node-lib","ref":"2d41e658a382fdff27ef87a0db24dbaff280a685"},{"repo":"node-app","ref":"ef794674647b3620e711f4f855865f8ad3340498"},{"repo":"rust-lib","ref":"f2534ffafbc4f7e900075dfc8e48b9259aced2fe"},{"repo":"rust-app","ref":"38b0a5425176a53621d1c07be791701dbd30eefe"},{"repo":"go-lib","ref":"e09dec6790a60ba75d5d338eece1068a4b8454b1"},{"repo":"go-app","ref":"8e035feb84cf80a294e631bda4ea7a44b1c4d7cf"},{"repo":"python-lib","ref":"b2db8ce2962fbaae690db7a9dabd14eb1d0362de"},{"repo":"python-app","ref":"a0c58cc6942a8cd30ad5eb318b9ada2fa9b2edb1"},{"repo":"polyglot-lib","ref":"e62ceb6337324a294d4fc861692a267ff0db97d0"},{"repo":"workspace-monorepo","ref":"72c47a51887733b9035bac1a3efdbf92880ef791"},{"repo":"multiversion-lib","ref":"ba9ee7269559a122f2b58fb89f134aaa4b7d0aee"},{"repo":"awkward-lib","ref":"6ccc922f4cb27b4a3de5f0e113c4bbf20d736300"},{"repo":"submodule-consumer","ref":"bc193f9d805e286c95e9b0c49580c5171224e45c"},{"repo":"subtree-consumer","ref":"3da0c249e481104a8c9058e6107dd47f8a80b10f"},{"repo":"shared-schema","ref":"90d976b2d1d97f2e1c301eac35f88574e7aeee4d"}]' }}
         run: |
           set -euo pipefail
           [[ "$ZED_CLI_REF" =~ ^[0-9a-f]{40}$ ]]
           [[ "$HARNESS_REF" =~ ^[0-9a-f]{40}$ ]]
           [[ "$ZED_INTERFACES_REF" =~ ^[0-9a-f]{40}$ ]]
+          test "$(tr -d '\r\n' < .zed-cli-ref)" = "$ZED_CLI_REF"
           python3 - <<'PY'
           import json
           import os
@@ -177,6 +185,8 @@ jobs:
           set -euo pipefail
           test "$(git -C zed-cli rev-parse HEAD)" = "$ZED_CLI_REF"
           test "$(git -C zed-interfaces rev-parse HEAD)" = "$ZED_INTERFACES_REF"
+          grep -F "rev = \"$ZED_INTERFACES_REF\"" zed-cli/Cargo.toml
+          grep -F "rev=$ZED_INTERFACES_REF#$ZED_INTERFACES_REF" zed-cli/Cargo.lock
           cargo fmt --all --check --manifest-path zed-cli/Cargo.toml
           cargo test --locked --manifest-path zed-cli/Cargo.toml --lib r2g::tests
           cargo build --locked --release --manifest-path zed-cli/Cargo.toml --bin zed
