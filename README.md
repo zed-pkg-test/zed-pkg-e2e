@@ -219,3 +219,15 @@ environment variables after the sibling stack is running.
 ## License
 
 MIT
+
+## Archived DEN-2725 replay evidence
+
+The preserved `evidence/den-2725-final-export/` namespace contains the verified
+final replay export from source run `31243116442`:
+
+- root-dispatch commit: `1c94813c6b59c7621c1256d7c55246e7f06f44b7`;
+- current-main commit: `0246a3af901b65ca6724d936c7f3232c9f72fcd7`; and
+- verified product tree: `99ab08e3142c2a52d2c97482134e99fae3811b43`.
+
+The original export identified eight root product files for import. They remain
+evidence only here and do not replace this repository's E2E control-plane tree.

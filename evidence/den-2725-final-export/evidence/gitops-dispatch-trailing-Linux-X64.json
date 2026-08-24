@@ -1,0 +1,11 @@
+{
+  "$schema": "zed-pkg-test/gitops-dispatch-trailing-options/v1",
+  "candidate": "1c94813c6b59c7621c1256d7c55246e7f06f44b7",
+  "checkCount": 3,
+  "checks": [
+    "recognized-trailing-root-options-are-lifted",
+    "literal-double-dash-terminates-root-option-extraction",
+    "malformed-trailing-root-boolean-fails-closed"
+  ],
+  "result": "passed"
+}
