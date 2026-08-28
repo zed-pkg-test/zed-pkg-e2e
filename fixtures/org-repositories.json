@@ -1,0 +1,122 @@
+{
+  "schema": "zed-pkg-test/repository-inventory-v1",
+  "organization": "zed-pkg-test",
+  "package_organizations": [
+    "zed-pkg-test",
+    "zedtest",
+    "zed-pkg"
+  ],
+  "orchestrator": "zed-pkg-e2e",
+  "repositories": [
+    {
+      "name": "node-lib",
+      "kind": "package",
+      "manifest": ".zpkg.toml"
+    },
+    {
+      "name": "node-app",
+      "kind": "package",
+      "manifest": ".zpkg.toml"
+    },
+    {
+      "name": "rust-lib",
+      "kind": "package",
+      "manifest": ".zpkg.toml"
+    },
+    {
+      "name": "rust-app",
+      "kind": "package",
+      "manifest": ".zpkg.toml"
+    },
+    {
+      "name": "go-lib",
+      "kind": "package",
+      "manifest": ".zpkg.toml"
+    },
+    {
+      "name": "go-app",
+      "kind": "package",
+      "manifest": ".zpkg.toml"
+    },
+    {
+      "name": "python-lib",
+      "kind": "package",
+      "manifest": ".zpkg.toml"
+    },
+    {
+      "name": "python-app",
+      "kind": "package",
+      "manifest": ".zpkg.toml"
+    },
+    {
+      "name": "dart-lib",
+      "kind": "package",
+      "manifest": ".zpkg.toml"
+    },
+    {
+      "name": "dart-app",
+      "kind": "package",
+      "manifest": ".zpkg.toml"
+    },
+    {
+      "name": "gleam-lib",
+      "kind": "package",
+      "manifest": ".zpkg.toml"
+    },
+    {
+      "name": "gleam-app",
+      "kind": "package",
+      "manifest": ".zpkg.toml"
+    },
+    {
+      "name": "polyglot-lib",
+      "kind": "package",
+      "manifest": ".zpkg.toml"
+    },
+    {
+      "name": "polyglot-node-app",
+      "kind": "package",
+      "manifest": ".zpkg.toml"
+    },
+    {
+      "name": "polyglot-go-app",
+      "kind": "package",
+      "manifest": ".zpkg.toml"
+    },
+    {
+      "name": "multiversion-lib",
+      "kind": "package",
+      "manifest": ".zpkg.toml"
+    },
+    {
+      "name": "awkward-lib",
+      "kind": "package",
+      "manifest": ".zpkg.toml"
+    },
+    {
+      "name": "subtree-consumer",
+      "kind": "package",
+      "manifest": ".zpkg.toml"
+    },
+    {
+      "name": "submodule-consumer",
+      "kind": "package",
+      "manifest": ".zpkg.toml"
+    },
+    {
+      "name": "workspace-monorepo",
+      "kind": "package",
+      "manifest": ".zpkg.toml"
+    },
+    {
+      "name": "shared-schema",
+      "kind": "package",
+      "manifest": ".zpkg.toml"
+    },
+    {
+      "name": "zed-pkg-e2e",
+      "kind": "orchestrator",
+      "manifest": null
+    }
+  ]
+}

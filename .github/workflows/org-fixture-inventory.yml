@@ -1,0 +1,91 @@
+name: zed-pkg-test organization inventory
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+  schedule:
+    - cron: "31 4 * * *"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: zed-pkg-test-inventory-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  inventory:
+    name: Audit core lifecycle and complete public fleet
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - name: Check out the inventory harness
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+          show-progress: false
+
+      - name: Run all Python contract tests
+        run: |
+          set -euo pipefail
+          python3 -Werror -m unittest discover -s tests -p 'test_*.py' -v
+
+      - name: Validate checked-in core lifecycle coverage
+        run: |
+          set -euo pipefail
+          python3 scripts/org_fixture_inventory.py \
+            --output "$RUNNER_TEMP/zed-pkg-test-inventory-static.json"
+
+      - name: Probe the complete live public fleet and all Zed manifests
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          python3 scripts/org_fleet_contract.py \
+            --output "$RUNNER_TEMP/zed-pkg-test-inventory-live.json"
+          python3 - "$RUNNER_TEMP/zed-pkg-test-inventory-live.json" <<'PY'
+          import json
+          import sys
+          from pathlib import Path
+
+          report = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+          assert report["schema"] == "zed-pkg-test/public-fleet-inventory-v3", report
+          assert report["package_organizations"] == ["zed-pkg-test", "zedtest", "zed-pkg"], report
+          assert report["core_repository_count"] == 22, report
+          assert report["core_package_count"] == 21, report
+          assert report["live_repository_count"] >= report["core_repository_count"], report
+          assert report["supplemental_repository_count"] == (
+              report["live_repository_count"] - report["core_repository_count"]
+          ), report
+          assert report["missing_core_repositories"] == [], report
+          assert report["errors"] == [], report
+          assert report["required_manifest_present_count"] == report["required_manifest_count"], report
+          assert report["manifest_present_count"] >= report["required_manifest_count"], report
+          assert all(
+              row["manifest"]["package_org_allowed"] is not False
+              for row in report["repositories"]
+          ), report
+          print(
+              "verified",
+              report["live_repository_count"],
+              "public repositories,",
+              report["manifest_present_count"],
+              "valid package manifests,",
+              report["supplemental_repository_count"],
+              "supplemental repositories, and reviewed package namespaces",
+              ",".join(report["package_organizations"]),
+          )
+          PY
+
+      - name: Upload inventory evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: zed-pkg-test-inventory-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/zed-pkg-test-inventory-*.json
+          if-no-files-found: warn
+          retention-days: 14
+          include-hidden-files: false

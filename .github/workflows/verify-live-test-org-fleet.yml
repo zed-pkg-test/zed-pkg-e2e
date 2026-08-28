@@ -1,0 +1,139 @@
+name: verify live test organization fleet
+
+# `workflow_run.workflows` is resolved by GitHub against the `name:` declared by
+# workflows on the *default branch*, and only fires for runs of the default
+# branch. This file previously waited on "run authoritative test organization
+# fleet on ARM64", which lives solely on the unmerged `agent/run-fleet-arm64`
+# branch and only runs on pushes to that branch — so the chain was dead twice
+# over and this verification never executed. It now chains from the fleet
+# writers that do exist on `main`, and the credential-free contract job runs
+# directly on pushes and pull requests so the verifier is exercised on its own
+# changes. `tests/workflow-trigger-references.test.mjs` fails the build if any
+# `workflow_run` reference in this repository goes dangling again.
+
+on:
+  workflow_run:
+    workflows:
+      - apply test organization fleet
+      - finish test organization fleet with paced writes
+      - finish test organization fleet on one runner
+      - recover test organization fleet v3
+      - resume rate-limited test organization fleet
+    types:
+      - completed
+  pull_request:
+    paths:
+      - ".github/workflows/verify-live-test-org-fleet.yml"
+      - "scripts/verify-live-test-org-fleet.mjs"
+      - "scripts/validate-test-org-fleet.mjs"
+      - "scripts/read-fleet-manifest.mjs"
+      - "tests/live-fleet-verifier.test.mjs"
+      - "tests/workflow-trigger-references.test.mjs"
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/verify-live-test-org-fleet.yml"
+      - "scripts/verify-live-test-org-fleet.mjs"
+      - "scripts/validate-test-org-fleet.mjs"
+      - "scripts/read-fleet-manifest.mjs"
+      - "tests/live-fleet-verifier.test.mjs"
+      - "tests/workflow-trigger-references.test.mjs"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: verify-live-test-org-fleet-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  contract:
+    name: Validate verifier, manifest, and trigger contracts
+    if: github.repository == 'zed-pkg-test/zed-pkg-e2e'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Check out the commit under verification
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          show-progress: false
+
+      - name: Validate verifier and manifest contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --check scripts/verify-live-test-org-fleet.mjs
+          node --test tests/live-fleet-verifier.test.mjs
+          node scripts/validate-test-org-fleet.mjs
+
+      - name: Prove every workflow_run trigger in this repository resolves
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --test tests/workflow-trigger-references.test.mjs
+
+  verify-live:
+    name: Verify all repositories, default branches, and open PRs
+    needs: contract
+    # The live fleet is the state of 18 external organizations, not a property
+    # of a pull request diff, and `secrets.FLEET_GH_TOKEN` is not exposed to
+    # pull_request runs from forks. Live verification therefore runs on the
+    # authoritative events — a completed fleet writer, a push to main, or a
+    # manual dispatch — while pull requests still run the contract job above.
+    if: github.repository == 'zed-pkg-test/zed-pkg-e2e' && github.event_name != 'pull_request'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - name: Check out the authoritative verifier from main
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+          persist-credentials: false
+          show-progress: false
+
+      - name: Export the persisted fleet PAT without logging it
+        shell: bash
+        env:
+          STORED_FLEET_PAT: ${{ secrets.FLEET_GH_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${STORED_FLEET_PAT:-}" ]]; then
+            echo '::error::secrets.FLEET_GH_TOKEN is not available to this run; live fleet verification cannot be attempted.'
+            exit 1
+          fi
+          printf 'GH_TOKEN=%s\n' "$STORED_FLEET_PAT" >> "$GITHUB_ENV"
+
+      - name: Verify all repositories, default branches, and open PRs
+        shell: bash
+        env:
+          FLEET_VERIFY_CONCURRENCY: "4"
+        run: |
+          set -euo pipefail
+          report="$RUNNER_TEMP/live-test-org-fleet-report.json"
+          set +e
+          node scripts/verify-live-test-org-fleet.mjs > "$report"
+          status=$?
+          set -e
+
+          {
+            echo
+            echo '## Machine-readable failure summary'
+            echo
+            echo '```json'
+            jq '{expected, verified, failureCounts: {
+              missingRepositories: (.failures.missingRepositories | length),
+              missingDefaultBranches: (.failures.missingDefaultBranches | length),
+              missingOpenPullRequests: (.failures.missingOpenPullRequests | length)
+            }}' "$report"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          if [[ "$status" -ne 0 ]]; then
+            echo '::error::The live fleet does not yet satisfy the exact 319-repository/PR contract.'
+            jq '.failures | with_entries(.value |= .[0:25])' "$report"
+            exit "$status"
+          fi
+
+          echo 'All 301 specialized repositories, all 18 governance repositories, their default branches, and open pull requests were verified.' >> "$GITHUB_STEP_SUMMARY"

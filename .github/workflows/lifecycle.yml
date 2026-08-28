@@ -29,7 +29,7 @@ defaults:
 env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: "1"
-  ZED_INTERFACES_REF: dc0e0a0620b9462817950b552d3d334a184b1cb1
+  ZED_INTERFACES_REF: 8428bc574111fa148e590c8350c7855035ce2046
 
 jobs:
   build-zed:
@@ -81,6 +81,13 @@ jobs:
           fetch-depth: 1
           persist-credentials: false
           show-progress: false
+
+      - name: Enforce exact interface provenance
+        run: |
+          set -euo pipefail
+          test "$(git -C zed-interfaces rev-parse HEAD)" = "$ZED_INTERFACES_REF"
+          grep -F "rev = \"$ZED_INTERFACES_REF\"" zed-cli/Cargo.toml
+          grep -F "rev=$ZED_INTERFACES_REF#$ZED_INTERFACES_REF" zed-cli/Cargo.lock
 
       - name: Install the declared Rust toolchain
         run: |

@@ -1,0 +1,72 @@
+name: DEN-4181 managed app lifecycle exact-head certification
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/formal-app-lifecycle.yml"
+      - "scripts/verify_formal_app_lifecycle_contract.py"
+      - "tests/test_formal_app_lifecycle_contract.py"
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/formal-app-lifecycle.yml"
+      - "scripts/verify_formal_app_lifecycle_contract.py"
+      - "tests/test_formal_app_lifecycle_contract.py"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: den-4181-app-lifecycle-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  ZED_SYNC_SHA: 64717d0bdfe598ffa350736291c2ff2dde45ac2f
+  APP_MANIFEST_BLOB: 9bac5230b95d29f830a098a6d19308a8ae7ac974
+  APP_MODEL_BLOB: 2749b36ebb6bb5787a2ecb469a2f0a8025ecb3b9
+  APP_FIXTURE_BLOB: 12828bf2dba69e9faac3cd638ec7e3be65096885
+  APP_SCHEMA_BLOB: 6a82fe44eacc9a8f632ad2bdf78cae85499a0a57
+
+jobs:
+  certify:
+    name: formal model to Rust, JavaScript, Dart, and WASM
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Check out E2E certification authority
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: zed-pkg-e2e
+          persist-credentials: false
+
+      - name: Check out exact zed-sync production commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: zed-pkg/zed-sync
+          ref: ${{ env.ZED_SYNC_SHA }}
+          path: zed-sync
+          persist-credentials: false
+
+      - name: Verify immutable commit and formal artifact provenance
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git -C zed-sync rev-parse HEAD)" = "$ZED_SYNC_SHA"
+          test "$(git -C zed-sync rev-parse HEAD:formal/app-lifecycle.fm.toml)" = "$APP_MANIFEST_BLOB"
+          test "$(git -C zed-sync rev-parse HEAD:formal/app_lifecycle.qnt)" = "$APP_MODEL_BLOB"
+          test "$(git -C zed-sync rev-parse HEAD:protocol/formal-app-lifecycle.json)" = "$APP_FIXTURE_BLOB"
+          test "$(git -C zed-sync rev-parse HEAD:protocol/formal-app-lifecycle.schema.json)" = "$APP_SCHEMA_BLOB"
+
+      - name: Test the cross-repository checker
+        run: python3 -m unittest -v zed-pkg-e2e/tests/test_formal_app_lifecycle_contract.py
+
+      - name: Cross-check formal inventory, traces, schema, and refinements
+        run: python3 zed-pkg-e2e/scripts/verify_formal_app_lifecycle_contract.py zed-sync
+
+      - name: Install pinned Nix
+        uses: cachix/install-nix-action@630ae543ea3a38a9a4166f03376c02c50f408342
+
+      - name: Execute the exact production verification matrix
+        working-directory: zed-sync
+        run: nix develop --no-update-lock-file -c agent-check all

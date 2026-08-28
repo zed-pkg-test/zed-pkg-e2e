@@ -1,0 +1,25 @@
+# One-time concurrency preemption for the superseded legacy recovery workflow.
+name: preempt legacy fleet recovery
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/preempt-legacy-fleet-recovery.yml"
+      - ".github/fleet-preempt/START"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: resume-rate-limited-test-org-fleet
+  cancel-in-progress: true
+
+jobs:
+  preempt:
+    if: github.repository == 'zed-pkg-test/zed-pkg-e2e' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 2
+    steps:
+      - name: Confirm legacy recovery preemption
+        run: echo "The superseded resume-rate-limited-test-org-fleet run has been preempted by repository concurrency."

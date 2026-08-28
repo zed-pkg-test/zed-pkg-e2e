@@ -1,0 +1,153 @@
+name: immutable OCI plan contract
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/oci-plan-contract.yml"
+      - "scripts/oci_plan_contract.py"
+      - "docs/oci-plan-contract.md"
+      - "README.md"
+  workflow_dispatch:
+    inputs:
+      zed_cli_ref:
+        description: Exact 40-character zed-pkg/zed-cli candidate commit
+        required: true
+        default: 8bc7d97711fc44db2f31419e4b188c8916288787
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: oci-plan-contract-${{ github.event.pull_request.number || github.ref || github.run_id }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: "1"
+  HARNESS_REF: ${{ github.event.pull_request.head.sha || github.sha }}
+  ZED_CLI_REF: ${{ inputs.zed_cli_ref || '8bc7d97711fc44db2f31419e4b188c8916288787' }}
+  NODE_LIB_REF: 2d41e658a382fdff27ef87a0db24dbaff280a685
+  NODE_APP_REF: ef794674647b3620e711f4f855865f8ad3340498
+  POLYGLOT_LIB_REF: e62ceb6337324a294d4fc861692a267ff0db97d0
+
+jobs:
+  contract:
+    name: Exact OCI plan candidate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - name: Validate immutable inputs
+        run: |
+          set -euo pipefail
+          [[ "$HARNESS_REF" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$ZED_CLI_REF" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$NODE_LIB_REF" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$NODE_APP_REF" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$POLYGLOT_LIB_REF" =~ ^[0-9a-f]{40}$ ]]
+
+      - name: Check out exact harness
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.HARNESS_REF }}
+          path: harness
+          fetch-depth: 1
+          persist-credentials: false
+          show-progress: false
+
+      - name: Check out exact zed CLI candidate
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: zed-pkg/zed-cli
+          ref: ${{ env.ZED_CLI_REF }}
+          path: zed-cli
+          fetch-depth: 1
+          persist-credentials: false
+          show-progress: false
+
+      - name: Check out exact node library fixture
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: zed-pkg-test/node-lib
+          ref: ${{ env.NODE_LIB_REF }}
+          path: fixtures/node-lib
+          fetch-depth: 1
+          persist-credentials: false
+          show-progress: false
+
+      - name: Check out exact node application fixture
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: zed-pkg-test/node-app
+          ref: ${{ env.NODE_APP_REF }}
+          path: fixtures/node-app
+          fetch-depth: 1
+          persist-credentials: false
+          show-progress: false
+
+      - name: Check out exact polyglot fixture
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: zed-pkg-test/polyglot-lib
+          ref: ${{ env.POLYGLOT_LIB_REF }}
+          path: fixtures/polyglot-lib
+          fetch-depth: 1
+          persist-credentials: false
+          show-progress: false
+
+      - name: Install declared Rust toolchain and syscall tracer
+        run: |
+          set -euo pipefail
+          rustup toolchain install stable --profile minimal --component rustfmt
+          rustup default stable
+          if ! command -v strace >/dev/null 2>&1; then
+            sudo apt-get update
+            sudo apt-get install --yes --no-install-recommends strace
+          fi
+          rustc --version --verbose
+          cargo --version --verbose
+          strace --version | head -1
+
+      - name: Verify exact checkouts and harness syntax
+        run: |
+          set -euo pipefail
+          test "$(git -C harness rev-parse HEAD)" = "$HARNESS_REF"
+          test "$(git -C zed-cli rev-parse HEAD)" = "$ZED_CLI_REF"
+          test "$(git -C fixtures/node-lib rev-parse HEAD)" = "$NODE_LIB_REF"
+          test "$(git -C fixtures/node-app rev-parse HEAD)" = "$NODE_APP_REF"
+          test "$(git -C fixtures/polyglot-lib rev-parse HEAD)" = "$POLYGLOT_LIB_REF"
+          python3 -m py_compile harness/scripts/oci_plan_contract.py
+
+      - name: Build and unit-test the exact candidate
+        run: |
+          set -euo pipefail
+          cargo fmt --all --check --manifest-path zed-cli/Cargo.toml
+          cargo test --locked --manifest-path zed-cli/Cargo.toml --all-targets oci
+          cargo build --locked --release --manifest-path zed-cli/Cargo.toml --bin zed
+          zed-cli/target/release/zed --version
+
+      - name: Run black-box OCI plan contract
+        run: |
+          set -euo pipefail
+          rm -rf evidence
+          python3 harness/scripts/oci_plan_contract.py \
+            --zed zed-cli/target/release/zed \
+            --strace "$(command -v strace)" \
+            --node-lib fixtures/node-lib \
+            --node-app fixtures/node-app \
+            --polyglot-lib fixtures/polyglot-lib \
+            --evidence evidence
+
+      - name: Upload deterministic evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: oci-plan-contract-${{ github.run_id }}-${{ github.run_attempt }}
+          path: evidence
+          if-no-files-found: warn
+          retention-days: 7
+          include-hidden-files: false

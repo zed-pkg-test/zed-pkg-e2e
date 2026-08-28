@@ -1,0 +1,1 @@
+One-shot trigger using a structural CORS boundary rather than whitespace-sensitive heredoc matching.

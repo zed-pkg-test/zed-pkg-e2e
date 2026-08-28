@@ -1,0 +1,276 @@
+name: resolve shared-auth PR 24 semantically
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/pr-merge/RESOLVE-SHARED-AUTH-24"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: resolve-shared-auth-pr-24
+  cancel-in-progress: false
+
+jobs:
+  resolve:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      GH_TOKEN: ${{ secrets.FLEET_GH_TOKEN }}
+      REPOSITORY: shared-auth/shared-auth-server.rs
+      HEAD_BRANCH: agent/harden-response-headers
+      EXPECTED_HEAD: a8097ef23fbab7fd8f3487a22319600e466b8d8b
+      EXPECTED_MAIN: 3547e16770e821fbc0e1e08f20820ac89fe1f8ce
+    steps:
+      - name: Validate stored credential
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test -n "$GH_TOKEN"
+          test "$(gh api user --jq '.login')" = "ORESoftware"
+          gh auth setup-git
+
+      - name: Reconstruct both branches and resolve by intent
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          workdir="$(mktemp -d)"
+          git clone --no-tags "https://github.com/${REPOSITORY}.git" "$workdir/repo"
+          cd "$workdir/repo"
+          git fetch origin \
+            "+refs/heads/main:refs/remotes/origin/main" \
+            "+refs/heads/${HEAD_BRANCH}:refs/remotes/origin/${HEAD_BRANCH}"
+
+          actual_main="$(git rev-parse origin/main)"
+          actual_head="$(git rev-parse "origin/${HEAD_BRANCH}")"
+          test "$actual_main" = "$EXPECTED_MAIN" || {
+            echo "::error::main moved: expected $EXPECTED_MAIN, found $actual_main"
+            exit 1
+          }
+          test "$actual_head" = "$EXPECTED_HEAD" || {
+            echo "::error::PR head moved: expected $EXPECTED_HEAD, found $actual_head"
+            exit 1
+          }
+
+          git checkout -B "$HEAD_BRANCH" "origin/$HEAD_BRANCH"
+          git config user.name "Alexander Mills"
+          git config user.email "alex@oresoftware.com"
+
+          set +e
+          git merge --no-commit --no-ff origin/main
+          merge_status=$?
+          set -e
+
+          if ((merge_status != 0)); then
+            mapfile -t conflicts < <(git diff --name-only --diff-filter=U | sort)
+            expected=(src/http/mod.rs tests/integration.rs)
+            if [[ "${conflicts[*]}" != "${expected[*]}" ]]; then
+              printf '::error::unexpected conflicts: %s\n' "${conflicts[*]}"
+              exit 1
+            fi
+          fi
+
+          # Current main is authoritative for all features landed since the old
+          # merge base (passkeys, MFA factors, DELETE CORS, fail-closed
+          # introspection, and their tests). Reapply the independent PR intent
+          # on top of that current contract.
+          git show origin/main:src/http/mod.rs > src/http/mod.rs
+          git show origin/main:tests/integration.rs > tests/integration.rs
+
+          node <<'NODE'
+          const fs = require('node:fs');
+
+          const httpPath = 'src/http/mod.rs';
+          let http = fs.readFileSync(httpPath, 'utf8');
+          if (http.includes('HeaderName::from_static("permissions-policy")')) {
+            throw new Error('main already contains the response-header hardening; refusing duplicate insertion');
+          }
+
+          const oldImport = '    http::{header, HeaderValue, Method},';
+          const newImport = '    http::{header, HeaderName, HeaderValue, Method},';
+          if (!http.includes(oldImport)) throw new Error('expected axum header import was not found');
+          http = http.replace(oldImport, newImport);
+
+          const layerAnchor = `        .layer(SetResponseHeaderLayer::if_not_present(
+              header::STRICT_TRANSPORT_SECURITY,
+              HeaderValue::from_static("max-age=31536000; includeSubDomains"),
+          ))
+          .layer(cors)`;
+          const hardening = `        .layer(SetResponseHeaderLayer::if_not_present(
+              header::STRICT_TRANSPORT_SECURITY,
+              HeaderValue::from_static("max-age=31536000; includeSubDomains"),
+          ))
+          // Token-bearing bodies must never enter shared or browser caches.
+          // if_not_present preserves the JWKS handler's explicit public cache.
+          .layer(SetResponseHeaderLayer::if_not_present(
+              header::CACHE_CONTROL,
+              HeaderValue::from_static("no-store"),
+          ))
+          // The script-free UI needs no powerful browser capabilities.
+          .layer(SetResponseHeaderLayer::if_not_present(
+              HeaderName::from_static("permissions-policy"),
+              HeaderValue::from_static(
+                  "accelerometer=(), camera=(), display-capture=(), geolocation=(), gyroscope=(), magnetometer=(), microphone=(), payment=(), usb=()",
+              ),
+          ))
+          // Isolate auth pages from cross-origin opener relationships.
+          .layer(SetResponseHeaderLayer::if_not_present(
+              HeaderName::from_static("cross-origin-opener-policy"),
+              HeaderValue::from_static("same-origin"),
+          ))
+          .layer(cors)`;
+          if (!http.includes(layerAnchor)) throw new Error('expected HSTS/CORS layer boundary was not found');
+          http = http.replace(layerAnchor, hardening);
+          fs.writeFileSync(httpPath, http);
+
+          const testsPath = 'tests/integration.rs';
+          let tests = fs.readFileSync(testsPath, 'utf8');
+          const nextTest = '#[tokio::test]\nasync fn metrics_records_exchanges() {';
+          if (!tests.includes(nextTest)) throw new Error('metrics test insertion boundary was not found');
+          if (tests.includes('async fn security_headers_present_on_responses()')) {
+            throw new Error('main already contains the PR 24 integration tests; refusing duplicate insertion');
+          }
+
+          const additions = `#[tokio::test]
+          async fn ui_exchange_empty_token_returns_error_fragment() {
+              let resp = app()
+                  .await
+                  .oneshot(
+                      Request::post("/ui/exchange")
+                          .header("content-type", "application/x-www-form-urlencoded")
+                          .body(Body::from("access_token="))
+                          .unwrap(),
+                  )
+                  .await
+                  .unwrap();
+              let frag = body_string(resp).await;
+              assert!(
+                  frag.contains("unauthorized"),
+                  "expected error fragment, got: {frag}"
+              );
+              assert!(!frag.contains("exchanged"));
+              assert!(!frag.contains("access_token"));
+          }
+
+          #[tokio::test]
+          async fn security_headers_present_on_responses() {
+              let resp = app()
+                  .await
+                  .oneshot(Request::get("/").body(Body::empty()).unwrap())
+                  .await
+                  .unwrap();
+              let headers = resp.headers();
+              let get = |name: &str| {
+                  headers
+                      .get(name)
+                      .unwrap_or_else(|| panic!("missing security header: {name}"))
+                      .to_str()
+                      .unwrap()
+                      .to_string()
+              };
+
+              assert_eq!(get("x-content-type-options"), "nosniff");
+              assert_eq!(get("x-frame-options"), "DENY");
+              assert_eq!(get("referrer-policy"), "no-referrer");
+              assert!(get("content-security-policy").contains("default-src 'none'"));
+              assert!(get("strict-transport-security").contains("max-age="));
+              assert_eq!(get("cache-control"), "no-store");
+              assert!(get("permissions-policy").contains("camera=()"));
+              assert_eq!(get("cross-origin-opener-policy"), "same-origin");
+          }
+
+          #[tokio::test]
+          async fn jwks_keeps_public_cache_not_no_store() {
+              let resp = app()
+                  .await
+                  .oneshot(
+                      Request::get("/.well-known/jwks.json")
+                          .body(Body::empty())
+                          .unwrap(),
+                  )
+                  .await
+                  .unwrap();
+              let cache_control = resp
+                  .headers()
+                  .get("cache-control")
+                  .expect("JWKS response must define cache policy")
+                  .to_str()
+                  .unwrap();
+              assert!(
+                  cache_control.contains("public"),
+                  "JWKS must stay publicly cacheable, got: {cache_control}"
+              );
+              assert!(cache_control.contains("max-age=300"));
+              assert!(!cache_control.contains("no-store"));
+          }
+
+          #[tokio::test]
+          async fn webhook_fails_closed_without_secret() {
+              let resp = app()
+                  .await
+                  .oneshot(
+                      Request::post("/internal/webhook/sync")
+                          .header("content-type", "application/json")
+                          .body(Body::from("{}"))
+                          .unwrap(),
+                  )
+                  .await
+                  .unwrap();
+              assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+          }
+
+          `;
+          tests = tests.replace(nextTest, additions + nextTest);
+          fs.writeFileSync(testsPath, tests);
+          NODE
+
+          git add src/http/mod.rs tests/integration.rs
+          test -z "$(git diff --name-only --diff-filter=U)"
+          git diff --cached --check
+
+          mapfile -t changed < <(git diff --cached --name-only | sort)
+          expected_changed=(src/http/mod.rs tests/integration.rs)
+          [[ "${changed[*]}" == "${expected_changed[*]}" ]] || {
+            printf '::error::unexpected staged paths: %s\n' "${changed[*]}"
+            exit 1
+          }
+
+          git commit -m "merge: reconcile response hardening with current auth surface" \
+            -m "Preserve current main's passkey, factor, DELETE-CORS, and fail-closed introspection work while integrating PR 24's no-store, Permissions-Policy, COOP, JWKS cache exception, UI failure, and webhook regression coverage."
+
+          git merge-base --is-ancestor "$EXPECTED_HEAD" HEAD
+          git merge-base --is-ancestor "$EXPECTED_MAIN" HEAD
+          test "$(git rev-list --parents -n 1 HEAD | wc -w)" -eq 3
+
+          cargo fmt --all -- --check
+          cargo test --locked --test integration
+          cargo test --locked
+
+          git diff --check origin/main...HEAD
+          mapfile -t final_changed < <(git diff --name-only origin/main...HEAD | sort)
+          [[ "${final_changed[*]}" == "${expected_changed[*]}" ]] || {
+            printf '::error::unexpected final diff paths: %s\n' "${final_changed[*]}"
+            exit 1
+          }
+
+          new_head="$(git rev-parse HEAD)"
+          git push origin "HEAD:refs/heads/${HEAD_BRANCH}"
+          remote_head="$(git ls-remote origin "refs/heads/${HEAD_BRANCH}" | cut -f1)"
+          test "$remote_head" = "$new_head"
+          echo "SEMANTIC_HEAD=$new_head" | tee -a "$GITHUB_ENV"
+          echo "Resolved and pushed exact head: $new_head"
+
+      - name: Record result
+        shell: bash
+        run: |
+          {
+            echo "## shared-auth PR 24 semantic resolution"
+            echo
+            echo "- Previous PR head: \`$EXPECTED_HEAD\`"
+            echo "- Current main integrated: \`$EXPECTED_MAIN\`"
+            echo "- Resolved merge head: \`$SEMANTIC_HEAD\`"
+            echo "- Preserved current main features and added PR 24 hardening/tests"
+            echo "- Validation: cargo fmt, integration tests, full locked test suite"
+          } >> "$GITHUB_STEP_SUMMARY"

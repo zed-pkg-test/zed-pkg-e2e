@@ -1,0 +1,7 @@
+# DEN-2957 conformance artifacts are byte-level contracts across platforms.
+.github/workflows/github-dependency-inventory-conformance.yml text eol=lf
+docs/github-dependency-inventory-conformance.md text eol=lf
+fixtures/github-dependency-inventory/** text eol=lf
+harness/github_dependency_inventory.py text eol=lf
+harness/github_inventory_*.py text eol=lf
+harness/test_github_inventory_*.py text eol=lf

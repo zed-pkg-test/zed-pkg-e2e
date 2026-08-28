@@ -1,5 +1,11 @@
 node_modules/
+__pycache__/
+*.py[cod]
 playwright-report/
 test-results/
 .stack/
 .zed/
+tmp
+temp
+tmp/worktrees
+temp/worktrees
