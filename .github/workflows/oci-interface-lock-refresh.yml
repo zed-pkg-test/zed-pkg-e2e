@@ -1,0 +1,75 @@
+name: exact OCI generated-file artifact
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/oci-interface-lock-refresh.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: exact-oci-generated-files-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  ZED_CLI_REF: a5ee43a148fe8fb1325c407c26e7d53f09f568de
+  ZED_INTERFACES_REF: 2082012d1903783a89200c3bd44d2659a6daf872
+
+jobs:
+  generate:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 20
+    steps:
+      - name: Check out exact product candidate
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: zed-pkg/zed-cli
+          ref: ${{ env.ZED_CLI_REF }}
+          path: zed-cli
+          fetch-depth: 1
+          persist-credentials: false
+          show-progress: false
+
+      - name: Install formatter and generate exact bytes
+        run: |
+          set -euo pipefail
+          rustup toolchain install stable --profile minimal --component rustfmt
+          rustup default stable
+          test "$(git -C zed-cli rev-parse HEAD)" = "$ZED_CLI_REF"
+          cargo update --manifest-path zed-cli/Cargo.toml \
+            -p zed-interfaces \
+            --precise "$ZED_INTERFACES_REF"
+          cargo fmt --all --manifest-path zed-cli/Cargo.toml
+          git -C zed-cli diff --check
+
+          mkdir -p evidence/tree
+          files=(
+            Cargo.lock
+            src/cli_oci.rs
+            src/completion.rs
+            src/nix_bundle_write.rs
+            src/nix_export_bundle/archive.rs
+            src/nix_export_bundle/templates.rs
+            src/oci_command.rs
+            tests/nix_bundle_write_boundaries.rs
+            tests/nix_bundle_write_cli.rs
+            tests/nix_export_bundle/common.rs
+          )
+          for path in "${files[@]}"; do
+            mkdir -p "evidence/tree/$(dirname "$path")"
+            cp "zed-cli/$path" "evidence/tree/$path"
+          done
+          git -C zed-cli diff --binary > evidence/generated.patch
+          git -C zed-cli status --short > evidence/status.txt
+          find evidence/tree -type f -print0 | sort -z | xargs -0 sha256sum > evidence/SHA256SUMS
+
+      - name: Upload exact generated files
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: exact-oci-generated-files-${{ github.run_id }}-${{ github.run_attempt }}
+          path: evidence
+          if-no-files-found: error
+          retention-days: 7
+          include-hidden-files: false
