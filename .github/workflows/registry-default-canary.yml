@@ -1,0 +1,151 @@
+name: DEN-2760 public registry default canary
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/registry-default-canary.yml'
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/registry-default-canary.yml'
+  workflow_dispatch:
+    inputs:
+      zed_cli_ref:
+        description: Immutable zed-cli commit to certify
+        required: false
+        default: d0678568fbcff75697512cc36ae84a356548f26c
+
+permissions:
+  contents: read
+
+concurrency:
+  group: den-2760-registry-default-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: '1'
+  ZED_CLI_REF: ${{ github.event.inputs.zed_cli_ref || 'd0678568fbcff75697512cc36ae84a356548f26c' }}
+  ZED_INTERFACES_SHA: d1bf8ef7c88a75292cbe8d697bfd269f30d62e2b
+  EXPECTED_REGISTRY: https://registry.zpkg.net
+  FORBIDDEN_REGISTRY: https://registry.zpkg.tech
+
+jobs:
+  exact-default:
+    name: zpkg.net default / ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-15, windows-2025]
+
+    steps:
+      - name: Require immutable product and interface pins
+        run: |
+          set -euo pipefail
+          [[ "$ZED_CLI_REF" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$ZED_INTERFACES_SHA" =~ ^[0-9a-f]{40}$ ]]
+          test "$EXPECTED_REGISTRY" = 'https://registry.zpkg.net'
+          test "$FORBIDDEN_REGISTRY" = 'https://registry.zpkg.tech'
+
+      - name: Check out exact zed-cli candidate
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: zed-pkg/zed-cli
+          ref: ${{ env.ZED_CLI_REF }}
+          path: zed-cli
+          fetch-depth: 1
+          persist-credentials: false
+          show-progress: false
+
+      - name: Verify exact product and dependency candidate
+        run: |
+          set -euo pipefail
+          test "$(git -C zed-cli rev-parse HEAD)" = "$ZED_CLI_REF"
+          grep -F "rev = \"$ZED_INTERFACES_SHA\"" zed-cli/Cargo.toml
+          grep -F "#$ZED_INTERFACES_SHA" zed-cli/Cargo.lock
+          grep -F "ZED_INTERFACES_SHA: $ZED_INTERFACES_SHA" \
+            zed-cli/.github/workflows/frozen-lock-integrity.yml
+          grep -F "ZED_INTERFACES_SHA: $ZED_INTERFACES_SHA" \
+            zed-cli/.github/workflows/nix-bundle-write.yml
+          grep -F "ZED_INTERFACES_SHA: $ZED_INTERFACES_SHA" \
+            zed-cli/.github/workflows/nix-export-bundle.yml
+
+      - name: Install pinned Rust toolchain action
+        uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30
+        with:
+          components: rustfmt,clippy
+
+      - name: Prove every public default surface uses zpkg.net
+        run: |
+          set -euo pipefail
+          surfaces=(
+            .cli-flags.toml
+            .dev-cli-flags.toml
+            .fetch-cli-flags.toml
+            .nix-interop-cli-flags.toml
+            README.md
+          )
+          for surface in "${surfaces[@]}"; do
+            grep -F "$EXPECTED_REGISTRY" "zed-cli/$surface"
+            if grep -F "$FORBIDDEN_REGISTRY" "zed-cli/$surface"; then
+              echo "forbidden registry remains in $surface" >&2
+              exit 1
+            fi
+          done
+          if git -C zed-cli grep -nF "$FORBIDDEN_REGISTRY" -- .; then
+            echo 'forbidden public registry remains in tracked product content' >&2
+            exit 1
+          fi
+
+      - name: Run formatter, registry tests, and strict lint
+        working-directory: zed-cli
+        run: |
+          set -euo pipefail
+          cargo fmt --all -- --check
+          cargo test --locked --lib registry::tests -- --nocapture
+          cargo clippy --locked --lib --bin zed -- -D warnings
+          cargo build --locked --bin zed
+
+      - name: Prove compiled help advertises the canonical default
+        working-directory: zed-cli
+        run: |
+          set -euo pipefail
+          binary=target/debug/zed
+          if [[ "$RUNNER_OS" == 'Windows' ]]; then
+            binary=target/debug/zed.exe
+          fi
+          "$binary" --help | tee "$RUNNER_TEMP/zed-help.txt"
+          grep -F "$EXPECTED_REGISTRY" "$RUNNER_TEMP/zed-help.txt"
+          if grep -F "$FORBIDDEN_REGISTRY" "$RUNNER_TEMP/zed-help.txt"; then
+            echo 'compiled help advertises the forbidden registry' >&2
+            exit 1
+          fi
+
+      - name: Record bounded evidence
+        if: always()
+        run: |
+          set +e
+          evidence="$RUNNER_TEMP/den-2760-registry-default"
+          mkdir -p "$evidence"
+          printf '%s\n' "$ZED_CLI_REF" > "$evidence/zed-cli-commit.txt"
+          printf '%s\n' "$ZED_INTERFACES_SHA" > "$evidence/zed-interfaces-commit.txt"
+          printf '%s\n' "$EXPECTED_REGISTRY" > "$evidence/expected-registry.txt"
+          cp "$RUNNER_TEMP/zed-help.txt" "$evidence/zed-help.txt" 2>/dev/null
+          git -C zed-cli status --porcelain=v1 --untracked-files=all \
+            > "$evidence/product-status.txt" 2>&1
+
+      - name: Upload bounded evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: den-2760-registry-default-${{ matrix.os }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/den-2760-registry-default
+          if-no-files-found: warn
+          retention-days: 14
+          include-hidden-files: false

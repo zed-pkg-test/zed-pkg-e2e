@@ -1,0 +1,60 @@
+# final credential-free local replay 2026-08-08T05:25Z
+
+Environment:
+- Python 3.13.5
+- zstd 1.5.7
+- no GitHub, Linear, Cloudflare, R2, registry, signing, or shared-auth credential
+- no external network or infrastructure mutation
+
+== focused test suites ==
+generator safety and failure atomicity: 12 PASS
+fake-AWS R2 synchronization contract: 6 PASS
+loopback plain-HTTP transport: 3 PASS
+total focused tests: 21 PASS
+
+The HTTP suite served the generated tree with Python ThreadingHTTPServer,
+required User-Agent `zpkg-static-registry-check/0` on every request, exercised
+a real 404 for an absent package, and rejected missing/corrupt HTTP objects
+without a traceback.
+
+== determinism ==
+built 7 checkpointed objects + checkpoint
+built 7 checkpointed objects + checkpoint
+byte-identical rebuild: yes
+complete tree files: 8
+tree_sha256: 473c19d07618d76b3581041aac0f0bba6dd01eb1f51e9e55cad929df488a1f22
+
+== conformance against final local tree ==
+[1] discovery document
+  ok: schema_version matches
+  ok: static-export capabilities advertised correctly
+  ok: v0 endpoint map matches
+[2] checkpoint integrity
+  ok: checkpoint schema/signature/path/hash/size fields validated before fetch
+  ok: tree_sha256 consistent over 7 files
+  ok: every checkpointed object matches its recorded sha256+size
+  ok: local file set exactly matches checkpoint plus checkpoint.json
+[3] indexes: NDJSON, semver order, tarball checksums
+  ok: every NDJSON line is an object
+  ok: zpkg-e2e/dep-user: 1 version verified
+  ok: zpkg-e2e/hello-zed: 3 versions verified
+[4] yank semantics
+  ok: zpkg-e2e/hello-zed@1.2.0: yanked => unresolvable, bytes retained
+[5] absent package => missing/404
+  ok: absent index is a hard miss
+== PASS
+
+== adversarial self-test ==
+  tamper-tarball: red as required
+  tamper-index: red as required
+  drop-checkpoint-entry: red as required
+  resurrect-yanked: red as required
+  wrong-schema: red as required
+  uncheckpointed-object: red as required
+  remove-checkpointed-object: red as required
+  unsafe-checkpoint-path: red as required
+  duplicate-checkpoint-path: red as required
+== self-test PASS (9 mutations)
+
+This is supporting reconstruction evidence. The authoritative merge gate is the
+exact-head Ubuntu 24.04/macOS 15 GitHub Actions workflow.

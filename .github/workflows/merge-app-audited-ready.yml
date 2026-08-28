@@ -1,0 +1,90 @@
+name: merge audited ready PRs with per-installation tokens
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/pr-merge/MERGE-APP-AUDITED-READY"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: merge-app-audited-ready
+  cancel-in-progress: false
+
+jobs:
+  merge:
+    if: "${{ github.event.head_commit.message == 'chore: merge audited ready PRs with app tokens' }}"
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      max-parallel: 6
+      matrix:
+        include:
+          - owner: discrete-event-systems
+            repository: discrete-event-systems/des-simulate.rs
+            pr: 113
+            head: e21a25508f7c2c7512f4cf09020dec1d6fbe2299
+          - owner: canonical-cloud
+            repository: canonical-cloud/canonical-cloud-api-server.rs
+            pr: 46
+            head: b72c620e9784eaac3b0ca70630e64de3227a186f
+          - owner: ORESoftware
+            repository: ORESoftware/ai-agent-coordinator.rs
+            pr: 56
+            head: 689b2575d3d52cf6b204adde1613efe8de5c5cbc
+          - owner: opto-sync
+            repository: opto-sync/syncer.rs
+            pr: 2
+            head: e99cf3c8303739fddd2b28c025b5067d776088bb
+          - owner: opto-sync
+            repository: opto-sync/opto-sync-clients
+            pr: 40
+            head: 098a94f040723d19783e8ff6daa3bc265dfa6eec
+          - owner: opto-sync
+            repository: opto-sync/indexeddb-schema.rs
+            pr: 2
+            head: 8563baf28a6d44e4eea0c70ab526f8339a719360
+          - owner: opter-io
+            repository: opter-io/opter-sync
+            pr: 3
+            head: 7078d21d8411106e4185b20c8c04d22b854b3119
+          - owner: canonical-cloud
+            repository: canonical-cloud/canonical-cloud-macos-app.swift
+            pr: 11
+            head: fb8cf26f9c92f0f439411b58fc069ceff31b8313
+          - owner: benefactor-cc
+            repository: benefactor-cc/benefactor-dart-client
+            pr: 18
+            head: ceb8ea2f692cc6bb277b9485ab4896f01999c60b
+          - owner: benefactor-cc
+            repository: benefactor-cc/benefactor-api-server.rs
+            pr: 17
+            head: ee881e9ada5c4d5516ab2f80c6810e841b4c19e2
+    steps:
+      - name: Mint a short-lived installation token for ${{ matrix.owner }}
+        id: app-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1
+        with:
+          client-id: ${{ vars.FLEET_APP_CLIENT_ID }}
+          private-key: ${{ secrets.FLEET_APP_PRIVATE_KEY }}
+          owner: ${{ matrix.owner }}
+          permission-contents: write
+          permission-metadata: read
+          permission-pull-requests: write
+
+      - name: Check out trusted exact-head gate
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+
+      - name: Revalidate, merge, and post-verify the exact audited head
+        shell: bash
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          TARGET_REPOSITORY: ${{ matrix.repository }}
+          TARGET_PR: ${{ matrix.pr }}
+          TARGET_HEAD: ${{ matrix.head }}
+        run: node .github/scripts/merge-app-audited-ready.mjs

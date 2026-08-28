@@ -1,0 +1,95 @@
+name: Global executable package profile canary
+
+on:
+  pull_request:
+    paths:
+      - .github/workflows/global-package-profile-canary.yml
+      - scripts/global_package_profile_canary.py
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: global-package-profile-canary-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  ZED_CLI_COMMIT: 9fa5065ed4fc291a08aa180d45f8640a3e63331f
+
+jobs:
+  canary:
+    name: Global package black box (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-15]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    steps:
+      - name: Check out certification harness
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+          show-progress: false
+
+      - name: Check out exact zed-cli candidate
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: zed-pkg/zed-cli
+          ref: ${{ env.ZED_CLI_COMMIT }}
+          path: product/zed-cli
+          fetch-depth: 1
+          persist-credentials: false
+          show-progress: false
+
+      - name: Verify immutable candidate identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "${#ZED_CLI_COMMIT}" -eq 40
+          test "$(git -C product/zed-cli rev-parse HEAD)" = "$ZED_CLI_COMMIT"
+          mkdir -p artifacts
+          printf 'candidate=%s\nos=%s\narch=%s\n' \
+            "$ZED_CLI_COMMIT" "$RUNNER_OS" "$RUNNER_ARCH" \
+            > "artifacts/candidate-${RUNNER_OS}.txt"
+
+      - name: Install repository Rust toolchain
+        uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30
+        with:
+          toolchain: stable
+          components: rustfmt,clippy
+
+      - name: Build exact release candidate
+        working-directory: product/zed-cli
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo fmt --all --check
+          cargo test --locked --test frozen_offline_prefetch
+          cargo test --locked --lib global::tests
+          cargo test --locked --test global_cli
+          cargo clippy --locked --all-targets --all-features -- -D warnings
+          cargo build --release --locked --bin zed
+
+      - name: Run independent disposable-registry canary
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m py_compile scripts/global_package_profile_canary.py
+          python3 scripts/global_package_profile_canary.py \
+            --zed product/zed-cli/target/release/zed \
+            --work "$RUNNER_TEMP/global-package-profile" \
+            --evidence artifacts/global-package-profile-${RUNNER_OS}.json
+          git diff --exit-code
+          git -C product/zed-cli diff --exit-code
+
+      - name: Upload failure or success evidence
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: global-package-profile-${{ runner.os }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: artifacts/
+          if-no-files-found: error
+          retention-days: 7

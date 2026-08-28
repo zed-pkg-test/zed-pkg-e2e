@@ -1,0 +1,178 @@
+name: resolve shared-auth PR 24 semantically v2
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/pr-merge/RESOLVE-SHARED-AUTH-24-V2"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: resolve-shared-auth-pr-24
+  cancel-in-progress: false
+
+jobs:
+  resolve:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      GH_TOKEN: ${{ secrets.FLEET_GH_TOKEN }}
+      REPOSITORY: shared-auth/shared-auth-server.rs
+      HEAD_BRANCH: agent/harden-response-headers
+      EXPECTED_HEAD: a8097ef23fbab7fd8f3487a22319600e466b8d8b
+      EXPECTED_MAIN: 3547e16770e821fbc0e1e08f20820ac89fe1f8ce
+    steps:
+      - name: Validate stored credential
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test -n "$GH_TOKEN"
+          test "$(gh api user --jq '.login')" = "ORESoftware"
+          gh auth setup-git
+
+      - name: Merge histories and synthesize the conflicted router
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          workdir="$(mktemp -d)"
+          git clone --no-tags "https://github.com/${REPOSITORY}.git" "$workdir/repo"
+          cd "$workdir/repo"
+          git fetch origin \
+            "+refs/heads/main:refs/remotes/origin/main" \
+            "+refs/heads/${HEAD_BRANCH}:refs/remotes/origin/${HEAD_BRANCH}"
+
+          actual_main="$(git rev-parse origin/main)"
+          actual_head="$(git rev-parse "origin/${HEAD_BRANCH}")"
+          test "$actual_main" = "$EXPECTED_MAIN" || {
+            echo "::error::main moved: expected $EXPECTED_MAIN, found $actual_main"
+            exit 1
+          }
+          test "$actual_head" = "$EXPECTED_HEAD" || {
+            echo "::error::PR head moved: expected $EXPECTED_HEAD, found $actual_head"
+            exit 1
+          }
+
+          git checkout -B "$HEAD_BRANCH" "origin/$HEAD_BRANCH"
+          git config user.name "Alexander Mills"
+          git config user.email "alex@oresoftware.com"
+
+          set +e
+          git merge --no-commit --no-ff origin/main
+          merge_status=$?
+          set -e
+
+          if ((merge_status != 0)); then
+            mapfile -t conflicts < <(git diff --name-only --diff-filter=U | sort)
+            ((${#conflicts[@]} > 0))
+            for path in "${conflicts[@]}"; do
+              [[ "$path" == "src/http/mod.rs" ]] || {
+                echo "::error::unexpected conflicted path: $path"
+                exit 1
+              }
+            done
+          fi
+
+          # Git reconciled the integration tests automatically. Prove that the
+          # result contains both current-main security behavior and every PR 24
+          # regression before accepting it.
+          grep -q 'app_with_introspect_secret' tests/integration.rs
+          grep -q 'async fn ui_exchange_empty_token_returns_error_fragment' tests/integration.rs
+          grep -q 'async fn security_headers_present_on_responses' tests/integration.rs
+          grep -q 'async fn jwks_keeps_public_cache_not_no_store' tests/integration.rs
+          grep -q 'async fn webhook_fails_closed_without_secret' tests/integration.rs
+
+          # Rebuild the sole conflicted file from current main, preserving its
+          # passkey/MFA routes, DELETE support, visibility changes, and all other
+          # intervening work; then add the independent response policy.
+          git show origin/main:src/http/mod.rs > src/http/mod.rs
+          node <<'NODE'
+          const fs = require('node:fs');
+          const path = 'src/http/mod.rs';
+          let source = fs.readFileSync(path, 'utf8');
+
+          if (source.includes('HeaderName::from_static("permissions-policy")')) {
+            throw new Error('response hardening already exists on main');
+          }
+
+          const oldImport = '    http::{header, HeaderValue, Method},';
+          const newImport = '    http::{header, HeaderName, HeaderValue, Method},';
+          if (!source.includes(oldImport)) throw new Error('expected header import not found');
+          source = source.replace(oldImport, newImport);
+
+          const boundary = `        .layer(SetResponseHeaderLayer::if_not_present(
+              header::STRICT_TRANSPORT_SECURITY,
+              HeaderValue::from_static("max-age=31536000; includeSubDomains"),
+          ))
+          .layer(cors)`;
+          const resolved = `        .layer(SetResponseHeaderLayer::if_not_present(
+              header::STRICT_TRANSPORT_SECURITY,
+              HeaderValue::from_static("max-age=31536000; includeSubDomains"),
+          ))
+          // Token-bearing responses must not enter shared or browser caches.
+          // if_not_present preserves the JWKS handler's public cache policy.
+          .layer(SetResponseHeaderLayer::if_not_present(
+              header::CACHE_CONTROL,
+              HeaderValue::from_static("no-store"),
+          ))
+          // The script-free UI needs none of these powerful browser features.
+          .layer(SetResponseHeaderLayer::if_not_present(
+              HeaderName::from_static("permissions-policy"),
+              HeaderValue::from_static(
+                  "accelerometer=(), camera=(), display-capture=(), geolocation=(), gyroscope=(), magnetometer=(), microphone=(), payment=(), usb=()",
+              ),
+          ))
+          // Prevent cross-origin opener relationships around authentication UI.
+          .layer(SetResponseHeaderLayer::if_not_present(
+              HeaderName::from_static("cross-origin-opener-policy"),
+              HeaderValue::from_static("same-origin"),
+          ))
+          .layer(cors)`;
+
+          if (!source.includes(boundary)) throw new Error('HSTS/CORS boundary not found');
+          source = source.replace(boundary, resolved);
+          fs.writeFileSync(path, source);
+          NODE
+
+          git add src/http/mod.rs tests/integration.rs
+          test -z "$(git diff --name-only --diff-filter=U)"
+          git diff --cached --check
+
+          git commit -m "merge: reconcile response hardening with current auth surface" \
+            -m "Preserve current main's passkey, factor, DELETE-CORS, and fail-closed introspection work while integrating PR 24's no-store, Permissions-Policy, COOP, JWKS cache exception, UI failure, and webhook regression coverage."
+
+          git merge-base --is-ancestor "$EXPECTED_HEAD" HEAD
+          git merge-base --is-ancestor "$EXPECTED_MAIN" HEAD
+          test "$(git rev-list --parents -n 1 HEAD | wc -w)" -eq 3
+
+          cargo fmt --all -- --check
+          cargo test --locked --test integration
+          cargo test --locked
+
+          git diff --check origin/main...HEAD
+          mapfile -t final_changed < <(git diff --name-only origin/main...HEAD | sort)
+          expected_changed=(src/http/mod.rs tests/integration.rs)
+          [[ "${final_changed[*]}" == "${expected_changed[*]}" ]] || {
+            printf '::error::unexpected final diff paths: %s\n' "${final_changed[*]}"
+            exit 1
+          }
+
+          new_head="$(git rev-parse HEAD)"
+          git push origin "HEAD:refs/heads/${HEAD_BRANCH}"
+          remote_head="$(git ls-remote origin "refs/heads/${HEAD_BRANCH}" | cut -f1)"
+          test "$remote_head" = "$new_head"
+          echo "SEMANTIC_HEAD=$new_head" | tee -a "$GITHUB_ENV"
+
+      - name: Record result
+        shell: bash
+        run: |
+          {
+            echo "## shared-auth PR 24 semantic resolution"
+            echo
+            echo "- Previous PR head: \`$EXPECTED_HEAD\`"
+            echo "- Current main integrated: \`$EXPECTED_MAIN\`"
+            echo "- Resolved merge head: \`$SEMANTIC_HEAD\`"
+            echo "- Exact two-parent semantic merge; no ours/theirs shortcut"
+            echo "- Validation: cargo fmt, integration tests, full locked test suite"
+          } >> "$GITHUB_STEP_SUMMARY"

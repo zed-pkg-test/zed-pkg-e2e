@@ -1,0 +1,113 @@
+ Math.max(retryAfter * 1000, 500 * (2 ** attempt))));
+      continue;
+    }
+    throw new Error(`${method} ${endpoint} -> ${response.status}: ${text.slice(0, 1000)}`);
+  }
+  throw new Error(`${method} ${endpoint} exhausted retries`);
+}
+
+function globMatch(value, pattern) {
+  const escaped = pattern.replace(/[.+^${}()|[\]\\]/g, '\\$&').replaceAll('*', '.*').replaceAll('?', '.');
+  return new RegExp(`^${escaped}$`).test(value);
+}
+
+function selectedPair(pair) {
+  if (excluded.has(pair.sourceOrg) || excluded.has(pair.testOrg)) return false;
+  if (!pair.testOrg.toLowerCase().endsWith('-test')) throw new Error(`refusing non-test organization ${pair.testOrg}`);
+  return options.orgs.length === 0 || options.orgs.some((org) => org.toLowerCase() === pair.testOrg.toLowerCase());
+}
+
+function selectedRepo(repository) {
+  return options.repos.length === 0 || options.repos.some((pattern) => globMatch(repository.name, pattern));
+}
+
+async function getRepository(owner, name) {
+  return api('GET', `/repos/${route(owner)}/${route(name)}`, undefined, { allow404: true });
+}
+
+async function ensureRepository(owner, spec, defaultVisibility) {
+  let repository = await getRepository(owner, spec.name);
+  if (repository) {
+    stats.existing += 1;
+    log('repository exists', { repository: `${owner}/${spec.name}` });
+    return repository;
+  }
+  if (!options.apply) {
+    stats.planned += 1;
+    log('would create repository', { repository: `${owner}/${spec.name}`, visibility: spec.visibility ?? defaultVisibility });
+    return { owner: { login: owner }, name: spec.name, full_name: `${owner}/${spec.name}`, default_branch: manifest.policy.defaultBranch, visibility: spec.visibility ?? defaultVisibility, _planned: true };
+  }
+  const visibility = spec.visibility ?? defaultVisibility;
+  repository = await api('POST', `/orgs/${route(owner)}/repos`, {
+    name: spec.name,
+    description: spec.description ?? `Generated ${spec.profile ?? 'governance'} test harness for ${owner}.`,
+    visibility,
+    private: visibility !== 'public',
+    auto_init: true,
+    has_issues: true,
+    has_projects: false,
+    has_wiki: false,
+    has_discussions: false,
+    is_template: false,
+    delete_branch_on_merge: true,
+  });
+  stats.created += 1;
+  log('created repository', { repository: repository.full_name, visibility });
+  return repository;
+}
+
+async function resolveSource(fullName) {
+  if (sourceCache.has(fullName)) return sourceCache.get(fullName);
+  const promise = (async () => {
+    const [owner, name] = fullName.split('/');
+    const repository = await getRepository(owner, name);
+    if (!repository) return { fullName, exists: false };
+    const branch = repository.default_branch || 'main';
+    const ref = await api('GET', `/repos/${route(owner)}/${route(name)}/git/ref/heads/${route(branch)}`, undefined, { allow404: true });
+    if (!ref) return { fullName, exists: true, branch, sha: null };
+    return { fullName, exists: true, branch, sha: ref.object.sha, visibility: repository.visibility };
+  })();
+  sourceCache.set(fullName, promise);
+  return promise;
+}
+
+function generatedHeader(comment = '#') {
+  return `${comment} ${manifest.policy.generatedFileMarker}; edit the fleet manifest or bootstrapper, not this file.`;
+}
+
+function renderZpkg(pair, spec, resolved) {
+  const deps = spec.imports.filter((dependency) => dependency.mode === 'zed');
+  if (deps.length === 0) return null;
+  const lines = [generatedHeader('#'), '[package]', `org = ${JSON.stringify(pair.testOrg)}`, `name = ${JSON.stringify(spec.name)}`, 'version = "0.1.0"', `description = ${JSON.stringify(spec.description ?? spec.focus.join('; '))}`, 'license = "MIT"', '', '[package.repository]', 'vcs = "git"', `url = ${JSON.stringify(`https://github.com/${pair.testOrg}/${spec.name}`)}`, '', '[install]', 'dir = ".vendor/.zed"', '', '[dependencies]'];
+  for (const dependency of deps) lines.push(`${JSON.stringify(dependency.source)} = "^0.1.0"`);
+  lines.push('');
+  return lines.join('\n');
+}
+
+function renderPlan(pair, spec, resolved, missing) {
+  return JSON.stringify({
+    generatedBy: manifest.policy.generatedFileMarker,
+    schemaVersion: 1,
+    sourceOrganization: pair.sourceOrg,
+    testOrganization: pair.testOrg,
+    repository: spec.name,
+    profile: spec.profile,
+    description: spec.description ?? spec.focus.join('; '),
+    focus: spec.focus,
+    services: spec.services ?? [],
+    matrix: spec.matrix ?? {},
+    requiredChecks: manifest.profiles[spec.profile]?.required ?? [],
+    sources: resolved,
+    sourceGates: missing,
+    imports: spec.imports ?? [],
+    security: {
+      immutableSourcePins: true,
+      pullRequestCredentials: false,
+      leastPrivilege: true,
+      redactSecretsAndRawMedia: true,
+    },
+  }, null, 2) + '\n';
+}
+
+function renderReadme(pair, spec, resolved, missing) {
+  

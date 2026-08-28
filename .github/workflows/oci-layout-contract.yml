@@ -1,0 +1,178 @@
+name: local OCI image-layout contract
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/oci-layout-contract.yml"
+      - "scripts/oci_layout_contract.py"
+      - "scripts/oci_plan_contract.py"
+      - "docs/oci-layout-contract.md"
+  workflow_dispatch:
+    inputs:
+      zed_cli_ref:
+        description: Exact 40-character zed-pkg/zed-cli layout candidate
+        required: true
+        default: c6207598240c073ecce13e344c54c6074e37eb6a
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: oci-layout-contract-${{ github.event.pull_request.number || github.ref || github.run_id }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: "1"
+  HARNESS_REF: ${{ github.event.pull_request.head.sha || github.sha }}
+  ZED_CLI_REF: ${{ inputs.zed_cli_ref || 'c6207598240c073ecce13e344c54c6074e37eb6a' }}
+  NODE_LIB_REF: 2d41e658a382fdff27ef87a0db24dbaff280a685
+  NODE_APP_REF: ef794674647b3620e711f4f855865f8ad3340498
+  POLYGLOT_LIB_REF: e62ceb6337324a294d4fc861692a267ff0db97d0
+
+jobs:
+  contract:
+    name: Exact local-layout candidate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 55
+    steps:
+      - name: Validate immutable inputs
+        run: |
+          set -euo pipefail
+          [[ "$HARNESS_REF" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$ZED_CLI_REF" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$NODE_LIB_REF" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$NODE_APP_REF" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$POLYGLOT_LIB_REF" =~ ^[0-9a-f]{40}$ ]]
+
+      - name: Check out exact harness
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.HARNESS_REF }}
+          path: harness
+          fetch-depth: 1
+          persist-credentials: false
+          show-progress: false
+
+      - name: Check out exact zed CLI candidate
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: zed-pkg/zed-cli
+          ref: ${{ env.ZED_CLI_REF }}
+          path: zed-cli
+          fetch-depth: 1
+          persist-credentials: false
+          show-progress: false
+
+      - name: Check out exact node library fixture
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: zed-pkg-test/node-lib
+          ref: ${{ env.NODE_LIB_REF }}
+          path: fixtures/node-lib
+          fetch-depth: 1
+          persist-credentials: false
+          show-progress: false
+
+      - name: Check out exact node application fixture
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: zed-pkg-test/node-app
+          ref: ${{ env.NODE_APP_REF }}
+          path: fixtures/node-app
+          fetch-depth: 1
+          persist-credentials: false
+          show-progress: false
+
+      - name: Check out exact polyglot fixture
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: zed-pkg-test/polyglot-lib
+          ref: ${{ env.POLYGLOT_LIB_REF }}
+          path: fixtures/polyglot-lib
+          fetch-depth: 1
+          persist-credentials: false
+          show-progress: false
+
+      - name: Install declared Rust toolchain and syscall tracer
+        run: |
+          set -euo pipefail
+          rustup toolchain install stable --profile minimal --component rustfmt --component clippy
+          rustup default stable
+          if ! command -v strace >/dev/null 2>&1; then
+            sudo apt-get update
+            sudo apt-get install --yes --no-install-recommends strace
+          fi
+          rustc --version --verbose
+          cargo --version --verbose
+          cargo clippy --version
+          strace --version | head -1
+
+      - name: Verify exact checkouts and harness syntax
+        run: |
+          set -euo pipefail
+          test "$(git -C harness rev-parse HEAD)" = "$HARNESS_REF"
+          test "$(git -C zed-cli rev-parse HEAD)" = "$ZED_CLI_REF"
+          test "$(git -C fixtures/node-lib rev-parse HEAD)" = "$NODE_LIB_REF"
+          test "$(git -C fixtures/node-app rev-parse HEAD)" = "$NODE_APP_REF"
+          test "$(git -C fixtures/polyglot-lib rev-parse HEAD)" = "$POLYGLOT_LIB_REF"
+          python3 -m py_compile \
+            harness/scripts/oci_plan_contract.py \
+            harness/scripts/oci_layout_contract.py
+
+      - name: Capture deterministic rustfmt result
+        run: |
+          set -euo pipefail
+          mkdir -p evidence/formatted-source
+          cargo fmt --all --manifest-path zed-cli/Cargo.toml
+          git -C zed-cli diff --binary -- \
+            src/oci_layout.rs \
+            src/cli_oci.rs \
+            src/main.rs \
+            src/lib.rs > evidence/rustfmt.patch
+          cp zed-cli/src/oci_layout.rs evidence/formatted-source/oci_layout.rs
+          cp zed-cli/src/cli_oci.rs evidence/formatted-source/cli_oci.rs
+          cp zed-cli/src/main.rs evidence/formatted-source/main.rs
+          cp zed-cli/src/lib.rs evidence/formatted-source/lib.rs
+
+      - name: Build, test, and lint the formatted candidate
+        run: |
+          set -euo pipefail
+          cargo test --locked --manifest-path zed-cli/Cargo.toml --all-targets oci
+          cargo test --locked --manifest-path zed-cli/Cargo.toml --all-targets oci_layout
+          cargo clippy --locked --manifest-path zed-cli/Cargo.toml --all-targets -- -D warnings
+          cargo build --locked --release --manifest-path zed-cli/Cargo.toml --bin zed
+          zed-cli/target/release/zed --version
+
+      - name: Run black-box local-layout contract
+        run: |
+          set -euo pipefail
+          rm -rf evidence/layout
+          python3 harness/scripts/oci_layout_contract.py \
+            --zed zed-cli/target/release/zed \
+            --strace "$(command -v strace)" \
+            --node-lib fixtures/node-lib \
+            --node-app fixtures/node-app \
+            --polyglot-lib fixtures/polyglot-lib \
+            --evidence evidence/layout
+
+      - name: Require the pinned candidate to be rustfmt-clean
+        run: |
+          set -euo pipefail
+          git -C zed-cli diff --check
+          git -C zed-cli diff --exit-code
+
+      - name: Upload formatting and contract evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: oci-layout-contract-${{ github.run_id }}-${{ github.run_attempt }}
+          path: evidence
+          if-no-files-found: warn
+          retention-days: 7
+          include-hidden-files: false

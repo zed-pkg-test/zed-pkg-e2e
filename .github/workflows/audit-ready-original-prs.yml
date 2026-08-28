@@ -1,0 +1,37 @@
+name: audit ready original PRs
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/pr-merge/AUDIT-READY-ORIGINAL"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: audit-ready-original-prs
+  cancel-in-progress: false
+
+jobs:
+  audit:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    env:
+      GH_TOKEN: ${{ secrets.FLEET_GH_TOKEN }}
+    steps:
+      - name: Validate stored credential
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test -n "$GH_TOKEN"
+          test "$(gh api user --jq '.login')" = "ORESoftware"
+
+      - name: Check out exact auditor
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+
+      - name: Audit exact heads without writes
+        shell: bash
+        run: node .github/scripts/audit-ready-original-prs.mjs

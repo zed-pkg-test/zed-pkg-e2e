@@ -1,0 +1,276 @@
+name: zedignore and manifest publish-exclude union
+
+on:
+  pull_request:
+    paths:
+      - .github/workflows/zedignore-manifest-union.yml
+      - docs/zedignore-manifest-union.md
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: zedignore-manifest-union-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  ZED_CLI_COMMIT: ca42115744b0d6d1ee18045b0e480e17a699af6f
+  ZED_CLI_BASE: 1ab18fcb2ff884e82af4cac4513d7b983a23c84a
+
+jobs:
+  certify:
+    name: publish-ignore union / ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-15, windows-2025]
+
+    steps:
+      - name: Check out independent certification repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+          show-progress: false
+
+      - name: Check out exact product candidate and history
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: zed-pkg/zed-cli
+          ref: ${{ env.ZED_CLI_COMMIT }}
+          path: product/zed-cli
+          fetch-depth: 0
+          persist-credentials: false
+          show-progress: false
+
+      - name: Require immutable base ancestry and exact two-file delta
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$ZED_CLI_COMMIT" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$ZED_CLI_BASE" =~ ^[0-9a-f]{40}$ ]]
+          test "$(git -C product/zed-cli rev-parse HEAD)" = "$ZED_CLI_COMMIT"
+          git -C product/zed-cli merge-base --is-ancestor "$ZED_CLI_BASE" "$ZED_CLI_COMMIT"
+          changed="$(git -C product/zed-cli diff --name-only "$ZED_CLI_BASE" "$ZED_CLI_COMMIT")"
+          expected=$'docs/publish-ignore.md\nsrc/ops_entry.rs'
+          test "$changed" = "$expected"
+          git -C product/zed-cli diff --check "$ZED_CLI_BASE" "$ZED_CLI_COMMIT"
+
+      - name: Install pinned Rust toolchain
+        uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30
+        with:
+          toolchain: stable
+          components: rustfmt,clippy
+
+      - name: Install Python 3.12
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v6.0.0
+        with:
+          python-version: "3.12"
+          check-latest: false
+
+      - name: Run exact-head Rust quality gates
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo fmt --manifest-path product/zed-cli/Cargo.toml --all --check
+          cargo test --manifest-path product/zed-cli/Cargo.toml --locked --lib ops::publish_ignore_tests
+          cargo clippy --manifest-path product/zed-cli/Cargo.toml --locked --lib --bin zed -- -D warnings
+          cargo build --manifest-path product/zed-cli/Cargo.toml --locked --release --bin zed
+
+      - name: Run three-source-state archive and warning contract
+        shell: bash
+        env:
+          RUNNER_OS_NAME: ${{ runner.os }}
+          RUNNER_ARCH_NAME: ${{ runner.arch }}
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts
+          python - <<'PY'
+          import hashlib
+          import json
+          import os
+          import pathlib
+          import subprocess
+          import tarfile
+          import tempfile
+
+          candidate = os.environ["ZED_CLI_COMMIT"]
+          base = os.environ["ZED_CLI_BASE"]
+          workspace = pathlib.Path.cwd()
+          binary = workspace / "product" / "zed-cli" / "target" / "release" / ("zed.exe" if os.name == "nt" else "zed")
+          assert binary.is_file(), binary
+
+          sensitive = (
+              "TOKEN", "SECRET", "PASSWORD", "PRIVATE_KEY", "ACCESS_KEY",
+              "API_KEY", "AUTHORIZATION", "COOKIE", "CREDENTIAL",
+          )
+
+          def clean_environment(home):
+              environment = {
+                  key: value for key, value in os.environ.items()
+                  if not key.upper().startswith("ZED_PKG_")
+                  and not any(marker in key.upper() for marker in sensitive)
+              }
+              environment["ZED_PKG_HOME"] = str(home)
+              environment["ZED_PKG_REGISTRY"] = "http://127.0.0.1:9"
+              environment["GIT_TERMINAL_PROMPT"] = "0"
+              return environment
+
+          def write_manifest(project, exclusions):
+              rendered = ", ".join(json.dumps(rule) for rule in exclusions)
+              (project / ".zpkg.toml").write_text(
+                  "\n".join([
+                      "[package]",
+                      'org = "acme"',
+                      'name = "ignore-fixture"',
+                      'version = "1.0.0"',
+                      'description = "publish ignore conformance fixture"',
+                      'license = "MIT"',
+                      "",
+                      "[package.repository]",
+                      'vcs = "git"',
+                      'url = "https://example.invalid/acme/ignore-fixture"',
+                      "",
+                      "[publish]",
+                      f"exclude = [{rendered}]",
+                      "",
+                  ]),
+                  encoding="utf-8",
+              )
+
+          def invoke_pack(root, name, exclusions, zedignore):
+              project = root / name
+              project.mkdir()
+              write_manifest(project, exclusions)
+              (project / "LICENSE").write_text("MIT\n", encoding="utf-8")
+              (project / "visible.txt").write_text("visible\n", encoding="utf-8")
+              (project / ".hidden").write_text("intentional hidden data\n", encoding="utf-8")
+              (project / ".manifest-only").mkdir()
+              (project / ".manifest-only" / "private.txt").write_text("manifest excluded\n", encoding="utf-8")
+              (project / ".zed-only").mkdir()
+              (project / ".zed-only" / "private.txt").write_text("zedignore excluded\n", encoding="utf-8")
+              (project / "target").mkdir()
+              (project / "target" / "keep.txt").write_text("re-included\n", encoding="utf-8")
+              if zedignore is not None:
+                  (project / ".zedignore").write_text(zedignore, encoding="utf-8")
+
+              out = root / f"{name}-out"
+              home = root / f"{name}-home"
+              result = subprocess.run(
+                  [str(binary), "pack", "--out", str(out)],
+                  cwd=project,
+                  env=clean_environment(home),
+                  text=True,
+                  capture_output=True,
+                  timeout=30,
+                  check=False,
+              )
+              assert result.returncode == 0, (result.stdout, result.stderr)
+              archive = out / "acme-ignore-fixture-1.0.0.tar.gz"
+              assert archive.is_file(), archive
+              with tarfile.open(archive, mode="r:gz") as packaged:
+                  names = set(packaged.getnames())
+              return result, names, archive
+
+          temp = pathlib.Path(os.environ.get("RUNNER_TEMP") or tempfile.gettempdir())
+          root = pathlib.Path(tempfile.mkdtemp(prefix="zedignore-union-", dir=temp))
+
+          conflict, names, archive = invoke_pack(
+              root,
+              "conflict",
+              [".manifest-only/**", "target/**", ".zpkg.toml", "LICENSE*"],
+              "# file-level publish policy\n.zed-only/**\n!target\n",
+          )
+          assert conflict.stderr.count("both .zpkg.toml [publish].exclude") == 1, conflict.stderr
+          assert conflict.stderr.count("conflicting publish-ignore rules") == 1, conflict.stderr
+          assert "manifest first, .zedignore second" in conflict.stderr
+          assert "the later .zedignore rule wins" in conflict.stderr
+          assert "`target`" in conflict.stderr
+          required = {
+              "pkg/.zpkg.toml",
+              "pkg/LICENSE",
+              "pkg/visible.txt",
+              "pkg/.hidden",
+              "pkg/target/keep.txt",
+          }
+          assert required <= names, (required - names, sorted(names))
+          forbidden = {
+              "pkg/.zedignore",
+              "pkg/.manifest-only/private.txt",
+              "pkg/.zed-only/private.txt",
+          }
+          assert names.isdisjoint(forbidden), sorted(names & forbidden)
+
+          duplicate, _, _ = invoke_pack(
+              root,
+              "same-polarity",
+              [".cache/**"],
+              "**/.CACHE/**\n",
+          )
+          assert duplicate.stderr.count("both .zpkg.toml [publish].exclude") == 1, duplicate.stderr
+          assert "conflicting publish-ignore rules" not in duplicate.stderr
+
+          manifest_only, _, _ = invoke_pack(
+              root,
+              "manifest-only",
+              [".manifest-only/**"],
+              None,
+          )
+          assert "both .zpkg.toml [publish].exclude" not in manifest_only.stderr
+          assert "conflicting publish-ignore rules" not in manifest_only.stderr
+
+          file_only, _, _ = invoke_pack(
+              root,
+              "file-only",
+              [],
+              ".zed-only/**\n",
+          )
+          assert "both .zpkg.toml [publish].exclude" not in file_only.stderr
+          assert "conflicting publish-ignore rules" not in file_only.stderr
+
+          evidence = {
+              "$schema": "zed-pkg-test/zedignore-manifest-union/v1",
+              "candidate": candidate,
+              "base": base,
+              "runner": {
+                  "os": os.environ["RUNNER_OS_NAME"],
+                  "arch": os.environ["RUNNER_ARCH_NAME"],
+              },
+              "binary_sha256": hashlib.sha256(binary.read_bytes()).hexdigest(),
+              "conflict_archive_sha256": hashlib.sha256(archive.read_bytes()).hexdigest(),
+              "assertions": {
+                  "archive_members_checked": True,
+                  "both_sources_warning_once": True,
+                  "conflict_warning_once": True,
+                  "same_polarity_duplicate_quiet": True,
+                  "single_source_quiet": True,
+                  "hidden_file_not_blanket_excluded": True,
+                  "always_include_preserved": True,
+                  "later_zedignore_negation_wins": True,
+              },
+              "result": "passed",
+          }
+          output = workspace / "artifacts" / f"zedignore-union-{os.environ['RUNNER_OS_NAME']}-{os.environ['RUNNER_ARCH_NAME']}.json"
+          output.write_text(json.dumps(evidence, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+          PY
+
+      - name: Require immutable product and harness source
+        shell: bash
+        run: |
+          set -euo pipefail
+          git -C product/zed-cli diff --exit-code
+          git -C product/zed-cli diff --cached --exit-code
+          status="$(git status --porcelain --untracked-files=all | grep -vE '^\?\? (artifacts|product)/' || true)"
+          test -z "$status"
+
+      - name: Upload commit-addressed evidence
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: zedignore-manifest-union-${{ runner.os }}-${{ runner.arch }}-${{ env.ZED_CLI_COMMIT }}
+          path: artifacts
+          if-no-files-found: error
+          retention-days: 14
+          include-hidden-files: false

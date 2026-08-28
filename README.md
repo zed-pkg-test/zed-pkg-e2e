@@ -171,6 +171,21 @@ bash scripts/durable-first-install-polyglot.sh \
 | `suites/fixture-package-pages.spec.ts` | Each single-language fixture (`node-lib`, `rust-lib`, `go-lib`, `python-lib`) renders the version, description, repository URL, and install snippet persisted from its `.zpkg.toml`; each is findable through HTMX search; a missing package is a real 404. |
 | `suites/polyglot-fan-out.spec.ts` | `polyglot-lib` becomes four separately addressable packages with distinct content hashes, and the unsuffixed repository name is not itself a package. Ecosystem-specific install enforcement remains in the lifecycle matrix, which reads each derived artifact manifest and exercises the native toolchain. |
 
+## Managed application lifecycle certification
+
+`.github/workflows/formal-app-lifecycle.yml` pins the exact production
+`zed-pkg/zed-sync` commit for DEN-4181. It verifies immutable commit and artifact
+provenance, cross-checks the registered Quint model against the canonical trace
+and JSON Schema, requires Rust, JavaScript, and Dart to consume the same fixture,
+and executes the production repository's complete pinned verification matrix.
+
+Run the cross-repository structural check against a sibling checkout:
+
+```bash
+python3 scripts/verify_formal_app_lifecycle_contract.py ../zed-sync
+python3 -m unittest -v tests/test_formal_app_lifecycle_contract.py
+```
+
 The browser workflow pins the stack, CLI, interfaces, Rust servers, and fixture
 inputs to immutable commit SHAs. Both Node workspaces install from their checked-in
 lockfiles with `npm ci`. The fixture publisher forces the local API URL, uses a

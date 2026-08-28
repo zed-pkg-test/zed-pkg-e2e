@@ -1,0 +1,193 @@
+name: Live paired test-fleet audit
+
+on:
+  pull_request:
+    paths:
+      - 'bootstrap/test-org-fleet.json.gz.b64.parts/**'
+      - 'scripts/audit-live-test-org-fleet.mjs'
+      - 'scripts/export-test-org-fleet-index.mjs'
+      - 'scripts/read-fleet-manifest.mjs'
+      - 'tests/live-test-org-fleet-audit.test.mjs'
+      - '.github/workflows/live-test-org-fleet-audit.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'bootstrap/test-org-fleet.json.gz.b64.parts/**'
+      - 'scripts/audit-live-test-org-fleet.mjs'
+      - 'scripts/export-test-org-fleet-index.mjs'
+      - 'scripts/read-fleet-manifest.mjs'
+      - 'tests/live-test-org-fleet-audit.test.mjs'
+      - '.github/workflows/live-test-org-fleet-audit.yml'
+  schedule:
+    - cron: '43 7 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: live-paired-test-fleet-audit-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  unit:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Check out without persisted credentials
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          show-progress: false
+      - name: Validate auditor and canonical exporter
+        run: |
+          node --check scripts/audit-live-test-org-fleet.mjs
+          node --test tests/live-test-org-fleet-audit.test.mjs
+          node scripts/export-test-org-fleet-index.mjs > canonical-test-fleet-index.json
+          node - <<'NODE'
+          const fs = require('node:fs');
+          const index = JSON.parse(fs.readFileSync('canonical-test-fleet-index.json', 'utf8'));
+          if (index.pairCount < 1) throw new Error('canonical exporter returned no pairs');
+          if (index.expectedRepositoryCount < index.managedRepositoryCount) throw new Error('expected count is below managed count');
+          if (!index.excludedOrganizations.map((value) => value.toLowerCase()).includes('r2g')) throw new Error('r2g exclusion missing');
+          if (!index.excludedOrganizations.map((value) => value.toLowerCase()).includes('r2g-test')) throw new Error('r2g-test exclusion missing');
+          NODE
+
+  live:
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    env:
+      # The repository-scoped GITHUB_TOKEN cannot enumerate private repositories
+      # in sibling organizations. Configure a read-only cross-org token or an
+      # approved short-lived GitHub App installation token as FLEET_AUDIT_TOKEN.
+      GH_TOKEN: ${{ secrets.FLEET_AUDIT_TOKEN }}
+    steps:
+      - name: Check out without persisted credentials
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          show-progress: false
+
+      - name: Require complete cross-organization visibility
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          if [[ -z "${GH_TOKEN:-}" ]]; then
+            {
+              echo '# Live paired test-fleet audit'
+              echo
+              echo '**Result:** not executed because `FLEET_AUDIT_TOKEN` is not configured.'
+              echo
+              echo 'The normal repository `GITHUB_TOKEN` is intentionally rejected because private sibling repositories would otherwise be reported as missing.'
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+          echo "::add-mask::$GH_TOKEN"
+
+      - name: Export the current canonical denominator
+        run: node scripts/export-test-org-fleet-index.mjs > canonical-test-fleet-index.json
+
+      - name: Compare all paired organizations with the current manifest
+        id: audit
+        shell: bash
+        run: |
+          set +e
+          node scripts/audit-live-test-org-fleet.mjs --json \
+            > live-test-fleet-audit.json \
+            2> live-test-fleet-audit.stderr
+          status=$?
+          set -e
+          printf 'exit_code=%s\n' "$status" >> "$GITHUB_OUTPUT"
+          test -e live-test-fleet-audit.stderr || : > live-test-fleet-audit.stderr
+
+      - name: Summarize and enforce the current machine-readable report
+        if: always() && steps.audit.outcome != 'skipped'
+        shell: bash
+        env:
+          AUDIT_EXIT_CODE: ${{ steps.audit.outputs.exit_code }}
+        run: |
+          node - <<'NODE'
+          const fs = require('node:fs');
+          const reportPath = 'live-test-fleet-audit.json';
+          const indexPath = 'canonical-test-fleet-index.json';
+          const stderrPath = 'live-test-fleet-audit.stderr';
+          const summaryPath = process.env.GITHUB_STEP_SUMMARY;
+          const auditExitCode = Number(process.env.AUDIT_EXIT_CODE ?? '1');
+          const token = process.env.GH_TOKEN ?? '';
+          const redact = (value) => token ? value.split(token).join('[REDACTED]') : value;
+          const stderr = fs.existsSync(stderrPath) ? redact(fs.readFileSync(stderrPath, 'utf8')).slice(0, 4000) : '';
+          const appendSummary = (text) => { if (summaryPath) fs.appendFileSync(summaryPath, `${text}\n`); };
+
+          const index = JSON.parse(fs.readFileSync(indexPath, 'utf8'));
+          let report;
+          try {
+            const raw = fs.readFileSync(reportPath, 'utf8');
+            if (!raw.trim()) throw new Error('audit JSON is empty');
+            report = JSON.parse(raw);
+          } catch (error) {
+            appendSummary('# Live paired test-fleet audit');
+            appendSummary('');
+            appendSummary(`**Result:** auditor failed before producing valid JSON (exit ${auditExitCode}).`);
+            if (stderr) appendSummary(`\n\`\`\`text\n${stderr}\n\`\`\``);
+            throw error;
+          }
+
+          appendSummary('# Live paired test-fleet audit');
+          appendSummary('');
+          appendSummary(`Canonical repositories present: **${report.presentRepositories}/${report.expectedRepositories}**`);
+          appendSummary('');
+          appendSummary(`Pairs: **${report.pairCount}** · Missing: **${report.missingRepositories}** · Extras preserved: **${report.extraRepositories}** · Canonical hygiene findings: **${report.expectedHygieneFindings}**`);
+          appendSummary('');
+          appendSummary('| Production org | Test org | Canonical | Present | Missing | Extras | Hygiene |');
+          appendSummary('|---|---|---:|---:|---:|---:|---:|');
+          for (const item of report.reports) {
+            appendSummary(`| \`${item.sourceOrganization}\` | \`${item.testOrganization}\` | ${item.expectedRepositories} | ${item.present.length} | ${item.missing.length} | ${item.extras.length} | ${item.expectedHygiene.length} |`);
+          }
+          const missing = report.reports.filter((item) => item.missing.length);
+          if (missing.length) {
+            appendSummary('');
+            appendSummary('## Missing canonical repositories');
+            appendSummary('');
+            for (const item of missing) appendSummary(`- **${item.testOrganization}:** ${item.missing.map((name) => `\`${name}\``).join(', ')}`);
+          }
+          if (stderr) {
+            appendSummary('');
+            appendSummary('## Auditor diagnostics');
+            appendSummary('');
+            appendSummary(`\`\`\`text\n${stderr}\n\`\`\``);
+          }
+
+          const compact = {
+            auditExitCode,
+            canonicalPairCount: index.pairCount,
+            canonicalExpectedRepositories: index.expectedRepositoryCount,
+            pairCount: report.pairCount,
+            expectedRepositories: report.expectedRepositories,
+            presentRepositories: report.presentRepositories,
+            missingRepositories: report.missingRepositories,
+            extraRepositories: report.extraRepositories,
+            expectedHygieneFindings: report.expectedHygieneFindings,
+          };
+          console.log(JSON.stringify(compact, null, 2));
+
+          const failures = [];
+          if (auditExitCode !== 0) failures.push(`auditor exited ${auditExitCode}`);
+          if (report.pairCount !== index.pairCount) failures.push(`pair count ${report.pairCount} != exporter ${index.pairCount}`);
+          if (report.expectedRepositories !== index.expectedRepositoryCount) failures.push(`expected repository count ${report.expectedRepositories} != exporter ${index.expectedRepositoryCount}`);
+          if (report.missingRepositories !== 0) failures.push(`missing ${report.missingRepositories} canonical repositories`);
+          if (report.expectedHygieneFindings !== 0) failures.push(`found ${report.expectedHygieneFindings} canonical repository hygiene failures`);
+          if (failures.length) throw new Error(failures.join('; '));
+          NODE
+
+      - name: Upload complete live-audit evidence
+        if: always() && steps.audit.outcome != 'skipped'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: live-paired-test-fleet-audit-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            canonical-test-fleet-index.json
+            live-test-fleet-audit.json
+            live-test-fleet-audit.stderr
+          if-no-files-found: warn
+          retention-days: 30

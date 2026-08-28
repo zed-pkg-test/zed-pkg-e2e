@@ -1,0 +1,106 @@
+# One-time idempotent recovery for organizations interrupted by GitHub's secondary content-creation limiter.
+name: resume rate-limited test organization fleet
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/resume-test-org-fleet.yml"
+      - ".github/fleet-resume/START"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: resume-rate-limited-test-org-fleet
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    name: Validate recovery contract
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Check out without persisted credentials
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          show-progress: false
+
+      - name: Validate fleet source and manifest
+        run: |
+          node --check scripts/bootstrap-test-org-fleet.mjs
+          node --check scripts/validate-test-org-fleet.mjs
+          node scripts/validate-test-org-fleet.mjs
+          node --test tests/test-org-fleet.test.mjs tests/git-transport-worktree.test.mjs
+
+  resume:
+    name: Resume ${{ matrix.organization }}
+    needs: validate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      max-parallel: 1
+      matrix:
+        organization:
+          - evento-globolo-test
+          - fiducia-cloud-test
+          - sonus-auris-test
+          - messaging-intel-test
+          - quaestor-ledger-test
+          - opto-sync-test
+          - memebank-test
+          - file-tunnel-test
+          - scintilla-run-test
+          - streempilot-test
+          - shared-auth-test
+          - hypesiege-test
+    steps:
+      - name: Check out without persisted credentials
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          show-progress: false
+
+      - name: Export the encrypted fleet PAT without logging it
+        shell: bash
+        env:
+          STORED_FLEET_PAT: ${{ secrets.FLEET_GH_TOKEN }}
+        run: |
+          set -euo pipefail
+          test -n "$STORED_FLEET_PAT"
+          printf 'GH_TOKEN=%s\n' "$STORED_FLEET_PAT" >> "$GITHUB_ENV"
+
+      - name: Verify target organization visibility
+        shell: bash
+        env:
+          FLEET_ORGANIZATION: ${{ matrix.organization }}
+        run: |
+          set -euo pipefail
+          gh api "orgs/$FLEET_ORGANIZATION" --silent
+
+      - name: Adopt completed work and create missing repositories and PRs
+        shell: bash
+        env:
+          FLEET_ORGANIZATION: ${{ matrix.organization }}
+          TEST_ORG_FLEET_SKIP_TOPICS: "true"
+        run: |
+          set -euo pipefail
+          node scripts/bootstrap-test-org-fleet.mjs \
+            --apply \
+            --org "$FLEET_ORGANIZATION" \
+            --concurrency 1
+
+      - name: Record organization completion
+        shell: bash
+        env:
+          FLEET_ORGANIZATION: ${{ matrix.organization }}
+        run: |
+          {
+            echo "## $FLEET_ORGANIZATION"
+            echo
+            echo "Idempotent recovery completed with authenticated Git transport."
+            echo
+            echo "Repository topics were deferred to minimize content-creation API pressure."
+          } >> "$GITHUB_STEP_SUMMARY"
