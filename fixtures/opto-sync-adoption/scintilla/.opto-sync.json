@@ -1,0 +1,63 @@
+{
+  "schemaVersion": "opto-sync.adoption.v1",
+  "project": "scintilla-run/scintilla-clients",
+  "clientPackage": {
+    "package": "opto-sync/opto-sync-clients",
+    "repository": "https://github.com/opto-sync/opto-sync-clients",
+    "version": "0.2.0",
+    "commit": "068414c8ff7d4262d0a395959b5209d5908f0fcc"
+  },
+  "languages": [
+    "dart",
+    "gleam",
+    "rust",
+    "typescript"
+  ],
+  "dataScopes": [
+    "artifactIndex",
+    "experimentDefinitions",
+    "observationCheckpoints",
+    "runMetadata"
+  ],
+  "localStores": [
+    "indexeddb",
+    "sqlite"
+  ],
+  "transports": [
+    "http",
+    "websocket"
+  ],
+  "writeStrategies": [
+    "local-durable",
+    "local-then-remote",
+    "remote-confirmed"
+  ],
+  "conflictPolicy": {
+    "arrayStrategy": "mergeByKey",
+    "resolveByTimestamp": true,
+    "lwwKeys": [
+      "updatedAt"
+    ],
+    "arrayMatchKeys": [
+      "id"
+    ],
+    "tombstones": true
+  },
+  "background": {
+    "webServiceWorker": true,
+    "mobileWorker": true,
+    "desktopWorker": true
+  },
+  "security": {
+    "authenticatedTransport": true,
+    "encryptedAtRest": true,
+    "secretsInManifest": false
+  },
+  "rollout": {
+    "phase": "declared",
+    "owners": [
+      "scintilla-run"
+    ]
+  },
+  "notes": "Sync experiment definitions, run metadata, artifact indexes, observation checkpoints, and annotations. Artifact binaries, runner credentials, signing keys, and live high-volume telemetry streams remain outside Opto Sync."
+}

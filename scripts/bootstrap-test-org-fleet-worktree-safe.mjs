@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Hotfix wrapper for idempotent reruns of generated branches containing gitlinks.
+// Compatibility wrapper for idempotent reruns of generated branches containing gitlinks.
 import fs from 'node:fs';
 import path from 'node:path';
 import process from 'node:process';
@@ -17,14 +17,20 @@ const gitlinkIndexSeam = [
   '        `${gitlink.mode},${gitlink.sha},${gitlink.path}`,',
   '      ]);',
 ].join('\n');
+const gitlinkWorktreePlaceholder =
+  "      fs.mkdirSync(path.join(worktree, gitlink.path), { recursive: true });";
 
-if (!launcher.includes(gitlinkIndexSeam)) {
-  throw new Error('bootstrap gitlink index seam changed; refusing an unsafe runtime patch');
+let patchedLauncher = launcher;
+if (!launcher.includes(gitlinkWorktreePlaceholder)) {
+  if (!launcher.includes(gitlinkIndexSeam)) {
+    throw new Error('bootstrap gitlink index seam changed; refusing an unsafe runtime patch');
+  }
+  patchedLauncher = launcher.replace(
+    gitlinkIndexSeam,
+    `${gitlinkIndexSeam}\n${gitlinkWorktreePlaceholder}`,
+  );
 }
 
-const worktreeSafeGitlinkBlock = `${gitlinkIndexSeam}\n` +
-  "      fs.mkdirSync(path.join(worktree, gitlink.path), { recursive: true });";
-const patchedLauncher = launcher.replace(gitlinkIndexSeam, worktreeSafeGitlinkBlock);
 const temporaryLauncher = path.join(
   scriptsDirectory,
   `.bootstrap-test-org-fleet-worktree-safe-${process.pid}-${Date.now()}.mjs`,

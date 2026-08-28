@@ -1,0 +1,76 @@
+{
+  "organizations": {
+    "acme": [
+      "acme/lib-b",
+      "acme/app",
+      "acme/shared",
+      "acme/cycle-b",
+      "acme/lib-a",
+      "acme/archived",
+      "acme/cycle-a",
+      "acme/app"
+    ]
+  },
+  "page_size": 3,
+  "repositories": {
+    "acme/app": {
+      "commit_sha": "1111111111111111111111111111111111111111",
+      "default_branch": "main",
+      "files": {
+        ".gitmodules": "[submodule \"shared\"]\n\tpath = vendor/shared\n\turl = git@github.com:acme/shared.git\n",
+        ".zpkg.lock": "version = 1\n\n[[package]]\norg = \"acme\"\nname = \"lib-a\"\nversion = \"1.0.0\"\nsha256 = \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"\n\n[[package]]\norg = \"acme\"\nname = \"lib-b\"\nversion = \"1.0.0\"\nsha256 = \"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\"\n\n[[package]]\norg = \"acme\"\nname = \"shared\"\nversion = \"2.0.0\"\nsha256 = \"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\"\n",
+        ".zpkg.toml": "[package]\norg = \"acme\"\nname = \"app\"\nversion = \"0.1.0\"\n\n[dependencies]\n\"acme/lib-b\" = \"^1.0\"\n\"acme/lib-a\" = \"^1.0\\\" ]\\nmalicious\"\n",
+        "flake.lock": "{\n  \"nodes\": {\n    \"cycle-a\": {\n      \"locked\": {\n        \"owner\": \"acme\",\n        \"repo\": \"cycle-a\",\n        \"rev\": \"5555555555555555555555555555555555555555\",\n        \"type\": \"github\"\n      }\n    },\n    \"root\": {\n      \"inputs\": {\n        \"cycle-a\": \"cycle-a\"\n      }\n    }\n  },\n  \"root\": \"root\",\n  \"version\": 7\n}\n",
+        "flake.nix": "{\n  inputs.lib-a.url = \"github:acme/lib-a/release-1\";\n  outputs = { self, ... }: {};\n}\n",
+        "nix/sources.json": "{\n  \"shared\": {\n    \"owner\": \"acme\",\n    \"repo\": \"shared\",\n    \"rev\": \"4444444444444444444444444444444444444444\"\n  }\n}\n"
+      },
+      "gitlinks": {
+        "vendor/shared": "4444444444444444444444444444444444444444"
+      },
+      "private": true
+    },
+    "acme/archived": {
+      "archived": true,
+      "commit_sha": "7777777777777777777777777777777777777777",
+      "default_branch": "trunk",
+      "files": {}
+    },
+    "acme/cycle-a": {
+      "commit_sha": "5555555555555555555555555555555555555555",
+      "default_branch": "main",
+      "files": {
+        ".zpkg.toml": "[package]\norg = \"acme\"\nname = \"cycle-a\"\nversion = \"0.1.0\"\n\n[dependencies]\n\"acme/cycle-b\" = \"^0.1\"\n"
+      }
+    },
+    "acme/cycle-b": {
+      "commit_sha": "6666666666666666666666666666666666666666",
+      "default_branch": "main",
+      "files": {
+        ".zpkg.toml": "[package]\norg = \"acme\"\nname = \"cycle-b\"\nversion = \"0.1.0\"\n\n[dependencies]\n\"acme/cycle-a\" = \"^0.1\"\n"
+      }
+    },
+    "acme/lib-a": {
+      "commit_sha": "2222222222222222222222222222222222222222",
+      "default_branch": "main",
+      "files": {
+        ".zpkg.toml": "[package]\norg = \"acme\"\nname = \"lib-a\"\nversion = \"0.1.0\"\n\n[dependencies]\n\"acme/shared\" = \"^2.0\"\n"
+      }
+    },
+    "acme/lib-b": {
+      "commit_sha": "3333333333333333333333333333333333333333",
+      "default_branch": "main",
+      "files": {
+        ".zpkg.toml": "[package]\norg = \"acme\"\nname = \"lib-b\"\nversion = \"0.1.0\"\n\n[dependencies]\n\"acme/shared\" = \"^2.0\"\n"
+      }
+    },
+    "acme/shared": {
+      "commit_sha": "4444444444444444444444444444444444444444",
+      "default_branch": "main",
+      "files": {
+        ".zpkg.toml": "[package]\norg = \"acme\"\nname = \"shared\"\nversion = \"0.1.0\"\n"
+      }
+    }
+  },
+  "require_token": false,
+  "schema": "zpkg/github-api-fixture/v1"
+}

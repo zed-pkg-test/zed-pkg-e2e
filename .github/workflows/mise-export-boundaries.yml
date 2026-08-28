@@ -1,0 +1,153 @@
+name: mise export boundaries
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      zed_cli_ref:
+        description: Immutable zed-cli commit to certify
+        required: false
+        default: 3434716591e048d0a769bafd47353d2953e89e48
+  schedule:
+    - cron: "17 5 * * 3"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mise-export-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: "1"
+  ZED_CLI_REF: ${{ github.event.inputs.zed_cli_ref || '3434716591e048d0a769bafd47353d2953e89e48' }}
+
+jobs:
+  certify:
+    name: export / ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-24.04
+          - macos-15
+          - windows-2025
+    steps:
+      - name: Require an immutable CLI pin
+        run: |
+          set -euo pipefail
+          [[ "$ZED_CLI_REF" =~ ^[0-9a-f]{40}$ ]]
+
+      - name: Check out certification harness
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: harness
+          fetch-depth: 1
+          persist-credentials: false
+          show-progress: false
+
+      - name: Check out immutable zed CLI
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: zed-pkg/zed-cli
+          ref: ${{ env.ZED_CLI_REF }}
+          path: zed-cli
+          fetch-depth: 1
+          persist-credentials: false
+          show-progress: false
+
+      - name: Install validation toolchain
+        run: |
+          set -euo pipefail
+          rustup toolchain install stable --profile minimal --component rustfmt,clippy
+          rustup default stable
+          rustc --version --verbose
+          cargo --version --verbose
+          python --version
+
+      - name: Run focused exporter tests and strict lint
+        run: |
+          set -euo pipefail
+          python -m py_compile \
+            harness/scripts/mise_export_boundaries.py \
+            harness/scripts/mise_export_ownership_state.py
+          cargo fmt --all --check --manifest-path zed-cli/Cargo.toml
+          cargo test --locked --manifest-path zed-cli/Cargo.toml mise_export
+          cargo test --locked --manifest-path zed-cli/Cargo.toml --test mise_export_api_boundaries
+          cargo test --locked --manifest-path zed-cli/Cargo.toml --test mise_export_cli
+          cargo test --locked --manifest-path zed-cli/Cargo.toml --test mise_export_reserved_paths_cli
+          cargo clippy --locked --manifest-path zed-cli/Cargo.toml --all-targets -- -D warnings
+
+      - name: Build immutable release CLI
+        run: |
+          set -euo pipefail
+          cargo build --locked --release --manifest-path zed-cli/Cargo.toml --bin zed
+          if [[ "$RUNNER_OS" == "Windows" ]]; then
+            test -f zed-cli/target/release/zed.exe
+          else
+            test -x zed-cli/target/release/zed
+          fi
+
+      - name: Certify ownership, conflict, secret, and path boundaries
+        run: |
+          set -euo pipefail
+          ZED_BIN="$PWD/zed-cli/target/release/zed"
+          if [[ "$RUNNER_OS" == "Windows" ]]; then
+            ZED_BIN="${ZED_BIN}.exe"
+          fi
+          python harness/scripts/mise_export_boundaries.py \
+            --zed "$ZED_BIN" \
+            --work-root "$RUNNER_TEMP/zed-mise-export"
+          python harness/scripts/mise_export_ownership_state.py \
+            --zed "$ZED_BIN" \
+            --work-root "$RUNNER_TEMP/zed-mise-export-ownership"
+
+      - name: Collect failure diagnostics
+        if: failure()
+        run: |
+          set +e
+          diagnostics="$RUNNER_TEMP/zed-mise-export-diagnostics"
+          mkdir -p "$diagnostics"
+          cp -R "$RUNNER_TEMP/zed-mise-export" "$diagnostics/boundaries-work-root" 2>/dev/null || true
+          cp -R "$RUNNER_TEMP/zed-mise-export-ownership" "$diagnostics/ownership-work-root" 2>/dev/null || true
+          git -C zed-cli status --porcelain=v1 --untracked-files=all \
+            > "$diagnostics/zed-cli-status.txt" 2>&1
+          git -C harness status --porcelain=v1 --untracked-files=all \
+            > "$diagnostics/harness-status.txt" 2>&1
+          rustc --version --verbose > "$diagnostics/rust-version.txt" 2>&1
+          cargo --version --verbose > "$diagnostics/cargo-version.txt" 2>&1
+          python --version > "$diagnostics/python-version.txt" 2>&1
+
+      - name: Upload failure diagnostics
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: mise-export-${{ matrix.os }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/zed-mise-export-diagnostics
+          if-no-files-found: warn
+          retention-days: 14
+          include-hidden-files: true
+
+  gate:
+    name: All mise export platforms passed
+    if: always()
+    needs: certify
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Enforce aggregate result
+        env:
+          MATRIX_RESULT: ${{ needs.certify.result }}
+        run: |
+          set -euo pipefail
+          printf 'mise-export=%s\n' "$MATRIX_RESULT"
+          test "$MATRIX_RESULT" = success

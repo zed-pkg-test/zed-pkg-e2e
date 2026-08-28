@@ -9,7 +9,7 @@ async function applyGovernance(pair) {
   const repository = await ensureRepository(pair.testOrg, spec, 'public');
   if (!options.apply || repository._planned) return;
   const result = await writeTree(pair.testOrg, repository, manifest.policy.governanceBranch, renderGovernanceFiles(pair), [], 'chore: bootstrap test org governance');
-  if (result.changed) await ensurePullRequest(pair.testOrg, repository, manifest.policy.governanceBranch, result.defaultBranch, 'chore: bootstrap test organization governance', `## Changes\n- add organization profile and community health files\n- add a credential-free reusable contract workflow\n- document immutable source-pin and privacy requirements\n\n## Why\nStandardize governance for the ${pair.sourceOrg} test fleet.\n\n## Checks\n- generated files are deterministic\n- checkout credentials are not persisted\n- actions are pinned to immutable commits`);
+  await ensurePullRequest(pair.testOrg, repository, manifest.policy.governanceBranch, result.defaultBranch, 'chore: bootstrap test organization governance', `## Changes\n- add organization profile and community health files\n- add a credential-free reusable contract workflow\n- document immutable source-pin and privacy requirements\n\n## Why\nStandardize governance for the ${pair.sourceOrg} test fleet.\n\n## Checks\n- generated files are deterministic\n- checkout credentials are not persisted\n- actions are pinned to immutable commits`);
   await ensureTopics(pair.testOrg, repository, ['test-fleet', 'governance', 'github-actions']);
 }
 
@@ -19,9 +19,7 @@ async function applyTestRepository(pair, spec) {
   if (!options.apply || repository._planned) return;
   const generated = await generateRepositoryFiles(pair, spec);
   const result = await writeTree(pair.testOrg, repository, manifest.policy.branch, generated.files, generated.gitlinks, `test: bootstrap ${spec.profile} harness`);
-  if (result.changed) {
-    await ensurePullRequest(pair.testOrg, repository, manifest.policy.branch, result.defaultBranch, `test: bootstrap ${spec.profile} harness`, `## Changes\n- add the generated ${spec.profile} contract\n- pin source repositories to immutable commits\n- add submodule, Zed, and native-package lanes where declared\n- add credential-free PR validation and gated integration workflow\n\n## Why\nCreate the specialized ${pair.sourceOrg} test surface for: ${spec.focus.join('; ')}.\n\n## Impact\n${generated.missing.length ? `Source-gated until: ${generated.missing.join(', ')}.` : 'All declared source repositories resolved at bootstrap time.'}\n\n## Checks\n- node scripts/validate-plan.mjs\n- profile-specific checks are recorded in test-plan.json`);
-  }
+  await ensurePullRequest(pair.testOrg, repository, manifest.policy.branch, result.defaultBranch, `test: bootstrap ${spec.profile} harness`, `## Changes\n- add the generated ${spec.profile} contract\n- pin source repositories to immutable commits\n- add submodule, Zed, and native-package lanes where declared\n- add credential-free PR validation and gated integration workflow\n\n## Why\nCreate the specialized ${pair.sourceOrg} test surface for: ${spec.focus.join('; ')}.\n\n## Impact\n${generated.missing.length ? `Source-gated until: ${generated.missing.join(', ')}.` : 'All declared source repositories resolved at bootstrap time.'}\n\n## Checks\n- node scripts/validate-plan.mjs\n- profile-specific checks are recorded in test-plan.json`);
   await ensureTopics(pair.testOrg, repository, [...(spec.topics ?? []), pair.sourceOrg.toLowerCase(), spec.profile]);
 }
 

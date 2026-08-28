@@ -31,12 +31,12 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test "$(tr -d '\r\n' < bootstrap/execute-test-org-fleet-single-runner.once)" = "APPLY_TEST_FLEET_SINGLE_RUNNER_V1"
+          test "$(tr -d '\r\n' < bootstrap/execute-test-org-fleet-single-runner.once)" = "APPLY_TEST_FLEET_SINGLE_RUNNER_V3"
           node --check scripts/bootstrap-test-org-fleet.mjs
           node --check scripts/bootstrap-test-org-fleet-worktree-safe.mjs
           node --check scripts/validate-test-org-fleet.mjs
           node scripts/validate-test-org-fleet.mjs
-          node --test tests/test-org-fleet.test.mjs
+          node --test tests/test-org-fleet.test.mjs tests/bootstrap-retry-policy.test.mjs
 
       - name: Export the persisted fleet PAT without logging it
         shell: bash

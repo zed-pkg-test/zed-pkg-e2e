@@ -1,0 +1,501 @@
+name: create production dotgithub fleet
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/fleet-create/START"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: create-production-dotgithub-fleet
+  cancel-in-progress: false
+
+jobs:
+  create:
+    if: "${{ github.event.head_commit.message == 'chore: run production dotgithub fleet creation' }}"
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      GH_TOKEN: ${{ secrets.FLEET_GH_TOKEN }}
+    steps:
+      - name: Validate the stored fleet credential
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test -n "$GH_TOKEN"
+          login="$(gh api user --jq '.login')"
+          if [[ "$login" != "ORESoftware" ]]; then
+            echo "::error::FLEET_GH_TOKEN authenticated as unexpected user: $login"
+            exit 1
+          fi
+          gh auth setup-git
+
+      - name: Create and seed missing organization profile repositories
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          shopt -s inherit_errexit
+
+          owners=(
+            channelsiege
+            OmniBlitz
+            streamkore
+            hypeblitz
+            3FA-app
+            messaging-intel
+            akrion-sim
+            athlet-o
+            benefactor-cc
+            canonical-cloud
+            claritas-viz
+            cliptown
+            daedalus-fab
+            declarative-migrations
+            fiducia-cloud
+            anticaptrad
+            opto-sync
+            quaestor-ledger
+            sagitta-stack
+            shared-auth
+            scintilla-run
+            rust-ssr-demos
+            sonus-auris
+            usa-acc
+            voxletra
+            zed-pkg
+            zed-pkg-test
+            memebank
+            meta-agents-demo
+            networking-components
+            StreemPilot
+            unreal-unity-poc
+            file-tunnel
+            hypesiege
+            discrete-event-systems
+            drone-mngr
+            ORESoftware
+          )
+
+          created=()
+          existing=()
+          failed=()
+
+          for owner in "${owners[@]}"; do
+            echo "::group::$owner/.github"
+
+            if gh api "repos/$owner/.github" --silent 2>/dev/null; then
+              echo "already exists; preserving current contents"
+              existing+=("$owner")
+              echo "::endgroup::"
+              continue
+            fi
+
+            description="$owner organization-wide contributor guidance, governance, community health files, and shared automation policy."
+
+            if [[ "$owner" == "ORESoftware" ]]; then
+              create_endpoint="user/repos"
+            else
+              create_endpoint="orgs/$owner/repos"
+            fi
+
+            if ! gh api --method POST "$create_endpoint" \
+                -f name='.github' \
+                -f description="$description" \
+                -F private=false \
+                -F has_issues=true \
+                -F has_projects=false \
+                -F has_wiki=false \
+                -F auto_init=false \
+                --silent; then
+              echo "::error::repository creation failed for $owner/.github"
+              failed+=("$owner:create")
+              echo "::endgroup::"
+              continue
+            fi
+
+            workdir="$(mktemp -d)"
+            export OWNER="$owner"
+            export ROOT="$workdir"
+
+            node <<'NODE'
+          const fs = require("node:fs");
+          const path = require("node:path");
+
+          const owner = process.env.OWNER;
+          const root = process.env.ROOT;
+          const write = (file, content) => {
+            const target = path.join(root, file);
+            fs.mkdirSync(path.dirname(target), { recursive: true });
+            fs.writeFileSync(target, content.endsWith("\n") ? content : `${content}\n`, "utf8");
+          };
+
+          write("README.md", `# ${owner} organization defaults
+
+          This public \`.github\` repository contains organization-wide community health files, contributor guidance, shared agent policy, and an explicit repository-relationship contract.
+
+          Repository-local policy wins when it is stricter or more specific. Existing project history must be preserved during consolidation and conflict resolution.
+          `);
+
+          write("profile/README.md", `# ${owner}
+
+          This organization maintains software, infrastructure, interfaces, clients, services, and supporting documentation under a shared engineering baseline.
+
+          ## Working principles
+
+          - Keep changes reviewable, tested, and reversible.
+          - Treat security, privacy, compatibility, and data durability as design constraints.
+          - Resolve merge conflicts semantically: reconstruct both sides' intent, preserve compatible behavior, and document deliberate trade-offs.
+          - Prefer canonical repositories and short, stable names; deprecate duplicates with migration notes rather than silently deleting history.
+          - Keep cross-repository dependencies explicit and pinned where reproducibility matters.
+
+          Organization-wide contribution and security guidance lives in this \`.github\` repository.
+          `);
+
+          write("CONTRIBUTING.md", `# Contributing
+
+          1. Read the target repository's README, agent instructions, and local contribution guide.
+          2. Open focused changes with tests or an explicit verification plan.
+          3. Preserve public APIs, data formats, and operational behavior unless the change intentionally migrates them.
+          4. Keep generated files reproducible and identify their source.
+          5. Never resolve conflicts by blindly choosing "ours" or "theirs". Inspect the base, both branches, nearby history, tests, and downstream consumers; then construct the smallest coherent combined result.
+          6. Do not commit credentials, private keys, tokens, production data, or personal information.
+          `);
+
+          write("SECURITY.md", `# Security policy
+
+          Report suspected vulnerabilities privately through GitHub's security-advisory flow when available. Do not open a public issue containing exploit details, credentials, private data, or unredacted logs.
+
+          Security fixes should include a clear threat model, affected boundary, regression test, rollout plan, and rollback path. Rotate any credential that may have been exposed; deleting it from a later commit is not sufficient.
+          `);
+
+          write("SUPPORT.md", `# Support
+
+          Use the target repository's issue tracker for reproducible defects and feature requests. Include the affected version or commit, environment, minimal reproduction, expected behavior, actual behavior, and sanitized logs.
+
+          Security-sensitive reports belong in the private channel described in SECURITY.md.
+          `);
+
+          write("CODE_OF_CONDUCT.md", `# Code of conduct
+
+          Be respectful, specific, and constructive. Critique code and decisions rather than people. Harassment, discrimination, threats, doxxing, and disclosure of private information are not acceptable.
+
+          Maintainers may edit or remove abusive content and restrict participation when needed to protect the community.
+          `);
+
+          write("GOVERNANCE.md", `# Governance
+
+          Repository maintainers own technical direction for their scope. Cross-repository changes must identify the canonical owner of each interface and avoid duplicating sources of truth.
+
+          Material changes should record:
+          - the decision and alternatives considered;
+          - compatibility and migration consequences;
+          - security and operational risks;
+          - validation evidence;
+          - rollback or deprecation strategy.
+
+          Conflicted changes are merged by intent, not line selection. A semantic reconciliation should preserve non-conflicting additions from both sides and explicitly resolve incompatible assumptions.
+          `);
+
+          write("REPOSITORY_BOUNDARIES.md", `# Repository boundaries
+
+          Each repository should have one primary responsibility and an explicit dependency direction.
+
+          - \`*-interfaces\`: schemas, protocol contracts, and stable cross-language boundaries.
+          - \`*-lib\`: reusable domain logic built on interfaces.
+          - \`*-clients\`: client SDKs and transport adapters.
+          - \`*-sync\`: synchronization and offline/replication behavior.
+          - \`*-cli\`: command-line workflows composed from clients, interfaces, and libraries.
+          - web/API/backend repositories: deployable services consuming the shared contracts.
+          - \`*-e2e\`: black-box and integration verification, not production implementation.
+
+          When repositories overlap, choose a canonical home, migrate callers, preserve attribution and useful history, and leave a clear deprecation pointer.
+          `);
+
+          write("AGENTS.md", `# Agent instructions
+
+          Before editing:
+          1. Read repository-local instructions and recent history.
+          2. Identify the canonical source of truth and downstream consumers.
+          3. Keep credentials and private data out of prompts, logs, commits, and artifacts.
+
+          For conflicts, compare the merge base, both heads, relevant tests, and surrounding commits. Reconstruct intent and produce a coherent combined implementation. Never use blanket ours/theirs resolution for substantive conflicts.
+
+          Validate the exact commit being proposed. Do not claim tests or deployments that were not actually run.
+          `);
+
+          write("CLAUDE.md", `# Claude guidance
+
+          Follow AGENTS.md and repository-local instructions. Preserve existing behavior unless the requested change intentionally replaces it. Use semantic conflict resolution and exact-head validation. Do not expose secrets or invent verification results.
+          `);
+
+          write(".openai/AGENTS.md", `# OpenAI agent guidance
+
+          Follow ../../AGENTS.md and all repository-local policy. Resolve conflicts semantically, keep changes narrowly scoped, and report verification truthfully.
+          `);
+
+          write(".claude/CLAUDE.md", `# Claude agent guidance
+
+          Follow ../../AGENTS.md and all repository-local policy. Resolve conflicts semantically, keep changes narrowly scoped, and report verification truthfully.
+          `);
+
+          write(".gemini/GEMINI.md", `# Gemini agent guidance
+
+          Follow ../../AGENTS.md and all repository-local policy. Resolve conflicts semantically, keep changes narrowly scoped, and report verification truthfully.
+          `);
+
+          write("agents/semantic-conflict-resolver.md", `# Semantic conflict resolver
+
+          A conflict is a design reconciliation task, not a text-selection task.
+
+          1. Establish the merge base and read the full conflicting files.
+          2. Inspect several relevant commits on both branches and identify the invariant each side protects.
+          3. Classify edits as independent, complementary, superseding, or incompatible.
+          4. Preserve independent and complementary work from both sides.
+          5. For incompatible assumptions, choose or synthesize the design that best satisfies current requirements, tests, compatibility, security, and maintainability.
+          6. Remove obsolete duplication and update tests/docs to express the final contract.
+          7. Verify the exact resolved head and summarize the semantic decisions.
+          `);
+
+          write("ORG_CONTEXT.md", `# Organization context
+
+          Organization: **${owner}**
+
+          This file is intentionally conservative. Project-specific product goals, Linear project IDs, Slack channels, deployment environments, and secrets must be recorded only after they are verified from their canonical systems. Do not fabricate missing links or identifiers.
+          `);
+
+          write("project-context.yaml", `schema_version: 1
+          organization: ${owner}
+          canonical_profile_repository: ${owner}/.github
+          policy:
+            semantic_conflict_resolution: required
+            preserve_history_during_consolidation: true
+            exact_head_validation: true
+            secrets_in_repository: forbidden
+          integrations:
+            linear: verify_per_project
+            slack: verify_per_project
+          `);
+
+          write("organization-policy.json", JSON.stringify({
+            schema_version: 1,
+            organization: owner,
+            canonical_profile_repository: `${owner}/.github`,
+            conflict_resolution: {
+              mode: "semantic",
+              blanket_ours_or_theirs: false,
+              inspect_history_and_tests: true
+            },
+            repository_consolidation: {
+              preserve_history: true,
+              prefer_short_canonical_names: true,
+              require_deprecation_pointer: true
+            },
+            validation: {
+              exact_head: true,
+              truthful_evidence: true
+            }
+          }, null, 2));
+
+          write("repository-relationships.json", JSON.stringify({
+            schema_version: 1,
+            organization: owner,
+            generated_at: null,
+            repositories: [],
+            notes: [
+              "Populate from live GitHub inventory; do not infer unverified dependencies.",
+              "Repository-local manifests remain authoritative for exact dependency versions."
+            ]
+          }, null, 2));
+
+          write("notes/README.md", `# Organization notes
+
+          Keep durable, non-sensitive organization-wide notes here. Project-specific plans should live with the project or in the verified planning system. Never store tokens, private keys, credentials, private customer data, or unredacted incident evidence in this repository.
+          `);
+
+          write(".github/ISSUE_TEMPLATE/config.yml", `blank_issues_enabled: true
+          contact_links:
+            - name: Security report
+              url: https://github.com/${owner}/.github/security/advisories/new
+              about: Report vulnerabilities privately when the advisory flow is enabled.
+          `);
+
+          write(".github/ISSUE_TEMPLATE/bug_report.yml", `name: Bug report
+          description: Report a reproducible defect
+          title: "bug: "
+          labels: ["bug"]
+          body:
+            - type: textarea
+              id: summary
+              attributes:
+                label: Summary
+                description: What happened, and what should have happened?
+              validations:
+                required: true
+            - type: textarea
+              id: reproduction
+              attributes:
+                label: Reproduction
+                description: Minimal steps, inputs, and environment details.
+              validations:
+                required: true
+            - type: textarea
+              id: evidence
+              attributes:
+                label: Sanitized evidence
+                description: Logs, screenshots, or traces with secrets and personal data removed.
+            - type: checkboxes
+              id: safety
+              attributes:
+                label: Safety check
+                options:
+                  - label: I removed credentials, private data, and exploit details that belong in a private advisory.
+                    required: true
+          `);
+
+          write(".github/ISSUE_TEMPLATE/feature_request.yml", `name: Feature request
+          description: Propose a focused improvement
+          title: "feat: "
+          labels: ["enhancement"]
+          body:
+            - type: textarea
+              id: problem
+              attributes:
+                label: Problem
+                description: What user or operational problem should be solved?
+              validations:
+                required: true
+            - type: textarea
+              id: outcome
+              attributes:
+                label: Desired outcome
+                description: Describe observable behavior and acceptance criteria.
+              validations:
+                required: true
+            - type: textarea
+              id: constraints
+              attributes:
+                label: Constraints and alternatives
+                description: Compatibility, security, migration, and alternatives considered.
+          `);
+
+          write(".github/pull_request_template.md", `## Summary
+
+          Describe the problem, the chosen design, and the user or operational outcome.
+
+          ## Verification
+
+          List commands, tests, checks, and manual validation actually performed against this exact head.
+
+          ## Compatibility and risk
+
+          Explain API/data/configuration changes, security implications, rollout, migration, and rollback.
+
+          ## Conflict reconciliation
+
+          When conflicts were present, summarize both sides' intent and how the final implementation preserves or deliberately supersedes each part.
+
+          - [ ] No secrets or private data are included.
+          - [ ] Documentation and tests reflect the final contract.
+          - [ ] The exact proposed head was verified.
+          `);
+
+          write(".github/copilot-instructions.md", `Read AGENTS.md and repository-local instructions before editing. Keep changes focused and evidence truthful. Resolve conflicts by understanding both branches and constructing the best coherent result; never select ours/theirs wholesale for substantive conflicts. Preserve security, compatibility, data durability, and repository boundaries.
+          `);
+
+          write(".github/dependabot.yml", `version: 2
+          updates:
+            - package-ecosystem: github-actions
+              directory: /
+              schedule:
+                interval: monthly
+              open-pull-requests-limit: 5
+          `);
+
+          write(".github/workflows/baseline-policy.yml", `name: baseline policy
+
+          on:
+            pull_request:
+            push:
+              branches: [main]
+            workflow_dispatch:
+
+          permissions:
+            contents: read
+
+          jobs:
+            validate:
+              runs-on: ubuntu-24.04
+              steps:
+                - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+                - name: Validate organization baseline
+                  shell: bash
+                  run: |
+                    set -euo pipefail
+                    required=(
+                      README.md
+                      profile/README.md
+                      CONTRIBUTING.md
+                      SECURITY.md
+                      SUPPORT.md
+                      CODE_OF_CONDUCT.md
+                      GOVERNANCE.md
+                      AGENTS.md
+                      repository-relationships.json
+                      organization-policy.json
+                    )
+                    for file in "\${required[@]}"; do
+                      test -s "\$file" || { echo "::error file=\$file::required baseline file is missing or empty"; exit 1; }
+                    done
+                    python3 -m json.tool organization-policy.json >/dev/null
+                    python3 -m json.tool repository-relationships.json >/dev/null
+                    ! git grep -nE '^(<<<<<<<|=======|>>>>>>>)' -- . ':!*.lock'
+          `);
+          NODE
+
+            (
+              cd "$workdir"
+              git init -q -b main
+              git config user.name "Alexander Mills"
+              git config user.email "alex@oresoftware.com"
+              git add .
+              git commit -q -m "chore: establish organization-wide GitHub baseline"
+              git push -q "https://github.com/$owner/.github.git" HEAD:refs/heads/main
+            ) || {
+              echo "::error::initial baseline push failed for $owner/.github"
+              failed+=("$owner:push")
+              rm -rf "$workdir"
+              echo "::endgroup::"
+              continue
+            }
+
+            rm -rf "$workdir"
+            created+=("$owner")
+            echo "created and seeded"
+            echo "::endgroup::"
+            sleep 2
+          done
+
+          {
+            echo "## Production .github fleet"
+            echo
+            echo "- Created: ${#created[@]}"
+            echo "- Already present and preserved: ${#existing[@]}"
+            echo "- Failed: ${#failed[@]}"
+            echo
+            if ((${#created[@]})); then
+              printf 'Created: `%s`\n\n' "$(IFS=', '; echo "${created[*]}")"
+            fi
+            if ((${#existing[@]})); then
+              printf 'Preserved: `%s`\n\n' "$(IFS=', '; echo "${existing[*]}")"
+            fi
+            if ((${#failed[@]})); then
+              printf 'Failures: `%s`\n' "$(IFS=', '; echo "${failed[*]}")"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          if ((${#failed[@]})); then
+            exit 1
+          fi

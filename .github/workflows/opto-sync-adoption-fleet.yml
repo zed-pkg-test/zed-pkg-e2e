@@ -1,0 +1,172 @@
+name: Opto Sync adoption fleet canary
+
+on:
+  pull_request:
+    paths:
+      - .github/workflows/opto-sync-adoption-fleet.yml
+      - fixtures/opto-sync-adoption/**
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/opto-sync-adoption-fleet.yml
+      - fixtures/opto-sync-adoption/**
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: opto-sync-adoption-fleet-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Check out exact harness revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+          show-progress: false
+
+      - name: Validate exact source blobs and product boundaries
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from __future__ import annotations
+
+          import hashlib
+          import json
+          import re
+          from pathlib import Path
+
+          ROOT = Path("fixtures/opto-sync-adoption")
+          CLIENT_COMMIT = "068414c8ff7d4262d0a395959b5209d5908f0fcc"
+          VALIDATOR_COMMIT = "da7459fdf3ce4096ce6b88aeed5fc98066f804d9"
+          CHECKOUT_COMMIT = "11d5960a326750d5838078e36cf38b85af677262"
+
+          EXPECTED = {
+              "sonus-auris": {
+                  "repository": "sonus-auris/sonus-auris-clients",
+                  "head": "21c6db6ea05194513b01b64c433ef29a90e3da21",
+                  "manifest_blob": "dc80f025ee9f473dac0bb5ca0f789dd92ad7cbac",
+                  "workflow_blob": "16ba4805c55853ff8d1eea890e7f5f7fc4b7ddb9",
+                  "owner": "sonus-auris",
+                  "scopes": {"recordingMetadata", "retentionPolicies", "schedule", "syncCheckpoints"},
+                  "transports": {"http", "supabase-realtime", "websocket"},
+                  "excluded": {"raw audio", "plaintext recordings", "encryption keys", "recovery material"},
+              },
+              "3fa": {
+                  "repository": "3FA-app/3fa-clients",
+                  "head": "0c0783d9b9b5f4eb9123951399713b59085359d4",
+                  "manifest_blob": "f809b8a2e2e0e0a373c56228ff491be25a7896b0",
+                  "workflow_blob": "30075c0db01859435b36bd0fb1833e5fcc885014",
+                  "owner": "3FA-app",
+                  "scopes": {"deviceDirectory", "encryptedMessageMetadata", "keyBundleMetadata", "syncCheckpoints"},
+                  "transports": {"http", "supabase-realtime", "websocket"},
+                  "excluded": {"private keys", "otp seeds", "plaintext", "access or refresh tokens"},
+              },
+              "scintilla": {
+                  "repository": "scintilla-run/scintilla-clients",
+                  "head": "c4c1dcc179e96eccf2273a00029c62b5f9a1e0d6",
+                  "manifest_blob": "8366532f877636a7e8785643aec1b4295567ef95",
+                  "workflow_blob": "c746d8d3a39699198eb5fd823fea11c2cecc3e65",
+                  "owner": "scintilla-run",
+                  "scopes": {"artifactIndex", "experimentDefinitions", "observationCheckpoints", "runMetadata"},
+                  "transports": {"http", "websocket"},
+                  "excluded": {"artifact binaries", "runner credentials", "signing keys", "live high-volume telemetry streams"},
+              },
+          }
+
+          def git_blob_sha(data: bytes) -> str:
+              header = f"blob {len(data)}\0".encode()
+              return hashlib.sha1(header + data).hexdigest()
+
+          evidence = {"schema": "opto-sync.fleet-canary.v1", "projects": {}}
+
+          for fixture, contract in EXPECTED.items():
+              fixture_root = ROOT / fixture
+              manifest_path = fixture_root / ".opto-sync.json"
+              workflow_path = fixture_root / "opto-sync-adoption.yml"
+              manifest_bytes = manifest_path.read_bytes()
+              workflow_bytes = workflow_path.read_bytes()
+
+              assert git_blob_sha(manifest_bytes) == contract["manifest_blob"]
+              assert git_blob_sha(workflow_bytes) == contract["workflow_blob"]
+              assert re.fullmatch(r"[0-9a-f]{40}", contract["head"])
+
+              manifest = json.loads(manifest_bytes)
+              assert manifest["schemaVersion"] == "opto-sync.adoption.v1"
+              assert manifest["project"] == contract["repository"]
+              assert manifest["clientPackage"] == {
+                  "package": "opto-sync/opto-sync-clients",
+                  "repository": "https://github.com/opto-sync/opto-sync-clients",
+                  "version": "0.2.0",
+                  "commit": CLIENT_COMMIT,
+              }
+              assert set(manifest["languages"]) == {"dart", "gleam", "rust", "typescript"}
+              assert set(manifest["dataScopes"]) == contract["scopes"]
+              assert set(manifest["localStores"]) == {"indexeddb", "sqlite"}
+              assert set(manifest["transports"]) == contract["transports"]
+              assert set(manifest["writeStrategies"]) == {
+                  "local-durable",
+                  "local-then-remote",
+                  "remote-confirmed",
+              }
+              assert manifest["conflictPolicy"] == {
+                  "arrayStrategy": "mergeByKey",
+                  "resolveByTimestamp": True,
+                  "lwwKeys": ["updatedAt"],
+                  "arrayMatchKeys": ["id"],
+                  "tombstones": True,
+              }
+              assert manifest["background"] == {
+                  "webServiceWorker": True,
+                  "mobileWorker": True,
+                  "desktopWorker": True,
+              }
+              assert manifest["security"] == {
+                  "authenticatedTransport": True,
+                  "encryptedAtRest": True,
+                  "secretsInManifest": False,
+              }
+              assert manifest["rollout"] == {
+                  "phase": "declared",
+                  "owners": [contract["owner"]],
+              }
+              notes = manifest["notes"].lower()
+              assert contract["excluded"] <= {term for term in contract["excluded"] if term in notes}
+
+              workflow = workflow_bytes.decode()
+              assert "pull_request_target:" not in workflow
+              assert "contents: write" not in workflow
+              assert "permissions:\n  contents: read" in workflow
+              assert workflow.count("persist-credentials: false") == 2
+              assert "repository: opto-sync/opto-sync-clients" in workflow
+              assert f"ref: {VALIDATOR_COMMIT}" in workflow
+              checkout_refs = re.findall(r"uses:\s*actions/checkout@([0-9a-f]{40})", workflow)
+              assert checkout_refs == [CHECKOUT_COMMIT, CHECKOUT_COMMIT]
+
+              evidence["projects"][fixture] = {
+                  "repository": contract["repository"],
+                  "head": contract["head"],
+                  "manifest_git_blob": contract["manifest_blob"],
+                  "manifest_sha256": hashlib.sha256(manifest_bytes).hexdigest(),
+                  "workflow_git_blob": contract["workflow_blob"],
+                  "workflow_sha256": hashlib.sha256(workflow_bytes).hexdigest(),
+                  "rollout": "declared",
+              }
+
+          evidence_path = Path("opto-sync-adoption-fleet-evidence.json")
+          evidence_path.write_text(json.dumps(evidence, indent=2, sort_keys=True) + "\n")
+          print(evidence_path.read_text())
+          PY
+
+      - name: Upload exact-blob evidence
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: opto-sync-adoption-fleet-${{ github.run_id }}-${{ github.run_attempt }}
+          path: opto-sync-adoption-fleet-evidence.json
+          if-no-files-found: error
+          retention-days: 14

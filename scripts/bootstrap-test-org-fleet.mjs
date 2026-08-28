@@ -3,6 +3,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
+import { hardenGeneratedIntegrationPolicy } from './test-org-fleet-integration-policy.mjs';
+
 const root = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
 const partsDir = path.join(root, 'scripts', 'bootstrap-test-org-fleet.parts');
 let source = fs.readdirSync(partsDir).sort().map((name) => fs.readFileSync(path.join(partsDir, name), 'utf8')).join('');
@@ -18,16 +20,18 @@ const originalRetryBlock = `    if ((response.status === 429 || response.status 
       await new Promise((resolve) => setTimeout(resolve, Math.max(retryAfter * 1000, 500 * (2 ** attempt))));
       continue;
     }`;
-const hardenedRetryBlock = `    const secondaryRateLimit = response.status === 403
+const hardenedRetryBlock = `    const primaryRemaining = Number(response.headers.get('x-ratelimit-remaining') ?? -1);
+    const primaryRateLimit = response.status === 403 && primaryRemaining === 0;
+    const secondaryRateLimit = response.status === 403
       && /secondary rate limit|temporarily blocked from content creation|abuse detection/i.test(text);
-    if ((secondaryRateLimit || response.status === 429 || response.status >= 500) && attempt < 13) {
+    if ((primaryRateLimit || secondaryRateLimit || response.status === 429 || response.status >= 500) && attempt < 13) {
       const retryAfterSeconds = Number(response.headers.get('retry-after') ?? 0);
       const resetEpochSeconds = Number(response.headers.get('x-ratelimit-reset') ?? 0);
-      const resetDelayMs = resetEpochSeconds > 0
-        ? Math.max(0, (resetEpochSeconds * 1000) - Date.now())
+      const resetDelayMs = primaryRateLimit && resetEpochSeconds > 0
+        ? Math.max(0, (resetEpochSeconds * 1000) - Date.now() + 5000)
         : 0;
       const exponentialDelayMs = secondaryRateLimit
-        ? Math.min(300000, 15000 * (2 ** attempt))
+        ? Math.min(180000, 15000 * (2 ** attempt))
         : Math.min(60000, 1000 * (2 ** attempt));
       const retryDelayMs = Math.max(retryAfterSeconds * 1000, resetDelayMs, exponentialDelayMs);
       log('retrying GitHub API request after rate limit', {
@@ -35,6 +39,8 @@ const hardenedRetryBlock = `    const secondaryRateLimit = response.status === 4
         endpoint,
         status: response.status,
         attempt: attempt + 1,
+        primaryRateLimit,
+        primaryRemaining,
         retryDelayMs,
       });
       await new Promise((resolve) => setTimeout(resolve, retryDelayMs));
@@ -129,6 +135,10 @@ esac
         '--cacheinfo',
         `${gitlink.mode},${gitlink.sha},${gitlink.path}`,
       ]);
+      // Git does not materialize a gitlink worktree directory when a branch is
+      // checked out without submodules. Keep an empty placeholder so an
+      // idempotent rerun does not report the valid gitlink as a deletion.
+      fs.mkdirSync(path.join(worktree, gitlink.path), { recursive: true });
     }
 
     if (!runGit(['status', '--porcelain=v1', '--untracked-files=no']).stdout.trim()) {
@@ -172,6 +182,7 @@ source = source.replace(
   writeTreePattern,
   `${gitPushWriteTreeSource}\n\nasync function ensurePullRequest`,
 );
+source = hardenGeneratedIntegrationPolicy(source);
 
 process.env.TEST_ORG_FLEET_REPO_ROOT = root;
 await import(`data:text/javascript;base64,${Buffer.from(source).toString('base64')}`);
