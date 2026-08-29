@@ -26,8 +26,8 @@ concurrency:
 env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: "1"
-  ZED_API_SHA: 949b0872cf715b85ffc7e80a2a9e9cb9eb99efcf
-  ZED_CLI_SHA: 8929a58c6591c7a964d7f91412665d7c8a4afdf3
+  ZED_API_SHA: 17f2abdcf473dcfee9d24b19f531e26f8513425b
+  ZED_CLI_SHA: 1bf3d898bc17c4a5d82cf44188b78ffd44c507e4
   ZED_PKG_REGISTRY: http://127.0.0.1:8080
   ZED_PKG_ALLOW_NO_MANIFEST: "1"
   ZED_PKG_INSTALL_MODE: copy
@@ -97,11 +97,28 @@ jobs:
           assert spec.loader is not None
           spec.loader.exec_module(module)
           raw, packages = module.load_ledger(pathlib.Path("config/production-package-release.json"))
-          assert raw["registry_api_sha"] == "949b0872cf715b85ffc7e80a2a9e9cb9eb99efcf"
-          assert raw["zed_cli_sha"] == "8929a58c6591c7a964d7f91412665d7c8a4afdf3"
+          assert raw["registry_api_sha"] == "17f2abdcf473dcfee9d24b19f531e26f8513425b"
+          assert raw["zed_cli_sha"] == "1bf3d898bc17c4a5d82cf44188b78ffd44c507e4"
           assert len(packages) == 19
+          assert [
+              package.package
+              for package in packages
+              if package.allow_repo_name_mismatch
+          ] == ["zed-pkg/zed-api-server", "opto-sync/syncer-rs"]
           PY
           git diff --check
+
+      - name: Require the stored cross-organization source credential
+        shell: bash
+        env:
+          ZED_PKG_GITHUB_TOKEN: ${{ secrets.FLEET_GH_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [[ -z "$ZED_PKG_GITHUB_TOKEN" ]]; then
+            echo "::error::Configure the FLEET_GH_TOKEN Actions secret for private cross-organization source reads"
+            exit 1
+          fi
+          echo "::add-mask::$ZED_PKG_GITHUB_TOKEN"
 
       - name: Install the pinned Rust toolchain
         uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
@@ -177,6 +194,8 @@ jobs:
 
       - name: Publish, retry, install, uninstall, and frozen-reinstall all 19 packages
         shell: bash
+        env:
+          ZED_PKG_GITHUB_TOKEN: ${{ secrets.FLEET_GH_TOKEN }}
         run: |
           set -euo pipefail
           python3 scripts/production_package_roundtrip.py \
