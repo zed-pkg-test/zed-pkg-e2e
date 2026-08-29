@@ -1,0 +1,177 @@
+{
+  "failed": 4,
+  "failures": [
+    {
+      "error": "quote_from_bytes() expected bytes",
+      "repository": "zed-pkg/zed-eclipse"
+    },
+    {
+      "error": "quote_from_bytes() expected bytes",
+      "repository": "zed-pkg/zed-monorepo"
+    },
+    {
+      "error": "quote_from_bytes() expected bytes",
+      "repository": "zed-pkg/zed-lib"
+    },
+    {
+      "error": "quote_from_bytes() expected bytes",
+      "repository": "zed-pkg/zed-web-server.rs"
+    }
+  ],
+  "packages": [
+    {
+      "manifest_created": false,
+      "repository": "zed-pkg/zed-sync",
+      "tag": "v0.1.0",
+      "tag_created": true,
+      "tag_sha": "0dcaee9d9a8185870f7d06f9a077ecf5161d9e7f",
+      "version": "0.1.0"
+    },
+    {
+      "manifest_created": false,
+      "repository": "zed-pkg/zed-sublimetext",
+      "tag": "v0.1.0",
+      "tag_created": true,
+      "tag_sha": "c3153867dff0b560946c9b7e287ed50366b87e6c",
+      "version": "0.1.0"
+    },
+    {
+      "manifest_created": true,
+      "repository": "zed-pkg/zed-xcode",
+      "tag": "v0.1.0",
+      "tag_created": true,
+      "tag_sha": "36309fa60cc7efa661e415752422fee8e1d5672f",
+      "version": "0.1.0"
+    },
+    {
+      "manifest_created": false,
+      "repository": "zed-pkg/zed-interfaces",
+      "tag": "v0.1.0",
+      "tag_created": true,
+      "tag_sha": "5394b2e7b070354ee79a4c6ac79c26d6264970cd",
+      "version": "0.1.0"
+    },
+    {
+      "manifest_created": false,
+      "repository": "zed-pkg/zed-lib-core",
+      "tag": "v0.1.0",
+      "tag_created": true,
+      "tag_sha": "700f1f9578c6633a20693a5b1f52970ab845a740",
+      "version": "0.1.0"
+    },
+    {
+      "manifest_created": true,
+      "repository": "zed-pkg/zed-docs",
+      "tag": "v0.1.0",
+      "tag_created": true,
+      "tag_sha": "a5e9c713c6e6b6c5120a89e9a0233c7eeb420720",
+      "version": "0.1.0"
+    },
+    {
+      "manifest_created": true,
+      "repository": "zed-pkg/zed-vscode",
+      "tag": "v0.1.0",
+      "tag_created": true,
+      "tag_sha": "1949d987a1c367771730b3c44bee2459364e0e56",
+      "version": "0.1.0"
+    },
+    {
+      "manifest_created": false,
+      "repository": "zed-pkg/zed-clients",
+      "tag": "v0.1.0",
+      "tag_created": true,
+      "tag_sha": "e79723981b88f8b6fbb2f49e7d3d954e2832cdc6",
+      "version": "0.1.0"
+    },
+    {
+      "manifest_created": false,
+      "repository": "zed-pkg/zed-cli",
+      "tag": "v0.1.0",
+      "tag_created": true,
+      "tag_sha": "751358fe130e64b646844bc7d857c4cff215ca2d",
+      "version": "0.1.0"
+    },
+    {
+      "manifest_created": true,
+      "repository": "zed-pkg/zed-pkg.github.io",
+      "tag": "v0.1.0",
+      "tag_created": true,
+      "tag_sha": "ec5c9fcbc09ce2b9b8f2798a75b9740b8cefd76a",
+      "version": "0.1.0"
+    },
+    {
+      "manifest_created": true,
+      "repository": "zed-pkg/zed-infra",
+      "tag": "v0.1.0",
+      "tag_created": true,
+      "tag_sha": "807ce6eb427270cb9df2f0af676faab310e00b05",
+      "version": "0.1.0"
+    },
+    {
+      "manifest_created": false,
+      "repository": "zed-pkg/zed-intellij",
+      "tag": "v0.1.0",
+      "tag_created": true,
+      "tag_sha": "7282fdbc7046bb2ba58369b59ef627211033e145",
+      "version": "0.1.0"
+    },
+    {
+      "manifest_created": false,
+      "repository": "zed-pkg/zed-jetbrains-air",
+      "tag": "v0.1.0",
+      "tag_created": true,
+      "tag_sha": "be357c41573e4afb936faea2b410272b32bf5649",
+      "version": "0.1.0"
+    },
+    {
+      "manifest_created": true,
+      "repository": "zed-pkg/zed-visual-studio",
+      "tag": "v0.1.0",
+      "tag_created": true,
+      "tag_sha": "5966b53d4951f02ffc07939175103764b9a2423f",
+      "version": "0.1.0"
+    },
+    {
+      "manifest_created": false,
+      "repository": "zed-pkg/zed-orm-core",
+      "tag": "v0.1.0",
+      "tag_created": true,
+      "tag_sha": "a78baf355e8ba3b98fa09780af9f67e8b7c12b85",
+      "version": "0.1.0"
+    },
+    {
+      "manifest_created": true,
+      "repository": "zed-pkg/zed-e2e",
+      "tag": "v0.1.0",
+      "tag_created": true,
+      "tag_sha": "f636118e83a8a3edde7285431651850eddf53a14",
+      "version": "0.1.0"
+    },
+    {
+      "manifest_created": true,
+      "repository": "zed-pkg/zed-qtcreator",
+      "tag": "v0.1.0",
+      "tag_created": true,
+      "tag_sha": "6dcc1f350b7301ea71b2e90450217fc5e10a8519",
+      "version": "0.1.0"
+    },
+    {
+      "manifest_created": true,
+      "repository": "zed-pkg/zed-api-server.rs",
+      "tag": "v0.1.0",
+      "tag_created": true,
+      "tag_sha": "949b0872cf715b85ffc7e80a2a9e9cb9eb99efcf",
+      "version": "0.1.0"
+    },
+    {
+      "manifest_created": false,
+      "repository": "zed-pkg/zed-lock",
+      "tag": "v0.1.1",
+      "tag_created": false,
+      "tag_sha": "a0dc78d385bc3ab553d3027b427f5f1428239c9c",
+      "version": "0.1.1"
+    }
+  ],
+  "prepared": 19,
+  "schema": 1
+}

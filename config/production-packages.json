@@ -1,0 +1,23 @@
+{
+  "organization": "zed-pkg",
+  "minimum_packages": 16,
+  "maximum_packages": 25,
+  "repositories": [
+    "zed-api-server.rs",
+    "zed-cli",
+    "zed-clients",
+    "zed-e2e",
+    "zed-infra",
+    "zed-interfaces",
+    "zed-intellij",
+    "zed-jetbrains-air",
+    "zed-lib",
+    "zed-lib-core",
+    "zed-lock",
+    "zed-monorepo",
+    "zed-orm-core",
+    "zed-sublimetext",
+    "zed-sync",
+    "zed-web-server.rs"
+  ]
+}

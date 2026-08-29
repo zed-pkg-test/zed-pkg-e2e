@@ -1,0 +1,312 @@
+{
+  "count": 22,
+  "packages": [
+    {
+      "archive_format": "tar.gz",
+      "dependencies": [],
+      "name": "zed-api-server.rs",
+      "org": "zed-pkg",
+      "package": "zed-pkg/zed-api-server.rs",
+      "repo": "zed-api-server.rs",
+      "repository_url": "https://github.com/zed-pkg/zed-api-server.rs",
+      "sha": "949b0872cf715b85ffc7e80a2a9e9cb9eb99efcf",
+      "tag": "v0.1.0",
+      "tag_sha": "949b0872cf715b85ffc7e80a2a9e9cb9eb99efcf",
+      "version": "0.1.0"
+    },
+    {
+      "archive_format": "tar.gz",
+      "dependencies": [],
+      "name": "zed-docs",
+      "org": "zed-pkg",
+      "package": "zed-pkg/zed-docs",
+      "repo": "zed-docs",
+      "repository_url": "https://github.com/zed-pkg/zed-docs",
+      "sha": "a5e9c713c6e6b6c5120a89e9a0233c7eeb420720",
+      "tag": "v0.1.0",
+      "tag_sha": "a5e9c713c6e6b6c5120a89e9a0233c7eeb420720",
+      "version": "0.1.0"
+    },
+    {
+      "archive_format": "tar.gz",
+      "dependencies": [],
+      "name": "zed-e2e",
+      "org": "zed-pkg",
+      "package": "zed-pkg/zed-e2e",
+      "repo": "zed-e2e",
+      "repository_url": "https://github.com/zed-pkg/zed-e2e",
+      "sha": "f636118e83a8a3edde7285431651850eddf53a14",
+      "tag": "v0.1.0",
+      "tag_sha": "f636118e83a8a3edde7285431651850eddf53a14",
+      "version": "0.1.0"
+    },
+    {
+      "archive_format": "tar.gz",
+      "dependencies": [],
+      "name": "zed-eclipse",
+      "org": "zed-pkg",
+      "package": "zed-pkg/zed-eclipse",
+      "repo": "zed-eclipse",
+      "repository_url": "https://github.com/zed-pkg/zed-eclipse",
+      "sha": "91f16c272b3221d0a70880b530ab670ade8bacb2",
+      "tag": "v0.1.0",
+      "tag_sha": "91f16c272b3221d0a70880b530ab670ade8bacb2",
+      "version": "0.1.0"
+    },
+    {
+      "archive_format": "tar.gz",
+      "dependencies": [],
+      "name": "zed-infra",
+      "org": "zed-pkg",
+      "package": "zed-pkg/zed-infra",
+      "repo": "zed-infra",
+      "repository_url": "https://github.com/zed-pkg/zed-infra",
+      "sha": "807ce6eb427270cb9df2f0af676faab310e00b05",
+      "tag": "v0.1.0",
+      "tag_sha": "807ce6eb427270cb9df2f0af676faab310e00b05",
+      "version": "0.1.0"
+    },
+    {
+      "archive_format": "tar.gz",
+      "dependencies": [],
+      "name": "zed-intellij",
+      "org": "zed-pkg",
+      "package": "zed-pkg/zed-intellij",
+      "repo": "zed-intellij",
+      "repository_url": "https://github.com/zed-pkg/zed-intellij",
+      "sha": "7282fdbc7046bb2ba58369b59ef627211033e145",
+      "tag": "v0.1.0",
+      "tag_sha": "7282fdbc7046bb2ba58369b59ef627211033e145",
+      "version": "0.1.0"
+    },
+    {
+      "archive_format": "tar.gz",
+      "dependencies": [],
+      "name": "zed-interfaces",
+      "org": "zed-pkg",
+      "package": "zed-pkg/zed-interfaces",
+      "repo": "zed-interfaces",
+      "repository_url": "https://github.com/zed-pkg/zed-interfaces",
+      "sha": "5394b2e7b070354ee79a4c6ac79c26d6264970cd",
+      "tag": "v0.1.0",
+      "tag_sha": "5394b2e7b070354ee79a4c6ac79c26d6264970cd",
+      "version": "0.1.0"
+    },
+    {
+      "archive_format": "tar.gz",
+      "dependencies": [],
+      "name": "zed-jetbrains-air",
+      "org": "zed-pkg",
+      "package": "zed-pkg/zed-jetbrains-air",
+      "repo": "zed-jetbrains-air",
+      "repository_url": "https://github.com/zed-pkg/zed-jetbrains-air",
+      "sha": "be357c41573e4afb936faea2b410272b32bf5649",
+      "tag": "v0.1.0",
+      "tag_sha": "be357c41573e4afb936faea2b410272b32bf5649",
+      "version": "0.1.0"
+    },
+    {
+      "archive_format": "tar.gz",
+      "dependencies": [],
+      "name": "zed-monorepo",
+      "org": "zed-pkg",
+      "package": "zed-pkg/zed-monorepo",
+      "repo": "zed-monorepo",
+      "repository_url": "https://github.com/zed-pkg/zed-monorepo",
+      "sha": "d130f0af41ddc261d35fbe6c456dc9fed656e190",
+      "tag": "v0.1.0",
+      "tag_sha": "d130f0af41ddc261d35fbe6c456dc9fed656e190",
+      "version": "0.1.0"
+    },
+    {
+      "archive_format": "tar.gz",
+      "dependencies": [
+        "oresoftware/k8s-libs-and-shared-defs"
+      ],
+      "name": "zed-orm-core",
+      "org": "zed-pkg",
+      "package": "zed-pkg/zed-orm-core",
+      "repo": "zed-orm-core",
+      "repository_url": "https://github.com/zed-pkg/zed-orm-core",
+      "sha": "a78baf355e8ba3b98fa09780af9f67e8b7c12b85",
+      "tag": "v0.1.0",
+      "tag_sha": "a78baf355e8ba3b98fa09780af9f67e8b7c12b85",
+      "version": "0.1.0"
+    },
+    {
+      "archive_format": "tar.gz",
+      "dependencies": [],
+      "name": "zed-pkg.github.io",
+      "org": "zed-pkg",
+      "package": "zed-pkg/zed-pkg.github.io",
+      "repo": "zed-pkg.github.io",
+      "repository_url": "https://github.com/zed-pkg/zed-pkg.github.io",
+      "sha": "ec5c9fcbc09ce2b9b8f2798a75b9740b8cefd76a",
+      "tag": "v0.1.0",
+      "tag_sha": "ec5c9fcbc09ce2b9b8f2798a75b9740b8cefd76a",
+      "version": "0.1.0"
+    },
+    {
+      "archive_format": "tar.gz",
+      "dependencies": [],
+      "name": "zed-qtcreator",
+      "org": "zed-pkg",
+      "package": "zed-pkg/zed-qtcreator",
+      "repo": "zed-qtcreator",
+      "repository_url": "https://github.com/zed-pkg/zed-qtcreator",
+      "sha": "6dcc1f350b7301ea71b2e90450217fc5e10a8519",
+      "tag": "v0.1.0",
+      "tag_sha": "6dcc1f350b7301ea71b2e90450217fc5e10a8519",
+      "version": "0.1.0"
+    },
+    {
+      "archive_format": "tar.gz",
+      "dependencies": [],
+      "name": "zed-sublimetext",
+      "org": "zed-pkg",
+      "package": "zed-pkg/zed-sublimetext",
+      "repo": "zed-sublimetext",
+      "repository_url": "https://github.com/zed-pkg/zed-sublimetext",
+      "sha": "c3153867dff0b560946c9b7e287ed50366b87e6c",
+      "tag": "v0.1.0",
+      "tag_sha": "c3153867dff0b560946c9b7e287ed50366b87e6c",
+      "version": "0.1.0"
+    },
+    {
+      "archive_format": "tar.gz",
+      "dependencies": [],
+      "name": "zed-sync",
+      "org": "zed-pkg",
+      "package": "zed-pkg/zed-sync",
+      "repo": "zed-sync",
+      "repository_url": "https://github.com/zed-pkg/zed-sync",
+      "sha": "0dcaee9d9a8185870f7d06f9a077ecf5161d9e7f",
+      "tag": "v0.1.0",
+      "tag_sha": "0dcaee9d9a8185870f7d06f9a077ecf5161d9e7f",
+      "version": "0.1.0"
+    },
+    {
+      "archive_format": "tar.gz",
+      "dependencies": [],
+      "name": "zed-visual-studio",
+      "org": "zed-pkg",
+      "package": "zed-pkg/zed-visual-studio",
+      "repo": "zed-visual-studio",
+      "repository_url": "https://github.com/zed-pkg/zed-visual-studio",
+      "sha": "5966b53d4951f02ffc07939175103764b9a2423f",
+      "tag": "v0.1.0",
+      "tag_sha": "5966b53d4951f02ffc07939175103764b9a2423f",
+      "version": "0.1.0"
+    },
+    {
+      "archive_format": "tar.gz",
+      "dependencies": [],
+      "name": "zed-vscode",
+      "org": "zed-pkg",
+      "package": "zed-pkg/zed-vscode",
+      "repo": "zed-vscode",
+      "repository_url": "https://github.com/zed-pkg/zed-vscode",
+      "sha": "1949d987a1c367771730b3c44bee2459364e0e56",
+      "tag": "v0.1.0",
+      "tag_sha": "1949d987a1c367771730b3c44bee2459364e0e56",
+      "version": "0.1.0"
+    },
+    {
+      "archive_format": "tar.gz",
+      "dependencies": [],
+      "name": "zed-web-server.rs",
+      "org": "zed-pkg",
+      "package": "zed-pkg/zed-web-server.rs",
+      "repo": "zed-web-server.rs",
+      "repository_url": "https://github.com/zed-pkg/zed-web-server.rs",
+      "sha": "98d94515eca2d5cd99849475d5e7b0cb6c2a93fe",
+      "tag": "v0.1.0",
+      "tag_sha": "98d94515eca2d5cd99849475d5e7b0cb6c2a93fe",
+      "version": "0.1.0"
+    },
+    {
+      "archive_format": "tar.gz",
+      "dependencies": [],
+      "name": "zed-xcode",
+      "org": "zed-pkg",
+      "package": "zed-pkg/zed-xcode",
+      "repo": "zed-xcode",
+      "repository_url": "https://github.com/zed-pkg/zed-xcode",
+      "sha": "36309fa60cc7efa661e415752422fee8e1d5672f",
+      "tag": "v0.1.0",
+      "tag_sha": "36309fa60cc7efa661e415752422fee8e1d5672f",
+      "version": "0.1.0"
+    },
+    {
+      "archive_format": "tar.gz",
+      "dependencies": [
+        "zed-pkg/zed-interfaces"
+      ],
+      "name": "zed-clients",
+      "org": "zed-pkg",
+      "package": "zed-pkg/zed-clients",
+      "repo": "zed-clients",
+      "repository_url": "https://github.com/zed-pkg/zed-clients",
+      "sha": "e79723981b88f8b6fbb2f49e7d3d954e2832cdc6",
+      "tag": "v0.1.0",
+      "tag_sha": "e79723981b88f8b6fbb2f49e7d3d954e2832cdc6",
+      "version": "0.1.0"
+    },
+    {
+      "archive_format": "tar.gz",
+      "dependencies": [
+        "oresoftware/k8s-libs-and-shared-defs",
+        "zed-pkg/zed-interfaces"
+      ],
+      "name": "zed-lib",
+      "org": "zed-pkg",
+      "package": "zed-pkg/zed-lib",
+      "repo": "zed-lib",
+      "repository_url": "https://github.com/zed-pkg/zed-lib",
+      "sha": "12071278e728100cc80b8ba60297ebff8e0914cb",
+      "tag": "v0.1.0",
+      "tag_sha": "12071278e728100cc80b8ba60297ebff8e0914cb",
+      "version": "0.1.0"
+    },
+    {
+      "archive_format": "tar.gz",
+      "dependencies": [
+        "oresoftware/k8s-libs-and-shared-defs",
+        "zed-pkg/zed-interfaces"
+      ],
+      "name": "zed-lib-core",
+      "org": "zed-pkg",
+      "package": "zed-pkg/zed-lib-core",
+      "repo": "zed-lib-core",
+      "repository_url": "https://github.com/zed-pkg/zed-lib-core",
+      "sha": "700f1f9578c6633a20693a5b1f52970ab845a740",
+      "tag": "v0.1.0",
+      "tag_sha": "700f1f9578c6633a20693a5b1f52970ab845a740",
+      "version": "0.1.0"
+    },
+    {
+      "archive_format": "tar.gz",
+      "dependencies": [
+        "zed-pkg/zed-clients",
+        "zed-pkg/zed-interfaces",
+        "zed-pkg/zed-lock"
+      ],
+      "name": "zed-cli",
+      "org": "zed-pkg",
+      "package": "zed-pkg/zed-cli",
+      "repo": "zed-cli",
+      "repository_url": "https://github.com/zed-pkg/zed-cli",
+      "sha": "751358fe130e64b646844bc7d857c4cff215ca2d",
+      "tag": "v0.1.0",
+      "tag_sha": "751358fe130e64b646844bc7d857c4cff215ca2d",
+      "version": "0.1.0"
+    }
+  ],
+  "rejected": [
+    {
+      "reason": "zed-pkg/zed-lock: tag 'v0.1.1' peels to a0dc78d385bc3ab553d3027b427f5f1428239c9c, default-branch head is 1db0da00d30fcf2e0762f50eedb1f88458020b52",
+      "repo": "zed-lock"
+    }
+  ],
+  "schema": 1
+}
