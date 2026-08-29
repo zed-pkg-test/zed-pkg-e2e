@@ -79,7 +79,7 @@ jobs:
               echo
               echo '**Result:** not executed because `FLEET_AUDIT_TOKEN` is not configured.'
               echo
-              echo 'The normal repository `GITHUB_TOKEN` is intentionally rejected: it cannot see private repositories in sibling organizations and would turn permission gaps into false missing-repository findings.'
+              echo 'The normal repository `GITHUB_TOKEN` is intentionally rejected because private sibling repositories would otherwise be reported as missing.'
             } >> "$GITHUB_STEP_SUMMARY"
             exit 1
           fi
@@ -116,13 +116,8 @@ jobs:
           const auditExitCode = Number(process.env.AUDIT_EXIT_CODE ?? '1');
           const token = process.env.GH_TOKEN ?? '';
           const redact = (value) => token ? value.split(token).join('[REDACTED]') : value;
-          const stderr = fs.existsSync(stderrPath)
-            ? redact(fs.readFileSync(stderrPath, 'utf8')).slice(0, 4000)
-            : '';
-
-          const appendSummary = (text) => {
-            if (summaryPath) fs.appendFileSync(summaryPath, `${text}\n`);
-          };
+          const stderr = fs.existsSync(stderrPath) ? redact(fs.readFileSync(stderrPath, 'utf8')).slice(0, 4000) : '';
+          const appendSummary = (text) => { if (summaryPath) fs.appendFileSync(summaryPath, `${text}\n`); };
 
           const index = JSON.parse(fs.readFileSync(indexPath, 'utf8'));
           let report;
@@ -134,22 +129,9 @@ jobs:
             appendSummary('# Live paired test-fleet audit');
             appendSummary('');
             appendSummary(`**Result:** auditor failed before producing valid JSON (exit ${auditExitCode}).`);
-            if (stderr) {
-              appendSummary('');
-              appendSummary('```text');
-              appendSummary(stderr);
-              appendSummary('```');
-            }
-            throw new Error(`live auditor did not produce valid JSON: ${error.message}`);
+            if (stderr) appendSummary(`\n\`\`\`text\n${stderr}\n\`\`\``);
+            throw error;
           }
-
-          const missingByOrganization = report.reports
-            .filter((item) => item.missing.length > 0)
-            .map((item) => `- **${item.testOrganization}:** ${item.missing.map((name) => `\`${name}\``).join(', ')}`);
-          const hygieneByOrganization = report.reports
-            .filter((item) => item.expectedHygiene.length > 0)
-            .flatMap((item) => item.expectedHygiene.map((finding) =>
-              `- **${item.testOrganization}/${finding.repository}:** ${finding.finding}`));
 
           appendSummary('# Live paired test-fleet audit');
           appendSummary('');
@@ -162,25 +144,18 @@ jobs:
           for (const item of report.reports) {
             appendSummary(`| \`${item.sourceOrganization}\` | \`${item.testOrganization}\` | ${item.expectedRepositories} | ${item.present.length} | ${item.missing.length} | ${item.extras.length} | ${item.expectedHygiene.length} |`);
           }
-          if (missingByOrganization.length) {
+          const missing = report.reports.filter((item) => item.missing.length);
+          if (missing.length) {
             appendSummary('');
             appendSummary('## Missing canonical repositories');
             appendSummary('');
-            appendSummary(missingByOrganization.join('\n'));
-          }
-          if (hygieneByOrganization.length) {
-            appendSummary('');
-            appendSummary('## Canonical repository hygiene findings');
-            appendSummary('');
-            appendSummary(hygieneByOrganization.join('\n'));
+            for (const item of missing) appendSummary(`- **${item.testOrganization}:** ${item.missing.map((name) => `\`${name}\``).join(', ')}`);
           }
           if (stderr) {
             appendSummary('');
             appendSummary('## Auditor diagnostics');
             appendSummary('');
-            appendSummary('```text');
-            appendSummary(stderr);
-            appendSummary('```');
+            appendSummary(`\`\`\`text\n${stderr}\n\`\`\``);
           }
 
           const compact = {
@@ -193,11 +168,6 @@ jobs:
             missingRepositories: report.missingRepositories,
             extraRepositories: report.extraRepositories,
             expectedHygieneFindings: report.expectedHygieneFindings,
-            missingByOrganization: Object.fromEntries(
-              report.reports
-                .filter((item) => item.missing.length > 0)
-                .map((item) => [item.testOrganization, item.missing]),
-            ),
           };
           console.log(JSON.stringify(compact, null, 2));
 
