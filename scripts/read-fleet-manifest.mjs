@@ -2,6 +2,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import zlib from 'node:zlib';
 
+import { applyFleetManifestExtensions } from './fleet-manifest-extensions.mjs';
+
 export function readFleetManifest(manifestPath) {
   let bytes;
   if (fs.existsSync(manifestPath)) {
@@ -11,5 +13,6 @@ export function readFleetManifest(manifestPath) {
     const encoded = fs.readdirSync(partsDir).sort().map((name) => fs.readFileSync(path.join(partsDir, name), 'utf8').trim()).join('');
     bytes = Buffer.from(encoded, 'base64');
   }
-  return JSON.parse((manifestPath.endsWith('.gz') ? zlib.gunzipSync(bytes) : bytes).toString('utf8'));
+  const manifest = JSON.parse((manifestPath.endsWith('.gz') ? zlib.gunzipSync(bytes) : bytes).toString('utf8'));
+  return applyFleetManifestExtensions(manifest, manifestPath);
 }

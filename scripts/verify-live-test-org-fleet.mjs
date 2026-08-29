@@ -25,6 +25,8 @@ for (const pair of manifest.pairs) {
   }
 }
 
+const expectedSpecialized = expected.filter((entry) => entry.kind === 'specialized').length;
+const expectedGovernance = expected.filter((entry) => entry.kind === 'governance').length;
 function delay(milliseconds) {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }

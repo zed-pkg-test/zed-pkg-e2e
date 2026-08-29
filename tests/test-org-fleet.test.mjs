@@ -55,7 +55,7 @@ test('validator succeeds and reports the complete fleet', () => {
   assert.equal(result.status, 0, result.stderr);
   const summary = JSON.parse(result.stdout);
   assert.equal(summary.pairs, 19);
-  assert.equal(summary.createRepositories, 319);
+  assert.equal(summary.createRepositories, 322);
   assert.equal(summary.governanceRepositories, 19);
   assert.equal(summary.existingRepositories, 22);
   assert.equal(summary.errors, 0);
@@ -67,9 +67,9 @@ test('bootstrap dry run is deterministic and write-free', () => {
   const summary = JSON.parse(result.stdout);
   assert.equal(summary.mode, 'dry-run');
   assert.equal(summary.selectedOrganizations, 19);
-  assert.equal(summary.selectedRepositories, 319);
+  assert.equal(summary.selectedRepositories, 322);
   assert.equal(summary.governanceRepositories, 19);
-  assert.equal(summary.planned, 338);
+  assert.equal(summary.planned, 341);
   assert.equal(summary.created, 0);
   assert.equal(summary.committed, 0);
   assert.equal(summary.pullRequests, 0);

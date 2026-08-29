@@ -28,6 +28,8 @@ test('live verifier parses and derives the complete non-r2g fleet', () => {
   assert.doesNotMatch(verifier, /expectedSpecialized !== \d+/);
   assert.doesNotMatch(verifier, /expectedGovernance !== \d+/);
   assert.doesNotMatch(verifier, /expected\.length !== \d+/);
+  assert.match(verifier, /const expectedSpecialized = expected\.filter/);
+  assert.match(verifier, /const expectedGovernance = expected\.filter/);
   assert.match(verifier, /git\/ref\/heads/);
   assert.match(verifier, /pulls\?state=open&per_page=100/);
   assert.match(verifier, /missingOpenPullRequests/);
