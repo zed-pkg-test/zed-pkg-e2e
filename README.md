@@ -114,6 +114,19 @@ change, then to the merge commit when the CLI work lands. The workflow has
 read-only repository permissions and uploads only bounded local-registry
 diagnostics on failure.
 
+## GitHub / R2 fallback (registry down, CDN up)
+
+`.github/workflows/github-r2-fallback.yml` is a reusable canary for the
+`cdn.zpkg.net` guessable-object contract. `scripts/github_r2_fallback.py`
+publishes a disposable package to a `file://` registry, copies the tarball onto
+`packages/` and `github/` keys, points `--registry` at a closed loopback port,
+and proves `zed install --frozen` restores the packed payload from a loopback
+CDN. It also round-trips the typed `get_version` RPC frame over TCP NDJSON
+(from `github.com/oresoftware/api-docs`). Pull requests only compile the
+script; a full product run needs exact `zed-cli` and `zed-interfaces` commits
+via `workflow_call` or `workflow_dispatch`. See
+`docs/github-r2-fallback-canary.md`.
+
 Run the acceptance harness locally with sibling fixture checkouts:
 
 ```bash
