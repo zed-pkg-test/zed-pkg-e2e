@@ -1,0 +1,187 @@
+name: DEN-2750 validator materializer
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/den-2750-validator-materializer.yml"
+  push:
+    branches:
+      - agent/den-2750-validator-materializer
+    paths:
+      - ".github/workflows/den-2750-validator-materializer.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: den-2750-validator-materializer-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  FEATURE_BASE: d1bf8ef7c88a75292cbe8d697bfd269f30d62e2b
+  FEATURE_COMMIT: 5c2e328baf1954fd61aed0cad5867af99c17437f
+  CURRENT_MAIN: f793e7c592373242dff9ab855845c42f526db9b4
+
+jobs:
+  materialize:
+    name: current-main one-file validator / ubuntu-24.04
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Check out independent harness
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: harness
+          fetch-depth: 1
+          persist-credentials: false
+          show-progress: false
+
+      - name: Check out exact source feature history
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: zed-pkg/zed-interfaces
+          ref: ${{ env.FEATURE_COMMIT }}
+          path: interfaces
+          fetch-depth: 0
+          persist-credentials: false
+          show-progress: false
+
+      - name: Install pinned Rust toolchain
+        uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30
+        with:
+          toolchain: stable
+          components: rustfmt,clippy
+
+      - name: Prove feature lineage and compose on current main
+        working-directory: interfaces
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$FEATURE_COMMIT"
+          test "$(git diff --name-only "$FEATURE_BASE" "$FEATURE_COMMIT")" = src/version.rs
+          git cat-file -e "$CURRENT_MAIN^{commit}"
+          git diff --quiet "$FEATURE_BASE" "$CURRENT_MAIN" -- src/version.rs
+          git checkout --detach "$CURRENT_MAIN"
+          git checkout "$FEATURE_COMMIT" -- src/version.rs
+          test "$(git diff --name-only "$CURRENT_MAIN")" = src/version.rs
+
+      - name: Narrow malformed wildcard detection without exact-tag false positives
+        working-directory: interfaces
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path("src/version.rs")
+          text = path.read_text(encoding="utf-8")
+
+          start_marker = "/// Detect a dotted requirement whose leading segment is numeric"
+          end_marker = "\nimpl Requirement {"
+          start = text.find(start_marker)
+          end = text.find(end_marker, start)
+          if start < 0 or end < 0:
+              raise SystemExit("could not locate the pinned broad dotted-requirement helper")
+
+          helper = '''/// Detect only malformed dotted numeric requirements that the semver parser
+/// demotes to exact tags. A wildcard followed by any additional segment is a
+/// typo, and more than three all-numeric components are not semver. Valid
+/// calendar-like exact tags such as `2026.07.24` and ordinary opaque tags such
+/// as `1.nginx` and `1.x86_64` remain exact.
+fn looks_like_malformed_dotted_numeric_requirement(input: &str) -> bool {
+    let mut segments = input.split('.');
+    let Some(first) = segments.next() else {
+        return false;
+    };
+    if first.is_empty() || !first.bytes().all(|byte| byte.is_ascii_digit()) {
+        return false;
+    }
+
+    let mut segment_count = 1;
+    let mut all_numeric = true;
+    let mut saw_wildcard = false;
+    for segment in segments {
+        segment_count += 1;
+        if saw_wildcard {
+            return true;
+        }
+        if matches!(segment, "x" | "X" | "*") {
+            saw_wildcard = true;
+            all_numeric = false;
+            continue;
+        }
+        if segment.is_empty() {
+            return false;
+        }
+        if segment.bytes().all(|byte| byte.is_ascii_digit()) {
+            continue;
+        }
+        return false;
+    }
+
+    all_numeric && segment_count > 3
+}
+'''
+          text = text[:start] + helper + text[end:]
+
+          old_call = "            || looks_like_dotted_numeric_requirement(input);\n"
+          new_call = "            || looks_like_malformed_dotted_numeric_requirement(input);\n"
+          if text.count(old_call) != 1:
+              raise SystemExit("expected one broad validator helper call")
+          text = text.replace(old_call, new_call, 1)
+
+          old_docs = "Strings with no range operators or numeric dotted shape are\n    /// legitimate opaque tags and pass."
+          new_docs = "Strings without range operators or malformed dotted numeric shape are\n    /// legitimate opaque tags and pass."
+          if text.count(old_docs) != 1:
+              raise SystemExit("expected exact validator documentation boundary")
+          text = text.replace(old_docs, new_docs, 1)
+
+          accepted = '''            "matrix-2",
+            "1.nginx",
+            "1.x86_64",
+'''
+          accepted_with_calver = '''            "matrix-2",
+            "1.nginx",
+            "1.x86_64",
+            "2026.07.24",
+'''
+          if text.count(accepted) != 1:
+              raise SystemExit("expected exact accepted-tag regression list")
+          path.write_text(text.replace(accepted, accepted_with_calver, 1), encoding="utf-8")
+          PY
+          cargo fmt --all
+          test "$(git diff --name-only "$CURRENT_MAIN")" = src/version.rs
+          git diff --check
+
+      - name: Run strict current-main source contract
+        working-directory: interfaces
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo fmt --all -- --check
+          cargo clippy --locked --all-targets -- -D warnings
+          cargo test --locked --all-targets
+          cargo test --locked requirement_validation_rejects_malformed_dotted_ranges_only -- --exact --nocapture
+          test "$(git diff --name-only "$CURRENT_MAIN")" = src/version.rs
+
+      - name: Package exact source bytes and patch
+        working-directory: interfaces
+        shell: bash
+        run: |
+          set -euo pipefail
+          output="$RUNNER_TEMP/den-2750-validator"
+          mkdir -p "$output/src"
+          cp src/version.rs "$output/src/version.rs"
+          git diff --binary "$CURRENT_MAIN" -- src/version.rs > "$output/validator.patch"
+          test -s "$output/validator.patch"
+          sha256sum "$output/src/version.rs" "$output/validator.patch" > "$output/SHA256SUMS"
+
+      - name: Upload exact validator materialization
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: den-2750-validator-${{ github.run_id }}
+          path: ${{ runner.temp }}/den-2750-validator
+          if-no-files-found: error
+          retention-days: 1
+          include-hidden-files: false
