@@ -138,11 +138,15 @@ def sidecar_names(org: str, name: str, version: str) -> list[str]:
 
 
 def pack_canary(work: Path) -> tuple[bytes, Path]:
+    """Pack the same `pkg/`-rooted layout `zed pack` writes.
+
+    `zed install` rejects archives whose first directory is not `pkg/`.
+    """
     root = work / "package"
-    root.mkdir(parents=True)
-    (root / "src").mkdir()
-    (root / "src" / "payload.txt").write_text(PAYLOAD, encoding="utf-8")
-    (root / ".zpkg.toml").write_text(
+    pkg = root / "pkg"
+    (pkg / "src").mkdir(parents=True)
+    (pkg / "src" / "payload.txt").write_text(PAYLOAD, encoding="utf-8")
+    (pkg / ".zpkg.toml").write_text(
         f'''[package]
 org = "{ORG}"
 name = "{PACKAGE_NAME}"
@@ -162,11 +166,16 @@ adapter = "none"
     )
     buffer = io.BytesIO()
     with tarfile.open(fileobj=buffer, mode="w:gz") as archive:
-        archive.add(root, arcname=f"{PACKAGE_NAME}-{VERSION}")
+        archive.add(pkg, arcname="pkg")
     tarball = buffer.getvalue()
     path = work / TARBALL_ASSET
     path.write_bytes(tarball)
     return tarball, path
+
+
+def packed_member_names(tarball: bytes) -> list[str]:
+    with tarfile.open(fileobj=io.BytesIO(tarball), mode="r:gz") as archive:
+        return [member.name for member in archive.getmembers()]
 
 
 def ensure_repo(token: str) -> dict[str, Any]:
@@ -506,6 +515,11 @@ def assert_contract_helpers() -> None:
     assert asset_names(ORG, PACKAGE_NAME, VERSION)[0] == TARBALL_ASSET
     assert sidecar_names(ORG, PACKAGE_NAME, VERSION)[0] == SIDECAR_ASSET
     assert TAG == "v0.0.1"
+    packed, _path = pack_canary(Path(tempfile.mkdtemp(prefix="zpkg-canary-pack-")))
+    names = packed_member_names(packed)
+    assert any(name == "pkg" or name.startswith("pkg/") for name in names), names
+    assert "pkg/.zpkg.toml" in names, names
+    assert "pkg/src/payload.txt" in names, names
 
 
 def parse_args() -> argparse.Namespace:
