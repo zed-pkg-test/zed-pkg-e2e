@@ -30,7 +30,7 @@ const organizations = [
   'embedded-alerts-test',
 ];
 
-test('paced executor lists exactly 287 specialized repositories', () => {
+test('paced executor lists exactly 290 specialized repositories', () => {
   let total = 0;
   for (const organization of organizations) {
     const result = childProcess.spawnSync(process.execPath, [listScript, '--org', organization, '--json'], {
@@ -44,7 +44,7 @@ test('paced executor lists exactly 287 specialized repositories', () => {
     assert.equal(new Set(plan.repositories).size, plan.repositories.length);
     total += plan.repositoryCount;
   }
-  assert.equal(total, 287);
+  assert.equal(total, 290);
 });
 
 test('paced executor rejects excluded organizations and paces write-producing repositories', () => {
@@ -62,7 +62,7 @@ test('paced executor rejects excluded organizations and paces write-producing re
   assert.match(workflow, /for attempt in 1 2 3/);
   assert.match(workflow, /sleep 15/);
   assert.match(workflow, /TEST_ORG_FLEET_SKIP_TOPICS: "true"/);
-  assert.match(workflow, /test "\$total" -eq 287/);
+  assert.match(workflow, /test "\$total" -eq 290/);
   assert.match(workflow, /tests\/bootstrap-retry-policy\.test\.mjs/);
   assert.match(workflow, /tests\/git-transport-worktree\.test\.mjs/);
   assert.match(workflow, /gh_api_with_rate_limit_retry\(\)/);

@@ -34,7 +34,7 @@ test('git credential helper never dirties a generated repository worktree', () =
   assert.match(launcher, /fs\.rmSync\(credentialDirectory, \{ recursive: true, force: true \}\)/);
   assert.match(
     launcher,
-    /fs\.mkdirSync\(path\.join\(worktree, gitlink\.path\), \{ recursive: true \}\)/,
+    /fs\.mkdirSync\(gitlinkPath, \{ recursive: true \}\)/,
   );
   assert.match(compatibilityWrapper, /if \(!launcher\.includes\(gitlinkWorktreePlaceholder\)\)/);
 });

@@ -85,44 +85,44 @@ jobs:
               raise SystemExit("could not locate the pinned broad dotted-requirement helper")
 
           helper = '''/// Detect only malformed dotted numeric requirements that the semver parser
-/// demotes to exact tags. A wildcard followed by any additional segment is a
-/// typo, and more than three all-numeric components are not semver. Valid
-/// calendar-like exact tags such as `2026.07.24` and ordinary opaque tags such
-/// as `1.nginx` and `1.x86_64` remain exact.
-fn looks_like_malformed_dotted_numeric_requirement(input: &str) -> bool {
-    let mut segments = input.split('.');
-    let Some(first) = segments.next() else {
-        return false;
-    };
-    if first.is_empty() || !first.bytes().all(|byte| byte.is_ascii_digit()) {
-        return false;
-    }
+          /// demotes to exact tags. A wildcard followed by any additional segment is a
+          /// typo, and more than three all-numeric components are not semver. Valid
+          /// calendar-like exact tags such as `2026.07.24` and ordinary opaque tags such
+          /// as `1.nginx` and `1.x86_64` remain exact.
+          fn looks_like_malformed_dotted_numeric_requirement(input: &str) -> bool {
+              let mut segments = input.split('.');
+              let Some(first) = segments.next() else {
+                  return false;
+              };
+              if first.is_empty() || !first.bytes().all(|byte| byte.is_ascii_digit()) {
+                  return false;
+              }
 
-    let mut segment_count = 1;
-    let mut all_numeric = true;
-    let mut saw_wildcard = false;
-    for segment in segments {
-        segment_count += 1;
-        if saw_wildcard {
-            return true;
-        }
-        if matches!(segment, "x" | "X" | "*") {
-            saw_wildcard = true;
-            all_numeric = false;
-            continue;
-        }
-        if segment.is_empty() {
-            return false;
-        }
-        if segment.bytes().all(|byte| byte.is_ascii_digit()) {
-            continue;
-        }
-        return false;
-    }
+              let mut segment_count = 1;
+              let mut all_numeric = true;
+              let mut saw_wildcard = false;
+              for segment in segments {
+                  segment_count += 1;
+                  if saw_wildcard {
+                      return true;
+                  }
+                  if matches!(segment, "x" | "X" | "*") {
+                      saw_wildcard = true;
+                      all_numeric = false;
+                      continue;
+                  }
+                  if segment.is_empty() {
+                      return false;
+                  }
+                  if segment.bytes().all(|byte| byte.is_ascii_digit()) {
+                      continue;
+                  }
+                  return false;
+              }
 
-    all_numeric && segment_count > 3
-}
-'''
+              all_numeric && segment_count > 3
+          }
+          '''
           text = text[:start] + helper + text[end:]
 
           old_call = "            || looks_like_dotted_numeric_requirement(input);\n"
@@ -138,14 +138,14 @@ fn looks_like_malformed_dotted_numeric_requirement(input: &str) -> bool {
           text = text.replace(old_docs, new_docs, 1)
 
           accepted = '''            "matrix-2",
-            "1.nginx",
-            "1.x86_64",
-'''
+                      "1.nginx",
+                      "1.x86_64",
+          '''
           accepted_with_calver = '''            "matrix-2",
-            "1.nginx",
-            "1.x86_64",
-            "2026.07.24",
-'''
+                      "1.nginx",
+                      "1.x86_64",
+                      "2026.07.24",
+          '''
           if text.count(accepted) != 1:
               raise SystemExit("expected exact accepted-tag regression list")
           path.write_text(text.replace(accepted, accepted_with_calver, 1), encoding="utf-8")

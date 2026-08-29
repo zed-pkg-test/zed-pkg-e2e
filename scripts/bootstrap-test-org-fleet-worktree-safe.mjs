@@ -18,7 +18,7 @@ const gitlinkIndexSeam = [
   '      ]);',
 ].join('\n');
 const gitlinkWorktreePlaceholder =
-  "      fs.mkdirSync(path.join(worktree, gitlink.path), { recursive: true });";
+  "      fs.mkdirSync(gitlinkPath, { recursive: true });";
 
 let patchedLauncher = launcher;
 if (!launcher.includes(gitlinkWorktreePlaceholder)) {
