@@ -21,6 +21,12 @@ materializes that payload (needs zed-cli#294). Pull requests only compile the
 script; `workflow_dispatch` runs the live GitHub APIs. See
 `docs/github-api-fallback-canary.md`.
 
+`scripts/ghcr_fallback.py` is the complementary Packages proof: it publishes
+the packed tarball only to
+[`ghcr.io/zed-pkg-test/ghcr-fallback-canary`](https://github.com/zed-pkg-test/ghcr-fallback-canary)
+(no Release) so `zed install --frozen` must take the GHCR fallback branch.
+See `docs/ghcr-fallback-canary.md`.
+
 Cloudflare Workers in [`zed-pkg/zed-infra`](https://github.com/zed-pkg/zed-infra)
 (`workers/registry-proxy`, `workers/cdn-proxy`) reconstruct the same GitHub
 URLs at `registry.zpkg.net` / `cdn.zpkg.net` when the k8s origin is 502.

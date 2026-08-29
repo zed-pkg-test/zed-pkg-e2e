@@ -1,0 +1,40 @@
+name: GHCR live fallback canary
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/ghcr-fallback.yml"
+      - "scripts/ghcr_fallback.py"
+      - "docs/ghcr-fallback-canary.md"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ghcr-fallback-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref || github.run_id }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  syntax:
+    name: Canary script compiles
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Check out harness
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+          show-progress: false
+      - name: py_compile and naming contract
+        run: |
+          set -euo pipefail
+          python3 -m py_compile scripts/ghcr_fallback.py
+          python3 scripts/ghcr_fallback.py \
+            --work-root "$RUNNER_TEMP/ghcr-contract" \
+            --skip-network
