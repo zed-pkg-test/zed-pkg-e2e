@@ -1,0 +1,129 @@
+name: DEN-3089 exact-head polyglot zedignore certification
+
+on:
+  push:
+    branches:
+      - alexanderdmills/den-3089-polyglot-zedignore
+    paths:
+      - .github/workflows/den-3089-exact-head.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: den-3089-exact-head-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PRODUCT_REPOSITORY: zed-pkg/zed-cli
+  PRODUCT_BRANCH: alexanderdmills/den-3089-polyglot-zedignore
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: "1"
+
+jobs:
+  resolve:
+    name: resolve immutable product head
+    runs-on: ubuntu-24.04
+    outputs:
+      product_sha: ${{ steps.resolve.outputs.product_sha }}
+    steps:
+      - name: Resolve product branch once
+        id: resolve
+        shell: bash
+        run: |
+          set -euo pipefail
+          product_sha="$(git ls-remote "https://github.com/${PRODUCT_REPOSITORY}.git" "refs/heads/${PRODUCT_BRANCH}" | awk '{print $1}')"
+          [[ "$product_sha" =~ ^[0-9a-f]{40}$ ]]
+          echo "product_sha=$product_sha" >> "$GITHUB_OUTPUT"
+          echo "Resolved ${PRODUCT_REPOSITORY}@${product_sha}"
+
+  certify:
+    name: certify ${{ matrix.os }}
+    needs: resolve
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-24.04
+          - macos-15
+          - windows-2025
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    steps:
+      - name: Check out exact product candidate
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ env.PRODUCT_REPOSITORY }}
+          ref: ${{ needs.resolve.outputs.product_sha }}
+          fetch-depth: 1
+          persist-credentials: false
+          show-progress: false
+
+      - name: Verify immutable checkout
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "${{ needs.resolve.outputs.product_sha }}"
+          test ! -e .github/workflows/den-3089-apply.yml
+          test ! -e tools/den-3089-apply.py.gz.b64.part00
+
+      - name: Install stable Rust toolchain
+        uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30
+        with:
+          toolchain: stable
+          components: rustfmt,clippy
+
+      - name: Verify formatting
+        shell: bash
+        run: cargo fmt --all -- --check
+
+      - name: Exercise real polyglot archive scenarios
+        shell: bash
+        env:
+          CARGO_NET_GIT_FETCH_WITH_CLI: "true"
+        run: cargo test --locked --test polyglot_zedignore -- --nocapture
+
+      - name: Run complete locked target suite
+        shell: bash
+        env:
+          CARGO_NET_GIT_FETCH_WITH_CLI: "true"
+        run: cargo test --all-targets --locked
+
+      - name: Reject lint regressions
+        shell: bash
+        env:
+          CARGO_NET_GIT_FETCH_WITH_CLI: "true"
+        run: cargo clippy --locked --lib --bin zed -- -D warnings
+
+  record:
+    name: record exact-head certification
+    needs:
+      - resolve
+      - certify
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out test-org branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: alexanderdmills/den-3089-polyglot-zedignore
+          fetch-depth: 1
+          persist-credentials: true
+          show-progress: false
+
+      - name: Prove product head did not move and record success
+        shell: bash
+        run: |
+          set -euo pipefail
+          certified_sha="${{ needs.resolve.outputs.product_sha }}"
+          current_sha="$(git ls-remote "https://github.com/${PRODUCT_REPOSITORY}.git" "refs/heads/${PRODUCT_BRANCH}" | awk '{print $1}')"
+          test "$current_sha" = "$certified_sha"
+          mkdir -p .github
+          printf '{\n  "ticket": "DEN-3089",\n  "product_repository": "%s",\n  "product_branch": "%s",\n  "product_sha": "%s",\n  "platforms": ["ubuntu-24.04", "macos-15", "windows-2025"],\n  "workflow_run_id": "%s",\n  "workflow_run_attempt": "%s",\n  "verified": true\n}\n' \
+            "$PRODUCT_REPOSITORY" "$PRODUCT_BRANCH" "$certified_sha" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" \
+            > .github/den-3089-exact-head-success.json
+          git config user.name "alex-main-agent"
+          git config user.email "alex-main-agent@users.noreply.github.com"
+          git add .github/den-3089-exact-head-success.json
+          git commit -m "test(DEN-3089): record exact-head cross-platform certification"
+          git push origin "HEAD:${GITHUB_REF_NAME}"
