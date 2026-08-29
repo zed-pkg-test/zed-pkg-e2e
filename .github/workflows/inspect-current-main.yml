@@ -1,0 +1,203 @@
+name: zed inspect current-main exact-head canary
+
+on:
+  pull_request:
+    paths:
+      - .github/workflows/inspect-current-main.yml
+      - docs/inspect-current-main.md
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: inspect-current-main-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  ZED_CLI_COMMIT: b7036935ce3711563f1527472fc64e92bc1341aa
+  ZED_CLI_BASE: 1ab18fcb2ff884e82af4cac4513d7b983a23c84a
+
+jobs:
+  certify:
+    name: exact-base inspect / ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-15, windows-2025]
+    steps:
+      - name: Check out independent certification repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+          show-progress: false
+
+      - name: Check out exact product candidate and history
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: zed-pkg/zed-cli
+          ref: ${{ env.ZED_CLI_COMMIT }}
+          path: product/zed-cli
+          fetch-depth: 0
+          persist-credentials: false
+          show-progress: false
+
+      - name: Require immutable base ancestry and five-file delta
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$ZED_CLI_COMMIT" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$ZED_CLI_BASE" =~ ^[0-9a-f]{40}$ ]]
+          test "$(git -C product/zed-cli rev-parse HEAD)" = "$ZED_CLI_COMMIT"
+          git -C product/zed-cli merge-base --is-ancestor "$ZED_CLI_BASE" "$ZED_CLI_COMMIT"
+          changed="$(git -C product/zed-cli diff --name-only "$ZED_CLI_BASE" "$ZED_CLI_COMMIT")"
+          expected=$'schemas/inspect-v1.schema.json\nsrc/cli_model.rs\nsrc/inspect.rs\nsrc/lib.rs\ntests/inspect_cli.rs'
+          test "$changed" = "$expected"
+          git -C product/zed-cli diff --check "$ZED_CLI_BASE" "$ZED_CLI_COMMIT"
+
+      - name: Install pinned Rust toolchain
+        uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30
+        with:
+          toolchain: stable
+          components: rustfmt,clippy
+
+      - name: Install Python 3.12
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v6.0.0
+        with:
+          python-version: "3.12"
+          check-latest: false
+
+      - name: Run exact-head Rust quality gates
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo fmt --manifest-path product/zed-cli/Cargo.toml --all --check
+          cargo test --manifest-path product/zed-cli/Cargo.toml --locked --lib inspect::tests
+          cargo test --manifest-path product/zed-cli/Cargo.toml --locked --lib cli_model::tests
+          cargo test --manifest-path product/zed-cli/Cargo.toml --locked --test inspect_cli
+          cargo clippy --manifest-path product/zed-cli/Cargo.toml --locked \
+            --lib --bin zed --test inspect_cli -- -D warnings
+          cargo build --manifest-path product/zed-cli/Cargo.toml --locked --release --bin zed
+
+      - name: Run adversarial read-only CLI contract
+        shell: bash
+        env:
+          RUNNER_OS_NAME: ${{ runner.os }}
+          RUNNER_ARCH_NAME: ${{ runner.arch }}
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts
+          python3 - <<'PY'
+          import hashlib, json, os, pathlib, subprocess, tempfile
+
+          candidate = os.environ["ZED_CLI_COMMIT"]
+          base = os.environ["ZED_CLI_BASE"]
+          workspace = pathlib.Path.cwd()
+          binary = workspace / "product" / "zed-cli" / "target" / "release" / ("zed.exe" if os.name == "nt" else "zed")
+          assert binary.is_file(), binary
+          sensitive = ("TOKEN", "SECRET", "PASSWORD", "PRIVATE_KEY", "ACCESS_KEY", "API_KEY", "AUTHORIZATION", "COOKIE", "CREDENTIAL")
+
+          def environment(home, fake=False):
+              clean = {k: v for k, v in os.environ.items()
+                       if not k.upper().startswith("ZED_PKG_") and not any(marker in k.upper() for marker in sensitive)}
+              clean["ZED_PKG_HOME"] = str(home)
+              clean["ZED_PKG_REGISTRY"] = "http://127.0.0.1:9"
+              if fake: clean["ZED_PKG_TOKEN"] = "fake-env-token-that-must-not-escape"
+              return clean
+
+          def snapshot(root):
+              if not root.exists(): return None
+              rows = {}
+              for item in sorted(root.rglob("*")):
+                  rel = item.relative_to(root).as_posix()
+                  if item.is_symlink(): rows[rel] = ["symlink", os.readlink(item)]
+                  elif item.is_file(): rows[rel] = ["file", hashlib.sha256(item.read_bytes()).hexdigest()]
+                  elif item.is_dir(): rows[rel] = ["dir"]
+              return rows
+
+          temp = pathlib.Path(os.environ.get("RUNNER_TEMP") or tempfile.gettempdir())
+          sandbox = pathlib.Path(tempfile.mkdtemp(prefix="inspect-v1-", dir=temp))
+          project, home = sandbox / "project", sandbox / "home"
+          project.mkdir(); home.mkdir()
+          manifest, lock = project / ".zpkg.toml", project / ".zpkg.lock"
+          staging = project / ".zpkg-staging"; staging.mkdir()
+          sentinel = staging / "sentinel"; sentinel.write_text("must-survive", encoding="utf-8")
+          manifest.write_text('[package]\norg = "acme"\nname = "fixture"\nversion = "1.0.0"\n\n[package.repository]\nvcs = "git"\nurl = "https://example.invalid/acme/fixture"\n', encoding="utf-8")
+          lock.write_text("version = 1\n", encoding="utf-8")
+          (home / "credentials.toml").write_text("malformed = [credential", encoding="utf-8")
+
+          def invoke(args, *, cwd=project, use_home=home, fake=False):
+              return subprocess.run([str(binary), *args], cwd=cwd, env=environment(use_home, fake),
+                                    text=True, capture_output=True, timeout=15, check=False)
+
+          before_project, before_home = snapshot(project), snapshot(home)
+          result = invoke(["--token", "fake-arg-token-that-must-not-escape", "inspect", "--format", "json", "--root", str(project.resolve())], fake=True)
+          assert result.returncode == 0, result.stderr
+          assert result.stderr == "" and result.stdout.count("\n") == 1
+          report = json.loads(result.stdout)
+          assert report["schema_version"] == "1.0"
+          assert report["cli"] == {"implementation": "zed-pkg", "command": "inspect", "offline": True, "mutates_project": False, "loads_credentials": False}
+          assert report["summary"]["recovery_pending"] is True
+          recovery = next(d for d in report["diagnostics"] if d["code"] == "RECOVERY_PENDING")
+          action = next(a for a in recovery["actions"] if a["argv"] == ["zed", "install", "--frozen"])
+          assert action["mutates_project"] and action["requires_network"] and action["executes_package_code"]
+          assert snapshot(project) == before_project and snapshot(home) == before_home
+          assert sentinel.read_text(encoding="utf-8") == "must-survive"
+          assert "fake-env-token-that-must-not-escape" not in result.stdout + result.stderr
+          assert "fake-arg-token-that-must-not-escape" not in result.stdout + result.stderr
+
+          secret = "gh" + "p_fake_manifest_secret_that_must_not_escape"
+          manifest.write_text(f'[package\nsecret = "{secret}"\n', encoding="utf-8")
+          malformed_before = snapshot(project)
+          malformed = invoke(["inspect", "--format", "json", "--root", str(project.resolve())])
+          assert malformed.returncode == 0 and malformed.stderr == ""
+          malformed_report = json.loads(malformed.stdout)
+          assert malformed_report["summary"]["health"] == "error"
+          assert any(d["code"] == "MANIFEST_INVALID" for d in malformed_report["diagnostics"])
+          assert secret not in malformed.stdout + malformed.stderr
+          assert snapshot(project) == malformed_before
+
+          help_result = invoke(["inspect", "--help"])
+          assert help_result.returncode == 0 and help_result.stderr == "" and "--root" in help_result.stdout
+          token_home = sandbox / "token-home"
+          token_result = invoke(["--token", "inspect", "--help"], cwd=sandbox, use_home=token_home)
+          assert token_result.returncode == 0 and '"schema_version"' not in token_result.stdout and not token_home.exists()
+
+          relative = invoke(["inspect", "--root", "relative-project"], cwd=sandbox, use_home=sandbox / "relative-home")
+          assert relative.returncode != 0 and not (sandbox / "relative-project").exists()
+          missing_root = sandbox / "missing-project"
+          missing = invoke(["inspect", "--root", str(missing_root)], cwd=sandbox, use_home=sandbox / "missing-home")
+          assert missing.returncode != 0 and not missing_root.exists()
+
+          evidence = {
+              "$schema": "zed-pkg-test/inspect-current-main/v1",
+              "candidate": candidate,
+              "base": base,
+              "runner": {"os": os.environ["RUNNER_OS_NAME"], "arch": os.environ["RUNNER_ARCH_NAME"]},
+              "binary_sha256": hashlib.sha256(binary.read_bytes()).hexdigest(),
+              "result": "passed",
+          }
+          output = workspace / "artifacts" / f"inspect-{os.environ['RUNNER_OS_NAME']}-{os.environ['RUNNER_ARCH_NAME']}.json"
+          output.write_text(json.dumps(evidence, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+          PY
+
+      - name: Require immutable product and harness source
+        shell: bash
+        run: |
+          set -euo pipefail
+          git -C product/zed-cli diff --exit-code
+          git -C product/zed-cli diff --cached --exit-code
+          status="$(git status --porcelain --untracked-files=all | grep -vE '^\?\? (artifacts|product)/' || true)"
+          test -z "$status"
+
+      - name: Upload commit-addressed evidence
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: inspect-current-main-${{ runner.os }}-${{ runner.arch }}-${{ env.ZED_CLI_COMMIT }}
+          path: artifacts
+          if-no-files-found: error
+          retention-days: 14
+          include-hidden-files: false
