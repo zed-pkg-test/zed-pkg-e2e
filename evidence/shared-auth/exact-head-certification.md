@@ -1,6 +1,10 @@
 # Shared Auth exact-head certification
 
-Certified commit: `a471b20f8f81094f57393dc797b3cad0868c2f40`
+Last certified commit: `a471b20f8f81094f57393dc797b3cad0868c2f40`
+
+Next requested exact head (shared-auth `main`, not yet re-certified):
+`5cb47d3169df6829c468ea724e8acd61fecbcd6d`. Independent test repo head
+requested: `426fa32554b99f3e555d578dc0b99b2b8a9c4ff0`.
 
 The Zpkg browser-handoff source passed the independent Shared Auth test contract,
 declarative PostgreSQL schema application, realm validation, Redis reachability,
