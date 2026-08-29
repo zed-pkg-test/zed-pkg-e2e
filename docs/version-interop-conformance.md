@@ -2,15 +2,16 @@
 
 This contract converts the strict native-registry rules in
 `zed-pkg/zed-interfaces` into reusable data plus an external Rust consumer. It
-is stacked on the independent native-registry contract canary so future CLI,
-server, SDK, and publication-plan work can reuse one reviewed set of edge cases.
+is stacked on the independent current-main native-registry contract canary so
+future CLI, server, SDK, lockfile, and publication-plan work can reuse one
+reviewed set of edge cases.
 
 ## Immutable product pin
 
 The corpus certifies exactly:
 
 ```text
-zed-pkg/zed-interfaces@8bcbcbe9377760c9a8843b75daff54e92c1bf6d2
+zed-pkg/zed-interfaces@032b52f6e335e5696cb793d6a955c8f0658a95eb
 ```
 
 The same 40-character commit appears in `cases.json`, the Rust consumer, and the
@@ -52,6 +53,15 @@ registry is contacted or mutated.
 
 Evidence includes the checked corpus, its SHA-256, the generated consumer lock,
 the exact product commit, command output, and clean-tree status.
+
+## Current-main relationship
+
+The current replacement is based on the same native-registry consumer branch as
+`zed-pkg-test/zed-pkg-e2e#51`. The original reviewed corpus history remains a
+merge parent, while the five-file review delta is carried onto the latest E2E
+baseline and repinned to the current product integration head. The complete
+browser, fixture lifecycle, recursive, mise, Git-submodule, and source-map
+workflow set remains a promotion gate in addition to this focused corpus job.
 
 ## Local shape
 

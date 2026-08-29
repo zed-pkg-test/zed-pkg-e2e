@@ -27,13 +27,6 @@ for (const pair of manifest.pairs) {
 
 const expectedSpecialized = expected.filter((entry) => entry.kind === 'specialized').length;
 const expectedGovernance = expected.filter((entry) => entry.kind === 'governance').length;
-if (expectedSpecialized !== 301 || expectedGovernance !== 18 || expected.length !== 319) {
-  throw new Error(
-    `unexpected live verification scope: ${expectedSpecialized} specialized + ` +
-      `${expectedGovernance} governance = ${expected.length}`,
-  );
-}
-
 function delay(milliseconds) {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }

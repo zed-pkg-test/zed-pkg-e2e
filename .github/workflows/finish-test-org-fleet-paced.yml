@@ -67,7 +67,7 @@ jobs:
             count="$(node scripts/list-test-org-fleet-repositories.mjs --org "$organization" --json | jq '.repositoryCount')"
             total=$((total + count))
           done
-          test "$total" -eq 287
+          test "$total" -eq 290
 
       - name: Export the persisted fleet PAT without logging it
         shell: bash
@@ -226,7 +226,7 @@ jobs:
 
             for repository in "${repositories[@]}"; do
               processed=$((processed + 1))
-              echo "[$processed/287] $organization/$repository"
+              echo "[$processed/290] $organization/$repository"
               if ! apply_filtered_repository "$organization" "$repository"; then
                 organization_failed=true
                 echo "::error::Failed to provision $organization/$repository after three idempotent attempts"
@@ -260,5 +260,5 @@ jobs:
             exit 1
           fi
 
-          test "$processed" -eq 287
+          test "$processed" -eq 290
           echo 'All selected organizations completed; `r2g` and `r2g-test` were never selected.' >> "$GITHUB_STEP_SUMMARY"

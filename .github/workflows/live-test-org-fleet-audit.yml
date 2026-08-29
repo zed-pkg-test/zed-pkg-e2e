@@ -88,7 +88,7 @@ jobs:
       - name: Export the current canonical denominator
         run: node scripts/export-test-org-fleet-index.mjs > canonical-test-fleet-index.json
 
-      - name: Compare all paired organizations with the current manifest
+      - name: Compare all paired organizations with the current canonical manifest
         id: audit
         shell: bash
         run: |
@@ -101,7 +101,7 @@ jobs:
           printf 'exit_code=%s\n' "$status" >> "$GITHUB_OUTPUT"
           test -e live-test-fleet-audit.stderr || : > live-test-fleet-audit.stderr
 
-      - name: Summarize and enforce the current machine-readable report
+      - name: Summarize and enforce the complete current machine-readable report
         if: always() && steps.audit.outcome != 'skipped'
         shell: bash
         env:

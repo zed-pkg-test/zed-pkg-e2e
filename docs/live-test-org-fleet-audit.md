@@ -29,7 +29,7 @@ Scheduled and manually dispatched live audits require `FLEET_AUDIT_TOKEN`, which
 - a read-only cross-organization token limited to repository metadata; or
 - an approved short-lived GitHub App installation token supplied under the same secret name.
 
-Pull-request and push jobs remain secret-free and run only syntax, unit, and canonical-exporter contracts.
+The workflow refuses to substitute the normal `GITHUB_TOKEN` and fails with an explicit configuration message when the cross-organization credential is absent. Pull-request and push jobs remain secret-free and run only syntax, unit, and canonical-exporter contracts.
 
 ## Local use
 
@@ -53,3 +53,9 @@ The live job fails independently when:
 - cross-organization credentials are absent.
 
 Extras are reported but preserved. Use `--strict-extras` only for an intentional exact-equality investigation; later product-specific repositories are not deletion targets.
+
+## Automation and evidence
+
+`.github/workflows/live-test-org-fleet-audit.yml` runs the offline auditor and canonical-exporter contracts on relevant pull requests and manifest changes. The exact cross-organization comparison runs only on the daily schedule or manual dispatch, where `FLEET_AUDIT_TOKEN` is required.
+
+The live job writes the pair-by-pair table, exact missing repository names, and canonical hygiene findings to the GitHub step summary. It retains the exact canonical index plus sanitized JSON and stderr evidence, making portfolio drift visible without relying on a stale hand-maintained count table or confusing permission gaps with repository deletion.

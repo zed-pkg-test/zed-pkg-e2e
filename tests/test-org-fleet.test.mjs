@@ -55,7 +55,7 @@ test('validator succeeds and reports the complete fleet', () => {
   assert.equal(result.status, 0, result.stderr);
   const summary = JSON.parse(result.stdout);
   assert.equal(summary.pairs, 19);
-  assert.equal(summary.createRepositories, 319);
+  assert.equal(summary.createRepositories, 322);
   assert.equal(summary.governanceRepositories, 19);
   assert.equal(summary.existingRepositories, 22);
   assert.equal(summary.errors, 0);
@@ -67,9 +67,9 @@ test('bootstrap dry run is deterministic and write-free', () => {
   const summary = JSON.parse(result.stdout);
   assert.equal(summary.mode, 'dry-run');
   assert.equal(summary.selectedOrganizations, 19);
-  assert.equal(summary.selectedRepositories, 319);
+  assert.equal(summary.selectedRepositories, 322);
   assert.equal(summary.governanceRepositories, 19);
-  assert.equal(summary.planned, 338);
+  assert.equal(summary.planned, 341);
   assert.equal(summary.created, 0);
   assert.equal(summary.committed, 0);
   assert.equal(summary.pullRequests, 0);
@@ -118,12 +118,16 @@ test('fleet apply serializes organizations and retries GitHub secondary content 
   assert.match(launcher, /retrying GitHub API request after rate limit/);
 });
 
-test('generated harness branches use authenticated git transport instead of REST blob fan-out', () => {
+test('generated harness branches use authenticated git transport without staging the askpass helper', () => {
   const launcherPath = path.join(root, 'scripts', 'bootstrap-test-org-fleet.mjs');
   const launcher = fs.readFileSync(launcherPath, 'utf8');
 
   assert.match(launcher, /spawnSync\('git'/);
   assert.match(launcher, /GIT_ASKPASS_REQUIRE: 'force'/);
+  assert.match(launcher, /const credentialDirectory = fs\.mkdtempSync\(path\.join\(os\.tmpdir\(\), 'test-org-fleet-credentials-'\)\)/);
+  assert.match(launcher, /const askpass = path\.join\(credentialDirectory, 'git-askpass\.sh'\)/);
+  assert.doesNotMatch(launcher, /const askpass = path\.join\(worktree, 'git-askpass\.sh'\)/);
+  assert.match(launcher, /fs\.rmSync\(credentialDirectory, \{ recursive: true, force: true \}\)/);
   assert.match(launcher, /\['push', '--quiet', 'origin'/);
   assert.match(launcher, /update-index/);
   assert.match(launcher, /--cacheinfo/);

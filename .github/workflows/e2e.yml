@@ -21,7 +21,7 @@ env:
   # Every cross-repository input is immutable. Updating one of these pins is an
   # intentional dependency change, not an ambient change to a default branch.
   ZED_E2E_REF: 5ccd57316ae39c3a3692fb4cfbda2f8a4dd74aa0
-  ZED_CLI_REF: 8929a58c6591c7a964d7f91412665d7c8a4afdf3
+  ZED_CLI_REF: 3a91d64abf1fc0bdee6eab2ff804113b1429849f
   ZED_INTERFACES_REF: dc0e0a0620b9462817950b552d3d334a184b1cb1
   ZED_API_REF: 93de2808e0c19a39bf8350abc6cd3104b729e5bc
   ZED_WEB_REF: bb6d9a7094fd9a8d13224865b32e9c362eea1b03

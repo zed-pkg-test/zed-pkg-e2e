@@ -3,6 +3,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
+import { applyFleetManifestExtensions } from './fleet-manifest-extensions.mjs';
 import { hardenGeneratedIntegrationPolicy } from './test-org-fleet-integration-policy.mjs';
 
 const root = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
@@ -26,6 +27,8 @@ const hardenedRetryBlock = `    const primaryRemaining = Number(response.headers
       && /secondary rate limit|temporarily blocked from content creation|abuse detection/i.test(text);
     if ((primaryRateLimit || secondaryRateLimit || response.status === 429 || response.status >= 500) && attempt < 13) {
       const retryAfterSeconds = Number(response.headers.get('retry-after') ?? 0);
+      const primaryRemaining = Number(response.headers.get('x-ratelimit-remaining') ?? -1);
+      const primaryRateLimit = primaryRemaining === 0;
       const resetEpochSeconds = Number(response.headers.get('x-ratelimit-reset') ?? 0);
       const resetDelayMs = primaryRateLimit && resetEpochSeconds > 0
         ? Math.max(0, (resetEpochSeconds * 1000) - Date.now() + 5000)
@@ -48,9 +51,15 @@ const hardenedRetryBlock = `    const primaryRemaining = Number(response.headers
     }`;
 
 const importSeam = "import zlib from 'node:zlib';";
+const extensionFunctionSource = applyFleetManifestExtensions.toString();
 const hardenedImports = `${importSeam}
 import childProcess from 'node:child_process';
-import os from 'node:os';`;
+import os from 'node:os';
+
+${extensionFunctionSource}`;
+
+const originalManifestLoad = "const manifest = JSON.parse((options.manifest.endsWith('.gz') ? zlib.gunzipSync(manifestBytes) : manifestBytes).toString('utf8'));";
+const hardenedManifestLoad = "const manifest = applyFleetManifestExtensions(JSON.parse((options.manifest.endsWith('.gz') ? zlib.gunzipSync(manifestBytes) : manifestBytes).toString('utf8')), options.manifest);";
 
 const originalTopicsGuard = `async function ensureTopics(owner, repository, topics) {
   if (!options.apply || repository._planned) return;`;
@@ -128,7 +137,8 @@ esac
     if (filePaths.length) runGit(['add', '--', ...filePaths]);
 
     for (const gitlink of gitlinks) {
-      fs.rmSync(path.join(worktree, gitlink.path), { recursive: true, force: true });
+      const gitlinkPath = path.join(worktree, gitlink.path);
+      fs.rmSync(gitlinkPath, { recursive: true, force: true });
       runGit([
         'update-index',
         '--add',
@@ -138,7 +148,7 @@ esac
       // Git does not materialize a gitlink worktree directory when a branch is
       // checked out without submodules. Keep an empty placeholder so an
       // idempotent rerun does not report the valid gitlink as a deletion.
-      fs.mkdirSync(path.join(worktree, gitlink.path), { recursive: true });
+      fs.mkdirSync(gitlinkPath, { recursive: true });
     }
 
     if (!runGit(['status', '--porcelain=v1', '--untracked-files=no']).stdout.trim()) {
@@ -171,12 +181,14 @@ const gitPushWriteTreeSource = gitPushWriteTree
 if (!source.includes(originalAttemptLoop)) throw new Error('generated bootstrap attempt-loop seam changed');
 if (!source.includes(originalRetryBlock)) throw new Error('generated bootstrap retry seam changed');
 if (!source.includes(importSeam)) throw new Error('generated bootstrap import seam changed');
+if (!source.includes(originalManifestLoad)) throw new Error('generated bootstrap manifest-load seam changed');
 if (!source.includes(originalTopicsGuard)) throw new Error('generated bootstrap topics seam changed');
 if (!writeTreePattern.test(source)) throw new Error('generated bootstrap write-tree seam changed');
 
 source = source.replace(originalAttemptLoop, hardenedAttemptLoop);
 source = source.replace(originalRetryBlock, hardenedRetryBlock);
 source = source.replace(importSeam, hardenedImports);
+source = source.replace(originalManifestLoad, hardenedManifestLoad);
 source = source.replace(originalTopicsGuard, hardenedTopicsGuard);
 source = source.replace(
   writeTreePattern,

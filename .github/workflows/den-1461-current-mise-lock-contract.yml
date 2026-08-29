@@ -1,0 +1,114 @@
+name: DEN-1461 current mise.lock contract
+
+on:
+  pull_request:
+    paths:
+      - .github/workflows/den-1461-current-mise-lock-contract.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: den-1461-current-mise-lock-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  ZED_CLI_SHA: 82ed67aaa98495b5aa85faef1d25671373eb1991
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: "1"
+
+jobs:
+  certify:
+    name: exact lock identity / ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-24.04
+          - macos-15
+          - windows-2025
+
+    steps:
+      - name: Check out certification repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          show-progress: false
+
+      - name: Check out immutable zed-cli candidate
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: zed-pkg/zed-cli
+          ref: ${{ env.ZED_CLI_SHA }}
+          path: zed-cli
+          persist-credentials: false
+          show-progress: false
+
+      - name: Install pinned Rust toolchain action
+        uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30
+        with:
+          components: rustfmt,clippy
+
+      - name: Verify exact immutable candidate
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git -C zed-cli rev-parse HEAD)" = "$ZED_CLI_SHA"
+          test -f zed-cli/src/mise_lock.rs
+          test -f zed-cli/tests/fixtures/mise-lock/current-actionlint.lock
+          test -f zed-cli/tests/mise_lock_contract.rs
+
+      - name: Check formatting
+        working-directory: zed-cli
+        run: cargo fmt --all --check
+
+      - name: Run complete lock module and public API contracts
+        working-directory: zed-cli
+        run: |
+          cargo test --locked mise_lock -- --nocapture
+          cargo test --locked --test mise_lock_contract -- --nocapture
+
+      - name: Lint every Rust target with warnings denied
+        working-directory: zed-cli
+        run: cargo clippy --locked --all-targets -- -D warnings
+
+      - name: Repeat deterministic normalized lock identity
+        working-directory: zed-cli
+        run: |
+          cargo test --locked mise_lock::tests::complete_current_lock_round_trips_and_is_frozen_portable -- --exact --nocapture
+          cargo test --locked mise_lock::tests::complete_current_lock_round_trips_and_is_frozen_portable -- --exact --nocapture
+
+      - name: Prove the certification lane is read-only and credential-free
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          workflow = Path('.github/workflows/den-1461-current-mise-lock-contract.yml').read_text()
+          assert 'permissions:\n  contents: read' in workflow
+          assert 'persist-credentials: false' in workflow
+          for forbidden in (
+              'contents: write',
+              'pull_request_target:',
+              'git push',
+              'GH_TOKEN',
+              'GITHUB_TOKEN',
+              'ZED_PKG_TOKEN',
+          ):
+              assert forbidden not in workflow, forbidden
+          PY
+
+  gate:
+    name: all DEN-1461 platforms passed
+    if: always()
+    needs: certify
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Enforce aggregate result
+        env:
+          RESULT: ${{ needs.certify.result }}
+        run: test "$RESULT" = success

@@ -1,0 +1,126 @@
+name: DEN-2788 web read-only canary
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/den-2788-web-readonly.yml'
+      - 'proofs/den-2788-web-readonly.json'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: den-2788-web-readonly-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  exact-source:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - name: Check out independent harness
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          show-progress: false
+
+      - name: Read immutable source graph
+        id: pin
+        shell: bash
+        run: |
+          set -euo pipefail
+          jq -e '
+            .schema_version == 1 and
+            .linear_issue == "DEN-2788" and
+            .source_repository == "zed-pkg/zed-web-server.rs" and
+            .source_pull_request == 6 and
+            (.source_commit | test("^[0-9a-f]{40}$")) and
+            .interfaces_repository == "zed-pkg/zed-interfaces" and
+            (.interfaces_commit | test("^[0-9a-f]{40}$")) and
+            .expected_package == "zed-pkg/zed-web-server" and
+            .expected_schema == "zed_pkg" and
+            .expected_database_role == "zed_pkg__web_ro" and
+            .expected_secret == "zed-web-server-db-ro"
+          ' proofs/den-2788-web-readonly.json >/dev/null
+          echo "source=$(jq -r .source_commit proofs/den-2788-web-readonly.json)" >> "$GITHUB_OUTPUT"
+          echo "interfaces=$(jq -r .interfaces_commit proofs/den-2788-web-readonly.json)" >> "$GITHUB_OUTPUT"
+
+      - name: Check out exact web source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: zed-pkg/zed-web-server.rs
+          ref: ${{ steps.pin.outputs.source }}
+          path: zed-web-server.rs
+          fetch-depth: 1
+          persist-credentials: false
+          show-progress: false
+
+      - name: Check out exact interfaces sibling
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: zed-pkg/zed-interfaces
+          ref: ${{ steps.pin.outputs.interfaces }}
+          path: zed-interfaces
+          fetch-depth: 1
+          persist-credentials: false
+          show-progress: false
+
+      - name: Verify exact source graph and read-only boundary
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git -C zed-web-server.rs rev-parse HEAD)" = "${{ steps.pin.outputs.source }}"
+          test "$(git -C zed-interfaces rev-parse HEAD)" = "${{ steps.pin.outputs.interfaces }}"
+          grep -Fq '"zed-pkg/zed-orm-core" = "^0.1.0"' zed-web-server.rs/.zpkg.toml
+          grep -Fq 'name: zed-web-server-db-ro' zed-web-server.rs/k8s/externalsecret.yaml
+          grep -Fq 'property: web_ro_url' zed-web-server.rs/k8s/externalsecret.yaml
+          grep -Fq 'EXPECTED_DATABASE_ROLE' zed-web-server.rs/k8s/base/deployment.yaml
+          grep -Fq 'value: zed_pkg__web_ro' zed-web-server.rs/k8s/base/deployment.yaml
+          grep -Fq 'default_transaction_read_only' zed-web-server.rs/src/server.rs
+          grep -Fq 'transaction_read_only != "on"' zed-web-server.rs/src/server.rs
+          ! grep -Fq 'features = ["read-write"]' zed-web-server.rs/Cargo.toml
+          ! grep -Eq '^sqlx\s*=' zed-web-server.rs/Cargo.toml
+          ! grep -Eq 'property: (api_rw_url|migrator_url)' zed-web-server.rs/k8s/externalsecret.yaml
+          ! grep -Eq '(gh[pousr]_[A-Za-z0-9]{20,}|lin_api_[A-Za-z0-9]{20,}|cfat_[A-Za-z0-9_-]{20,})' \
+            proofs/den-2788-web-readonly.json \
+            .github/workflows/den-2788-web-readonly.yml \
+            zed-web-server.rs/.zpkg.toml \
+            zed-web-server.rs/k8s/externalsecret.yaml
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          workspaces: zed-web-server.rs
+          shared-key: den-2788-web-readonly
+
+      - name: Format
+        working-directory: zed-web-server.rs
+        run: cargo fmt --all -- --check
+
+      - name: Check all targets
+        working-directory: zed-web-server.rs
+        run: cargo check --locked --all-targets
+
+      - name: Strict Clippy
+        working-directory: zed-web-server.rs
+        run: cargo clippy --locked --all-targets -- -D warnings
+
+      - name: Test
+        working-directory: zed-web-server.rs
+        run: cargo test --locked --all-targets
+
+      - name: Documentation
+        working-directory: zed-web-server.rs
+        env:
+          RUSTDOCFLAGS: -D warnings
+        run: cargo doc --locked --no-deps
+
+      - name: Release build
+        working-directory: zed-web-server.rs
+        run: cargo build --locked --release

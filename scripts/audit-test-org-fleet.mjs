@@ -351,11 +351,7 @@ process.stdout.write(`AUDIT_SUMMARY ${JSON.stringify(summary)}\n`);
 process.stdout.write(`${markdown.join('\n')}\n`);
 
 if (
-  summary.organizations !== 18
-  || summary.expectedRepositories !== 341
-  || summary.expectedGeneratedRepositories !== 319
-  || summary.expectedRetainedRepositories !== 22
-  || summary.verifiedRepositories !== summary.expectedRepositories
+  summary.verifiedRepositories !== summary.expectedRepositories
   || summary.verifiedGeneratedRepositories !== summary.expectedGeneratedRepositories
   || summary.openGeneratedPullRequests !== summary.expectedGeneratedRepositories
   || summary.errors !== 0

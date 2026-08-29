@@ -5,11 +5,12 @@ on:
   pull_request:
     paths:
       - "bootstrap/test-org-fleet.json.gz.b64.parts/**"
-      - "bootstrap/audit-test-org-fleet.once"
+      - "bootstrap/test-org-fleet.extensions.json"
       - "scripts/bootstrap-test-org-fleet.mjs"
       - "scripts/bootstrap-test-org-fleet.parts/**"
       - "scripts/audit-test-org-fleet.mjs"
       - "scripts/audit-test-org-fleet-live.mjs"
+      - "scripts/fleet-manifest-extensions.mjs"
       - "scripts/test-org-fleet-integration-policy.mjs"
       - "scripts/export-test-org-fleet-index.mjs"
       - "scripts/read-fleet-manifest.mjs"
@@ -21,26 +22,32 @@ on:
       - "tests/export-test-org-fleet-index.test.mjs"
       - "tests/idempotent-fleet-pr-repair.test.mjs"
       - "tests/secure-fleet-handoff-scope.test.mjs"
+      - "tests/fleet-manifest-extensions.test.mjs"
+      - "tests/quaestor-fleet-extension.test.mjs"
       - "docs/test-org-fleet.md"
       - "docs/test-org-fleet-index.md"
       - "docs/test-org-fleet-app-auth.md"
       - "docs/test-org-source-certification.md"
+      - "docs/quaestor-ledger-test-extension.md"
       - ".github/fleet-handoff/START"
       - ".github/fleet-resume/START"
       - ".github/workflows/apply-test-org-fleet.yml"
-      - ".github/workflows/audit-test-org-fleet-once.yml"
+      - ".github/workflows/cancel-stale-fleet-recovery.yml"
+      - ".github/workflows/dispatch-test-org-fleet-once.yml"
       - ".github/workflows/resume-test-org-fleet.yml"
       - ".github/workflows/secure-fleet-token-handoff.yml"
       - ".github/workflows/test-org-fleet.yml"
+      - "bootstrap/execute-test-org-fleet-v2.once"
   push:
     branches: [main]
     paths:
       - "bootstrap/test-org-fleet.json.gz.b64.parts/**"
-      - "bootstrap/audit-test-org-fleet.once"
+      - "bootstrap/test-org-fleet.extensions.json"
       - "scripts/bootstrap-test-org-fleet.mjs"
       - "scripts/bootstrap-test-org-fleet.parts/**"
       - "scripts/audit-test-org-fleet.mjs"
       - "scripts/audit-test-org-fleet-live.mjs"
+      - "scripts/fleet-manifest-extensions.mjs"
       - "scripts/test-org-fleet-integration-policy.mjs"
       - "scripts/export-test-org-fleet-index.mjs"
       - "scripts/read-fleet-manifest.mjs"
@@ -52,17 +59,22 @@ on:
       - "tests/export-test-org-fleet-index.test.mjs"
       - "tests/idempotent-fleet-pr-repair.test.mjs"
       - "tests/secure-fleet-handoff-scope.test.mjs"
+      - "tests/fleet-manifest-extensions.test.mjs"
+      - "tests/quaestor-fleet-extension.test.mjs"
       - "docs/test-org-fleet.md"
       - "docs/test-org-fleet-index.md"
       - "docs/test-org-fleet-app-auth.md"
       - "docs/test-org-source-certification.md"
+      - "docs/quaestor-ledger-test-extension.md"
       - ".github/fleet-handoff/START"
       - ".github/fleet-resume/START"
       - ".github/workflows/apply-test-org-fleet.yml"
-      - ".github/workflows/audit-test-org-fleet-once.yml"
+      - ".github/workflows/cancel-stale-fleet-recovery.yml"
+      - ".github/workflows/dispatch-test-org-fleet-once.yml"
       - ".github/workflows/resume-test-org-fleet.yml"
       - ".github/workflows/secure-fleet-token-handoff.yml"
       - ".github/workflows/test-org-fleet.yml"
+      - "bootstrap/execute-test-org-fleet-v2.once"
   workflow_dispatch:
 
 permissions:
@@ -88,6 +100,7 @@ jobs:
           node --check scripts/bootstrap-test-org-fleet.mjs
           node --check scripts/audit-test-org-fleet.mjs
           node --check scripts/audit-test-org-fleet-live.mjs
+          node --check scripts/fleet-manifest-extensions.mjs
           node --check scripts/test-org-fleet-integration-policy.mjs
           node --check scripts/export-test-org-fleet-index.mjs
           node --check scripts/validate-test-org-fleet.mjs
@@ -104,12 +117,14 @@ jobs:
             tests/generated-plan-validator-gitlinks.test.mjs \
             tests/export-test-org-fleet-index.test.mjs \
             tests/idempotent-fleet-pr-repair.test.mjs \
-            tests/secure-fleet-handoff-scope.test.mjs
+            tests/secure-fleet-handoff-scope.test.mjs \
+            tests/fleet-manifest-extensions.test.mjs \
+            tests/quaestor-fleet-extension.test.mjs
 
       - name: Export canonical repository index
         run: |
           node scripts/export-test-org-fleet-index.mjs > /tmp/canonical-test-fleet-index.json
-          node -e 'const p=require("/tmp/canonical-test-fleet-index.json"); if(p.expectedRepositoryCount!==360||p.managedRepositoryCount!==338||p.retainedRepositoryCount!==22) process.exit(1)'
+          node -e 'const p=require("/tmp/canonical-test-fleet-index.json"); if(p.expectedRepositoryCount!==363||p.managedRepositoryCount!==341||p.retainedRepositoryCount!==22) process.exit(1)'
           {
             echo '### Canonical paired test-fleet index'
             echo
@@ -122,4 +137,4 @@ jobs:
         run: |
           env -u GH_TOKEN -u GITHUB_TOKEN \
             node scripts/bootstrap-test-org-fleet.mjs --dry-run --summary-json > /tmp/test-org-fleet-plan.json
-          node -e 'const p=require("/tmp/test-org-fleet-plan.json"); if(p.mode!=="dry-run"||p.planned!==338||p.created||p.committed||p.pullRequests) process.exit(1)'
+          node -e 'const p=require("/tmp/test-org-fleet-plan.json"); if(p.mode!=="dry-run"||p.planned!==341||p.created||p.committed||p.pullRequests) process.exit(1)'

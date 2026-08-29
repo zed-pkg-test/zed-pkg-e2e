@@ -114,7 +114,7 @@ jobs:
           node --check scripts/bootstrap-test-org-fleet.mjs
           node --check scripts/validate-test-org-fleet.mjs
           node scripts/validate-test-org-fleet.mjs
-          node --test tests/test-org-fleet.test.mjs
+          node --test tests/test-org-fleet.test.mjs tests/git-transport-worktree.test.mjs tests/fleet-recovery-control.test.mjs
 
       - name: Select a secret-backed credential
         id: auth
@@ -213,6 +213,7 @@ jobs:
         env:
           FLEET_ORGANIZATION: ${{ matrix.organization }}
           FLEET_REPOSITORY_FILTER: ${{ inputs.repository }}
+          TEST_ORG_FLEET_SKIP_TOPICS: "true"
         run: |
           set -euo pipefail
           args=(--apply --org "$FLEET_ORGANIZATION" --concurrency 1)
@@ -233,4 +234,6 @@ jobs:
             echo "Authentication: $FLEET_AUTHENTICATION"
             echo
             echo "Repository creation/adoption, generated branch commits, and draft pull requests completed."
+            echo
+            echo "Repository topic writes were deferred to minimize secondary content-creation limits."
           } >> "$GITHUB_STEP_SUMMARY"

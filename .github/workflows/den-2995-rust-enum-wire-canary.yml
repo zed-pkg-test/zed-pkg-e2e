@@ -1,0 +1,214 @@
+name: DEN-2995 Rust enum wire canary
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/den-2995-rust-enum-wire-canary.yml'
+      - 'fixtures/den-2995-rust-enum-wire-source.json'
+      - 'docs/den-2995-rust-enum-wire-canary.md'
+  push:
+    branches:
+      - test/den-2995-rust-enum-wire-canary
+    paths:
+      - '.github/workflows/den-2995-rust-enum-wire-canary.yml'
+      - 'fixtures/den-2995-rust-enum-wire-source.json'
+      - 'docs/den-2995-rust-enum-wire-canary.md'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: den-2995-rust-enum-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  exact-source-contract:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Check out the independent test repository
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
+
+      - name: Read the immutable source pin
+        id: source
+        shell: bash
+        run: |
+          set -euo pipefail
+          repository="$(jq -r .repository fixtures/den-2995-rust-enum-wire-source.json)"
+          sha="$(jq -r .sha fixtures/den-2995-rust-enum-wire-source.json)"
+          expect_fixed="$(jq -r .expect_fixed fixtures/den-2995-rust-enum-wire-source.json)"
+          test "$repository" = 'ORESoftware/k8s-libs-and-shared-defs'
+          [[ "$sha" =~ ^[0-9a-f]{40}$ ]]
+          test "$expect_fixed" = true -o "$expect_fixed" = false
+          echo "repository=$repository" >> "$GITHUB_OUTPUT"
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          echo "expect_fixed=$expect_fixed" >> "$GITHUB_OUTPUT"
+
+      - name: Check out the exact source candidate
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          repository: ${{ steps.source.outputs.repository }}
+          ref: ${{ steps.source.outputs.sha }}
+          path: candidate
+          persist-credentials: false
+          submodules: false
+          fetch-depth: 1
+
+      - name: Verify immutable source identity
+        shell: bash
+        env:
+          EXPECTED_SHA: ${{ steps.source.outputs.sha }}
+        run: |
+          set -euo pipefail
+          test "$(git -C candidate rev-parse HEAD)" = "$EXPECTED_SHA"
+          test -f candidate/pg-defs/src/generate.mjs
+          test -f candidate/pg-defs/generated/rust/Cargo.toml
+          test -f candidate/pg-defs/generated/rust/src/lib.rs
+
+      - name: Install the pinned Node toolchain
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+
+      - name: Verify committed generator output is deterministic
+        working-directory: candidate
+        run: node pg-defs/src/generate.mjs --check
+
+      - name: Inspect generator policy at the exact source head
+        shell: bash
+        env:
+          EXPECT_FIXED: ${{ steps.source.outputs.expect_fixed }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import os
+          from pathlib import Path
+
+          source = Path('candidate/pg-defs/src/generate.mjs').read_text()
+          block = source.split('function renderRustEnum(baseName, column) {', 1)[1]
+          block = block.split('\nfunction rustType(column) {', 1)[0]
+          expect_fixed = os.environ['EXPECT_FIXED'] == 'true'
+
+          has_lowercase_rule = '#[serde(rename_all = "lowercase")]' in block
+          has_exact_rename_line = (
+              'lines.push(`    #[serde(rename = ${JSON.stringify(value)})]`);' in block
+          )
+          rename_is_conditional = (
+              'if (rustEnumVariant(value) !== pascal(value)) {' in block
+          )
+
+          if expect_fixed:
+              assert not has_lowercase_rule, 'enum-level lowercase rule still present'
+              assert has_exact_rename_line, 'generator does not emit exact rename attributes'
+              assert not rename_is_conditional, 'exact rename is still limited to leading-digit labels'
+          else:
+              assert has_lowercase_rule, 'pre-fix pin no longer reproduces the lowercase rule'
+              assert has_exact_rename_line, 'pre-fix generator shape changed unexpectedly'
+              assert rename_is_conditional, 'pre-fix pin unexpectedly emits exact names for every value'
+          PY
+
+      - name: Add an external Rust consumer contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p candidate/pg-defs/generated/rust/tests
+          cat > candidate/pg-defs/generated/rust/tests/den_2995_enum_wire.rs <<'RS'
+          use dd_pg_defs::AuthPublicKeysAlgorithm;
+
+          #[test]
+          fn ssh_algorithm_serde_uses_the_exact_sql_labels() {
+              let ed25519 = AuthPublicKeysAlgorithm::SshEd25519;
+              let p256 = AuthPublicKeysAlgorithm::EcdsaSha2Nistp256;
+
+              assert_eq!(serde_json::to_string(&ed25519).unwrap(), "\"ssh-ed25519\"");
+              assert_eq!(serde_json::to_string(&p256).unwrap(), "\"ecdsa-sha2-nistp256\"");
+              assert_eq!(
+                  serde_json::from_str::<AuthPublicKeysAlgorithm>("\"ssh-ed25519\"").unwrap(),
+                  ed25519,
+              );
+              assert_eq!(
+                  serde_json::from_str::<AuthPublicKeysAlgorithm>("\"ecdsa-sha2-nistp256\"")
+                      .unwrap(),
+                  p256,
+              );
+          }
+          RS
+
+      - name: Reproduce the defect or certify the repair
+        id: rust_contract
+        shell: bash
+        env:
+          EXPECT_FIXED: ${{ steps.source.outputs.expect_fixed }}
+        run: |
+          set -uo pipefail
+          rustc --version
+          cargo --version
+          set +e
+          cargo test \
+            --manifest-path candidate/pg-defs/generated/rust/Cargo.toml \
+            --test den_2995_enum_wire \
+            > /tmp/den-2995-rust.log 2>&1
+          status=$?
+          set -e
+          cat /tmp/den-2995-rust.log
+
+          if [ "$EXPECT_FIXED" = true ]; then
+            test "$status" -eq 0 || {
+              echo '::error::The repaired source pin still corrupts SQL enum labels in Rust serde.'
+              exit 1
+            }
+            echo 'observation=fixed' >> "$GITHUB_OUTPUT"
+          else
+            test "$status" -ne 0 || {
+              echo '::error::The pre-fix source pin unexpectedly passed; update the evidence pin.'
+              exit 1
+            }
+            grep -E 'sshed25519|ssh-ed25519' /tmp/den-2995-rust.log >/dev/null
+            echo 'observation=defect-reproduced' >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Record machine-readable evidence
+        shell: bash
+        env:
+          SOURCE_SHA: ${{ steps.source.outputs.sha }}
+          EXPECT_FIXED: ${{ steps.source.outputs.expect_fixed }}
+          OBSERVATION: ${{ steps.rust_contract.outputs.observation }}
+        run: |
+          set -euo pipefail
+          jq -n \
+            --arg source_sha "$SOURCE_SHA" \
+            --arg observation "$OBSERVATION" \
+            --argjson expect_fixed "$EXPECT_FIXED" \
+            '{
+              schema_version: 1,
+              linear: "DEN-2995",
+              source_repository: "ORESoftware/k8s-libs-and-shared-defs",
+              source_sha: $source_sha,
+              expect_fixed: $expect_fixed,
+              observation: $observation,
+              contract: "exact SQL enum labels survive generated Rust serde"
+            }' | tee den-2995-evidence.json
+
+      - name: Prove the canary is read-only and credential-free
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          workflow = Path('.github/workflows/den-2995-rust-enum-wire-canary.yml').read_text()
+          assert 'permissions:\n  contents: read' in workflow
+          assert workflow.count('persist-credentials: false') == 2
+          for forbidden in (
+              'contents' + ': write',
+              'pull_request' + '_target:',
+              'git' + ' push',
+              'GITHUB_PAT',
+              'LINEAR_API' + '_KEY',
+              'CLOUDFLARE' + '_API_TOKEN',
+              'AWS_SECRET' + '_ACCESS_KEY',
+          ):
+              assert forbidden not in workflow, forbidden
+          PY

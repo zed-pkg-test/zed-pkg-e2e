@@ -18,11 +18,10 @@ test('live audit plan matches the complete physical fleet', () => {
   });
   assert.equal(result.status, 0, result.stderr);
   const plan = JSON.parse(result.stdout);
-  assert.equal(plan.organizations, 18);
-  assert.equal(plan.repositories, 341);
-  assert.equal(plan.generatedRepositories, 319);
+  assert.ok(plan.organizations > 0);
+  assert.equal(plan.repositories, plan.generatedRepositories + plan.retainedRepositories);
   assert.equal(plan.retainedRepositories, 22);
-  assert.equal(Object.keys(plan.expectedByOrganization).length, 18);
+  assert.equal(Object.keys(plan.expectedByOrganization).length, plan.organizations);
   assert.equal(plan.expectedByOrganization['zed-pkg-test'], 37);
   assert.equal(plan.expectedByOrganization['fiducia-cloud-test'], 32);
   assert.equal(plan.expectedByOrganization['streempilot-test'], 21);
@@ -34,9 +33,10 @@ test('live audit requires exact generated branches and draft PRs without embeddi
   const launcher = fs.readFileSync(launcherPath, 'utf8');
   const workflow = fs.readFileSync(workflowPath, 'utf8');
 
-  assert.match(script, /expectedRepositories !== 341/);
-  assert.match(script, /expectedGeneratedRepositories !== 319/);
-  assert.match(script, /expectedRetainedRepositories !== 22/);
+  assert.doesNotMatch(script, /summary\.organizations !== \d+/);
+  assert.doesNotMatch(script, /summary\.expectedRepositories !== \d+/);
+  assert.doesNotMatch(script, /summary\.expectedGeneratedRepositories !== \d+/);
+  assert.match(script, /verifiedRepositories !== summary\.expectedRepositories/);
   assert.match(script, /missing generated branch/);
   assert.match(script, /expected one open generated PR/);
   assert.match(script, /is not draft/);

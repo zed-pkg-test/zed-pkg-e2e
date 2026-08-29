@@ -9,3 +9,4 @@ tmp
 temp
 tmp/worktrees
 temp/worktrees
+/scripts/.audit-test-org-fleet-live-*.mjs

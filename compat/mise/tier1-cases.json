@@ -1,0 +1,95 @@
+{
+  "schema_version": 1,
+  "compatibility_tier": 1,
+  "name": "lossless-project-adapter",
+  "implementation_issue": "DEN-1420",
+  "program_issue": "DEN-1435",
+  "claims": [
+    {
+      "id": "project-config-basic",
+      "status": "supported",
+      "fixture": "supported/basic",
+      "assertions": [
+        "import_succeeds",
+        "provenance_lock_written",
+        "normalized_plan_written",
+        "frozen_verify_succeeds",
+        "export_preserves_source_bytes"
+      ]
+    },
+    {
+      "id": "multi-version-order",
+      "status": "supported",
+      "fixture": "supported/multi-version",
+      "assertions": [
+        "version_order_preserved",
+        "duplicate_versions_stably_deduplicated",
+        "round_trip_stable"
+      ]
+    },
+    {
+      "id": "typed-env-vars-tasks",
+      "status": "preserved-inert",
+      "fixture": "supported/typed-state",
+      "assertions": [
+        "typed_values_preserved",
+        "tasks_not_executed_during_adapter_operations",
+        "round_trip_stable"
+      ]
+    },
+    {
+      "id": "unknown-hooks-plugins",
+      "status": "preserved-inert",
+      "fixture": "preserved/inert-hooks-plugins",
+      "assertions": [
+        "unknown_sections_preserved",
+        "hook_not_executed",
+        "plugin_not_executed",
+        "round_trip_stable"
+      ]
+    },
+    {
+      "id": "conflicting-config-files",
+      "status": "negative-canary",
+      "fixture": "negative/conflicting-config",
+      "assertions": [
+        "import_fails_closed",
+        "diagnostic_mentions_conflict"
+      ]
+    },
+    {
+      "id": "tool-versions-only",
+      "status": "unsupported-explicit",
+      "fixture": "negative/tool-versions-only",
+      "assertions": [
+        "import_fails_closed",
+        "no_silent_empty_plan"
+      ]
+    },
+    {
+      "id": "source-tamper",
+      "status": "negative-canary",
+      "fixture": "supported/basic",
+      "assertions": [
+        "verify_rejects_source_hash_drift"
+      ]
+    },
+    {
+      "id": "plan-tamper",
+      "status": "negative-canary",
+      "fixture": "supported/basic",
+      "assertions": [
+        "verify_rejects_normalized_plan_drift"
+      ]
+    }
+  ],
+  "not_yet_claimed": [
+    ".tool-versions import",
+    "official mise.lock semantic replay",
+    "task execution parity",
+    "native runtime installation",
+    "shell activation parity",
+    "hook or plugin execution",
+    "global mise configuration merge"
+  ]
+}

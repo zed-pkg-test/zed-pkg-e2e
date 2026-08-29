@@ -1,0 +1,33 @@
+{
+  "$schema": "zed-pkg-test/gitops-dispatch-canary/v1",
+  "binaries": {
+    "probeSha256": "701c875d5ed69cd1042f4726e54eacc1c96fd7f1133ed75680dae150d08ab658",
+    "zedGitopsSha256": "71cf25ac61f3012c017721f457fdb2a61e171413aad27d1f29acf2e0fdbb456e",
+    "zedSha256": "8b08ffddfa05c4ec4d391d94531f9f9bf16abf84d0af4ebe4b55f8fde6acd677"
+  },
+  "candidate": "1c94813c6b59c7621c1256d7c55246e7f06f44b7",
+  "checkCount": 15,
+  "checks": [
+    "package-installs-both-sibling-binaries",
+    "standalone-validator-help",
+    "root-help-advertises-gitops",
+    "root-dispatches-to-sibling-validator",
+    "help-alias-reaches-validator",
+    "completion-exposes-gitops-contract",
+    "root-and-standalone-validation-parity",
+    "online-mode-fails-explicitly",
+    "policy-failure-exit-code-and-diagnostic",
+    "missing-known-extension-fails-closed",
+    "working-directory-is-never-searched",
+    "relative-path-entry-is-rejected",
+    "sibling-validator-precedes-path",
+    "arguments-environment-and-exit-code-are-preserved",
+    "built-in-command-cannot-be-shadowed"
+  ],
+  "platform": {
+    "machine": "x86_64",
+    "python": "3.12.13",
+    "system": "Linux"
+  },
+  "result": "passed"
+}

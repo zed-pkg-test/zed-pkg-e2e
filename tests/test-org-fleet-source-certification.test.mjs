@@ -46,6 +46,21 @@ test('generated integration never falls back to the repository GITHUB_TOKEN', ()
   assert.match(source, /persist-credentials: false/);
 });
 
+test('generated integration cancels superseded runs for the same workflow and ref', () => {
+  const source = hardened();
+  const concurrencyContract = [
+    'permissions:\\n',
+    '  contents: read\\n\\n',
+    'concurrency:\\n',
+    '  group: \\${{ github.workflow }}-\\${{ github.ref }}\\n',
+    '  cancel-in-progress: true\\n\\n',
+    'jobs:\\n',
+    '  integration:\\n',
+  ].join('');
+
+  assert.equal(source.split(concurrencyContract).length - 1, 1);
+});
+
 test('generic status artifact can report source access but never product certification', () => {
   const source = hardened();
   assert.match(source, /name: Record protected source access status/);
@@ -120,5 +135,15 @@ test('policy transform is fail-closed when generated seams change', () => {
         ),
       ),
     /protected checkout token fallback/,
+  );
+  assert.throws(
+    () =>
+      hardenGeneratedIntegrationPolicy(
+        generatedSource.replace(
+          "    - cron: '17 8 * * *'\\n\\npermissions:\\n  contents: read\\n\\njobs:\\n",
+          'generated integration concurrency seam changed',
+        ),
+      ),
+    /generated integration concurrency/,
   );
 });

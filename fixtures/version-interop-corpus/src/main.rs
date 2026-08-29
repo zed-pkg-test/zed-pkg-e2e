@@ -8,7 +8,7 @@ use zed_interfaces::{
     native_versions_collide, semver_precedence_identity,
 };
 
-const INTERFACE_COMMIT: &str = "8bcbcbe9377760c9a8843b75daff54e92c1bf6d2";
+const INTERFACE_COMMIT: &str = "032b52f6e335e5696cb793d6a955c8f0658a95eb";
 const VERSION: &str = "1.4.2";
 const WRAPPER: &str = "@fiducia/core";
 const LINUX_PACKAGE: &str = "@fiducia/core-linux-arm64-musl";

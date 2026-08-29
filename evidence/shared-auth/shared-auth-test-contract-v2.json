@@ -1,0 +1,321 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-08-09T19:55:20.246Z",
+  "source": {
+    "repository": "shared-auth/shared-auth-server.rs",
+    "pullRequest": 69,
+    "expectedSha": "a471b20f8f81094f57393dc797b3cad0868c2f40",
+    "actualSha": "a471b20f8f81094f57393dc797b3cad0868c2f40"
+  },
+  "contract": {
+    "authorizePath": "/authorize",
+    "redeemPath": "/auth/handoff/redeem",
+    "clientId": "zpkg",
+    "pkceMethod": "S256",
+    "defaultCodeTtlSeconds": 90,
+    "codeTable": "shared_auth.browser_authorization_codes"
+  },
+  "security": {
+    "immutableSourcePin": true,
+    "exactRedirectAllowlist": true,
+    "exactReturnPathAllowlist": true,
+    "sameOriginPasswordPost": true,
+    "browserReceivesOnlyCodeAndState": true,
+    "backendRedeemRequiresClientSecret": true,
+    "singleUseAtomicConsume": true,
+    "encryptedAtRest": true,
+    "providerTokensNeverEnterUrls": true,
+    "configuredSupabaseIssuer": true,
+    "currentCryptoApis": true,
+    "hostScopedCsrfCookie": true
+  },
+  "checks": [
+    {
+      "id": "dependencies.current_crypto_apis",
+      "detail": "the exact candidate must remain pinned to the dependency family certified by this contract"
+    },
+    {
+      "id": "routes.authorize",
+      "detail": "GET and POST /authorize must remain registered"
+    },
+    {
+      "id": "routes.redeem",
+      "detail": "backend code redemption must remain registered"
+    },
+    {
+      "id": "headers.no_store",
+      "detail": "authorization and redemption responses must remain non-cacheable"
+    },
+    {
+      "id": "headers.no_referrer",
+      "detail": "authorization responses must retain no-referrer policy"
+    },
+    {
+      "id": "headers.csp",
+      "detail": "authorization UI must retain its restrictive CSP"
+    },
+    {
+      "id": "handoff.default_ttl",
+      "detail": "authorization-code TTL must default to 90 seconds"
+    },
+    {
+      "id": "handoff.required_secrets",
+      "detail": "browser handoff must fail closed without client, encryption, and database configuration"
+    },
+    {
+      "id": "handoff.exact_redirect_allowlist",
+      "detail": "redirect URI must be exact-match allowlisted"
+    },
+    {
+      "id": "handoff.exact_return_allowlist",
+      "detail": "return path must be exact-match allowlisted"
+    },
+    {
+      "id": "handoff.pkce_s256",
+      "detail": "authorization must require a 43-character base64url S256 challenge"
+    },
+    {
+      "id": "handoff.opaque_state",
+      "detail": "state must remain bounded opaque base64url"
+    },
+    {
+      "id": "handoff.configured_issuer_endpoint",
+      "detail": "password sign-in must derive its endpoint from the configured issuer"
+    },
+    {
+      "id": "handoff.endpoint_regressions",
+      "detail": "hosted and explicit self-hosted issuer behavior must have regression tests"
+    },
+    {
+      "id": "handoff.encrypted_code_issue",
+      "detail": "browser handoff must store encrypted tokens behind an opaque hashed code"
+    },
+    {
+      "id": "handoff.browser_only_code_and_state",
+      "detail": "browser redirect must contain exactly code and state, never provider tokens"
+    },
+    {
+      "id": "handoff.backend_client_secret",
+      "detail": "backend redemption must authenticate the registered client secret"
+    },
+    {
+      "id": "handoff.pkce_verifier",
+      "detail": "redemption must validate and derive the PKCE verifier challenge"
+    },
+    {
+      "id": "handoff.atomic_single_use",
+      "detail": "single use, client, redirect, expiry, and PKCE checks must remain one atomic update"
+    },
+    {
+      "id": "handoff.decrypt_after_consume",
+      "detail": "provider tokens may be decrypted only after successful atomic consume"
+    },
+    {
+      "id": "client_config.strict_json",
+      "detail": "registered browser-client JSON must reject unknown fields"
+    },
+    {
+      "id": "client_config.secret_indirection",
+      "detail": "client metadata must reference an environment secret instead of embedding one"
+    },
+    {
+      "id": "client_config.secret_entropy",
+      "detail": "backend client secret must retain its minimum entropy floor"
+    },
+    {
+      "id": "client_config.safe_redirects",
+      "detail": "redirect registration must reject unsafe URL forms"
+    },
+    {
+      "id": "client_config.origin_local_returns",
+      "detail": "return paths must remain local to the product origin"
+    },
+    {
+      "id": "http.same_origin_password_post",
+      "detail": "password submission must enforce the Shared Auth origin"
+    },
+    {
+      "id": "http.csrf_binding",
+      "detail": "authorization form must bind an HTTP-only, SameSite, ten-minute CSRF cookie"
+    },
+    {
+      "id": "http.host_scoped_cookie_tests",
+      "detail": "host scope, secure behavior, and lifetime must have regression tests"
+    },
+    {
+      "id": "http.cookie_removal",
+      "detail": "successful authorization must remove the CSRF cookie immediately"
+    },
+    {
+      "id": "http.no_transitive_time_import",
+      "detail": "cookie handling must not depend on a transitive time-module re-export"
+    },
+    {
+      "id": "http.hidden_s256",
+      "detail": "authorization form must submit S256 explicitly"
+    },
+    {
+      "id": "http.backend_bearer",
+      "detail": "redeem endpoint must require backend bearer authentication"
+    },
+    {
+      "id": "http.tokens_backend_only",
+      "detail": "provider tokens may appear only in the backend redemption response"
+    },
+    {
+      "id": "crypto.aes256gcm",
+      "detail": "token bundles must remain AES-256-GCM encrypted"
+    },
+    {
+      "id": "crypto.modern_rand",
+      "detail": "nonce generation must use the current rand 0.10 API"
+    },
+    {
+      "id": "crypto.fresh_nonce",
+      "detail": "every ciphertext must use a fresh 96-bit nonce"
+    },
+    {
+      "id": "crypto.no_deprecated_nonce_slice",
+      "detail": "AES-GCM nonce construction must not use the deprecated generic-array slice API"
+    },
+    {
+      "id": "crypto.authenticated_context",
+      "detail": "ciphertext must authenticate the handoff context as AAD"
+    },
+    {
+      "id": "crypto.hashed_codes",
+      "detail": "plaintext authorization codes must not be stored"
+    },
+    {
+      "id": "crypto.pkce_hash",
+      "detail": "PKCE challenge derivation must remain SHA-256/base64url"
+    },
+    {
+      "id": "crypto.current_hmac_keyinit",
+      "detail": "client-secret comparison must use current HMAC KeyInit and constant-time verification"
+    },
+    {
+      "id": "schema.authorization_codes",
+      "detail": "declarative schema must own the browser authorization-code table"
+    },
+    {
+      "id": "schema.column.code_hash",
+      "detail": "authorization-code table must retain code_hash"
+    },
+    {
+      "id": "schema.column.client_id",
+      "detail": "authorization-code table must retain client_id"
+    },
+    {
+      "id": "schema.column.redirect_uri",
+      "detail": "authorization-code table must retain redirect_uri"
+    },
+    {
+      "id": "schema.column.return_path",
+      "detail": "authorization-code table must retain return_path"
+    },
+    {
+      "id": "schema.column.supabase_project",
+      "detail": "authorization-code table must retain supabase_project"
+    },
+    {
+      "id": "schema.column.code_challenge",
+      "detail": "authorization-code table must retain code_challenge"
+    },
+    {
+      "id": "schema.column.encrypted_tokens",
+      "detail": "authorization-code table must retain encrypted_tokens"
+    },
+    {
+      "id": "schema.column.expires_at",
+      "detail": "authorization-code table must retain expires_at"
+    },
+    {
+      "id": "schema.column.consumed_at",
+      "detail": "authorization-code table must retain consumed_at"
+    },
+    {
+      "id": "schema.active_expiry_index",
+      "detail": "unconsumed codes must retain their expiry index"
+    },
+    {
+      "id": "schema.declarative_ownership",
+      "detail": "schema ownership must remain declarative and migration-controlled"
+    },
+    {
+      "id": "external_secret.AUTH_BROWSER_CLIENTS",
+      "detail": "Kubernetes ExternalSecret must project AUTH_BROWSER_CLIENTS"
+    },
+    {
+      "id": "external_secret.AUTH_HANDOFF_ENCRYPTION_KEY",
+      "detail": "Kubernetes ExternalSecret must project AUTH_HANDOFF_ENCRYPTION_KEY"
+    },
+    {
+      "id": "external_secret.AUTH_BROWSER_ZPKG_SECRET",
+      "detail": "Kubernetes ExternalSecret must project AUTH_BROWSER_ZPKG_SECRET"
+    },
+    {
+      "id": "external_secret.AUTH_DATABASE_URL",
+      "detail": "Kubernetes ExternalSecret must project AUTH_DATABASE_URL"
+    },
+    {
+      "id": "external_secret.no_values",
+      "detail": "deployment source must reference rather than embed credentials"
+    }
+  ],
+  "certification": {
+    "exactHead": true,
+    "independentTestRepository": "shared-auth-test/server-api-contract-e2e",
+    "configuredIssuerEndpoint": true,
+    "hostedEndpointRegression": true,
+    "selfHostedEndpointRegression": true,
+    "currentDependencyApis": true,
+    "boundedCsrfCookie": true
+  },
+  "files": {
+    "cargo": {
+      "path": "Cargo.toml",
+      "sha256": "bbff84b41971cd47e3b1eeed0482a62e9991886c2d873b7cb3e93d57ca5a87f7",
+      "bytes": 3865
+    },
+    "router": {
+      "path": "src/http/mod.rs",
+      "sha256": "b6236968b7aeed9c96e6586fbcf584397ceadc3ee48839ab68b57067d361110c",
+      "bytes": 8854
+    },
+    "handoffHttp": {
+      "path": "src/http/handoff.rs",
+      "sha256": "b8f040d682e9f40563433ba68d8d6573bc1f2ef455900564f7fff62768d49860",
+      "bytes": 8456
+    },
+    "handoff": {
+      "path": "src/handoff/mod.rs",
+      "sha256": "e7bd4c21a93ced99c14566d2c2e54052afe398b871e910f690516747d1ada848",
+      "bytes": 15228
+    },
+    "handoffConfig": {
+      "path": "src/handoff/config.rs",
+      "sha256": "5562546c4e3cc07c5ce3409d31af82f7df86a16444fb21e3d9d906eeb58f68ad",
+      "bytes": 5802
+    },
+    "handoffCrypto": {
+      "path": "src/handoff/crypto.rs",
+      "sha256": "d840ee5c023078632f0275f414926df13d9536e3238d2973e8c3da237846883a",
+      "bytes": 4691
+    },
+    "schema": {
+      "path": "db/schema.sql",
+      "sha256": "375530f902f39a9a778f61b6f7966e7f6fd4d133f817176227f9ddcd277274d4",
+      "bytes": 17844
+    },
+    "externalSecret": {
+      "path": "deploy/k8s/externalsecret.yaml",
+      "sha256": "c5b9bb120798020a3894fc29395f754fb714b12915cfd27fdd169a06629c7202",
+      "bytes": 3428
+    }
+  },
+  "limitations": [
+    "This report certifies exact source and the enumerated source/deployment contract assertions.",
+    "Runtime PostgreSQL, Redis, compilation, browser, Supabase, RDS, Kubernetes, and production traffic evidence must be supplied by the invoking workflow."
+  ]
+}

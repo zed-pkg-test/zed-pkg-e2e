@@ -1,0 +1,76 @@
+name: production package inventory
+
+on:
+  pull_request:
+    paths:
+      - .github/workflows/production-package-inventory.yml
+      - config/production-packages.json
+      - scripts/production_package_inventory.py
+      - docs/production-release-certification.md
+  push:
+    branches: [main]
+    paths:
+      - config/production-packages.json
+      - scripts/production_package_inventory.py
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production-package-inventory-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  inventory:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    outputs:
+      count: ${{ steps.inventory.outputs.count }}
+      matrix: ${{ steps.inventory.outputs.matrix }}
+    steps:
+      - name: Check out the exact harness head
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+          show-progress: false
+      - name: Validate workflow syntax
+        uses: docker://rhysd/actionlint@sha256:b1934ee5f1c509618f2508e6eb47ee0d3520686341fec936f3b79331f9315667
+        with:
+          args: .github/workflows/production-package-inventory.yml
+      - name: Validate inventory logic without network
+        run: |
+          set -euo pipefail
+          python3 -m py_compile scripts/production_package_inventory.py
+          python3 scripts/production_package_inventory.py --self-test
+      - name: Resolve exact tag-ready package heads
+        id: inventory
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set +e
+          python3 scripts/production_package_inventory.py \
+            --config config/production-packages.json \
+            --output evidence/package-inventory
+          inventory_status=$?
+          set -e
+
+          if [[ -f evidence/package-inventory/production-package-inventory.md ]]; then
+            cat evidence/package-inventory/production-package-inventory.md
+            cat evidence/package-inventory/production-package-inventory.md >>"$GITHUB_STEP_SUMMARY"
+          fi
+          if [[ -f evidence/package-inventory/production-package-inventory.json ]]; then
+            count="$(jq -r .count evidence/package-inventory/production-package-inventory.json)"
+            printf 'resolved_count=%s\n' "$count"
+          fi
+          exit "$inventory_status"
+      - name: Upload immutable inventory evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: production-package-inventory-${{ github.run_id }}-${{ github.run_attempt }}
+          path: evidence/package-inventory
+          if-no-files-found: error
+          retention-days: 30
+          include-hidden-files: false

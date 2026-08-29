@@ -34,7 +34,10 @@ const organizations = manifest.pairs.map((pair) => {
 
 const result = {
   schemaVersion: 1,
-  generatedFrom: 'bootstrap/test-org-fleet.json.gz.b64.parts',
+  generatedFrom: [
+    'bootstrap/test-org-fleet.json.gz.b64.parts',
+    'bootstrap/test-org-fleet.extensions.json',
+  ],
   excludedOrganizations: [...excluded].sort(),
   pairCount: organizations.length,
   retainedRepositoryCount: organizations.reduce((sum, item) => sum + item.retainedCount, 0),
@@ -47,10 +50,10 @@ const result = {
 
 if (result.pairCount !== 19) throw new Error(`expected 19 pairs, got ${result.pairCount}`);
 if (result.retainedRepositoryCount !== 22) throw new Error(`expected 22 retained repositories, got ${result.retainedRepositoryCount}`);
-if (result.specializedRepositoryCount !== 319) throw new Error(`expected 319 specialized repositories, got ${result.specializedRepositoryCount}`);
+if (result.specializedRepositoryCount !== 322) throw new Error(`expected 322 specialized repositories, got ${result.specializedRepositoryCount}`);
 if (result.governanceRepositoryCount !== 19) throw new Error(`expected 19 governance repositories, got ${result.governanceRepositoryCount}`);
-if (result.managedRepositoryCount !== 338) throw new Error(`expected 338 managed repositories, got ${result.managedRepositoryCount}`);
-if (result.expectedRepositoryCount !== 360) throw new Error(`expected 360 total repositories, got ${result.expectedRepositoryCount}`);
+if (result.managedRepositoryCount !== 341) throw new Error(`expected 341 managed repositories, got ${result.managedRepositoryCount}`);
+if (result.expectedRepositoryCount !== 363) throw new Error(`expected 363 total repositories, got ${result.expectedRepositoryCount}`);
 if (!result.excludedOrganizations.map((item) => item.toLowerCase()).includes('r2g')) throw new Error('r2g must remain excluded');
 if (!result.excludedOrganizations.map((item) => item.toLowerCase()).includes('r2g-test')) throw new Error('r2g-test must remain excluded');
 

@@ -150,6 +150,19 @@ change, then to the merge commit when the CLI work lands. The workflow has
 read-only repository permissions and uploads only bounded local-registry
 diagnostics on failure.
 
+## GitHub / R2 fallback (registry down, CDN up)
+
+`.github/workflows/github-r2-fallback.yml` is a reusable canary for the
+`cdn.zpkg.net` guessable-object contract. `scripts/github_r2_fallback.py`
+publishes a disposable package to a `file://` registry, copies the tarball onto
+`packages/` and `github/` keys, points `--registry` at a closed loopback port,
+and proves `zed install --frozen` restores the packed payload from a loopback
+CDN. It also round-trips the typed `get_version` RPC frame over TCP NDJSON
+(from `github.com/oresoftware/api-docs`). Pull requests only compile the
+script; a full product run needs exact `zed-cli` and `zed-interfaces` commits
+via `workflow_call` or `workflow_dispatch`. See
+`docs/github-r2-fallback-canary.md`.
+
 Run the acceptance harness locally with sibling fixture checkouts:
 
 ```bash
@@ -270,3 +283,15 @@ environment variables after the sibling stack is running.
 ## License
 
 MIT
+
+## Archived DEN-2725 replay evidence
+
+The preserved `evidence/den-2725-final-export/` namespace contains the verified
+final replay export from source run `31243116442`:
+
+- root-dispatch commit: `1c94813c6b59c7621c1256d7c55246e7f06f44b7`;
+- current-main commit: `0246a3af901b65ca6724d936c7f3232c9f72fcd7`; and
+- verified product tree: `99ab08e3142c2a52d2c97482134e99fae3811b43`.
+
+The original export identified eight root product files for import. They remain
+evidence only here and do not replace this repository's E2E control-plane tree.

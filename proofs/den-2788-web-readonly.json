@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "linear_issue": "DEN-2788",
+  "source_repository": "zed-pkg/zed-web-server.rs",
+  "source_pull_request": 6,
+  "source_commit": "3325dc16c51bea5924815bba0f37b0742ba985b4",
+  "interfaces_repository": "zed-pkg/zed-interfaces",
+  "interfaces_commit": "07d01604461d00e237c7d86ad3855464167574ec",
+  "expected_package": "zed-pkg/zed-web-server",
+  "expected_schema": "zed_pkg",
+  "expected_database_role": "zed_pkg__web_ro",
+  "expected_secret": "zed-web-server-db-ro"
+}

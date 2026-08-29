@@ -1,6 +1,6 @@
 {
   "schema": "zed.version-interop-corpus/v1",
-  "interface_commit": "8bcbcbe9377760c9a8843b75daff54e92c1bf6d2",
+  "interface_commit": "032b52f6e335e5696cb793d6a955c8f0658a95eb",
   "precedence": [
     {
       "id": "release-build-metadata",

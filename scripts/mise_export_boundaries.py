@@ -68,7 +68,6 @@ def assert_regular_operation_rendezvous(root: Path) -> None:
         f"failed mutation left native adapter state: {unexpected!r}",
     )
 
-
 def base_plan() -> dict[str, object]:
     return {
         "schema": 2,

@@ -1,0 +1,111 @@
+name: dispatch Hacker House Medellin test fleet through GitHub App
+
+on:
+  pull_request:
+    paths:
+      - .github/hhm-fleet-dispatch/START
+      - .github/workflows/dispatch-hhm-test-fleet-app.yml
+      - .github/workflows/apply-test-org-fleet.yml
+      - scripts/bootstrap-test-org-fleet.mjs
+      - scripts/validate-test-org-fleet.mjs
+      - tests/test-org-fleet.test.mjs
+  push:
+    branches: [main]
+    paths:
+      - .github/hhm-fleet-dispatch/START
+      - .github/workflows/dispatch-hhm-test-fleet-app.yml
+
+permissions:
+  actions: write
+  contents: read
+
+concurrency:
+  group: dispatch-hhm-test-fleet-app
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    name: Validate scoped dispatch contract
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Check out without persisted credentials
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          show-progress: false
+
+      - name: Validate one-shot authorization and immutable fleet contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(tr -d '\r\n' < .github/hhm-fleet-dispatch/START)" = "APPLY_HHM_TEST_FLEET_V1"
+          node --check scripts/bootstrap-test-org-fleet.mjs
+          node --check scripts/validate-test-org-fleet.mjs
+          node scripts/validate-test-org-fleet.mjs
+          node --test tests/test-org-fleet.test.mjs
+          grep -F -- '- hacker-house-medellin-test' .github/workflows/apply-test-org-fleet.yml
+          grep -F -- '- github-app' .github/workflows/apply-test-org-fleet.yml
+          grep -F -- 'confirm=APPLY_TEST_FLEET' .github/workflows/dispatch-hhm-test-fleet-app.yml
+
+  preflight-and-dispatch:
+    name: Preflight App and dispatch exact organization
+    if: github.event_name == 'push'
+    needs: validate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Require complete GitHub App configuration
+        shell: bash
+        env:
+          FLEET_APP_CLIENT_ID: ${{ vars.FLEET_APP_CLIENT_ID }}
+          FLEET_APP_PRIVATE_KEY: ${{ secrets.FLEET_APP_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          if [[ -z "$FLEET_APP_CLIENT_ID" || -z "$FLEET_APP_PRIVATE_KEY" ]]; then
+            echo '::error::The fleet GitHub App configuration is incomplete.'
+            exit 1
+          fi
+
+      - name: Mint exact-organization installation token
+        id: app-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: ${{ vars.FLEET_APP_CLIENT_ID }}
+          private-key: ${{ secrets.FLEET_APP_PRIVATE_KEY }}
+          owner: hacker-house-medellin-test
+          permission-administration: write
+          permission-contents: write
+          permission-metadata: read
+          permission-pull-requests: write
+          permission-workflows: write
+
+      - name: Verify exact target visibility without mutation
+        shell: bash
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: |
+          set -euo pipefail
+          gh api orgs/hacker-house-medellin-test --silent
+          count="$(gh api --paginate 'orgs/hacker-house-medellin-test/repos?type=all&per_page=100' --jq '.[].name' | wc -l | tr -d '[:space:]')"
+          {
+            echo '## Hacker House Medellin test fleet App preflight'
+            echo
+            echo "Visible repositories before dispatch: $count"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Dispatch the merged exact-organization executor
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          gh workflow run apply-test-org-fleet.yml \
+            --repo "$GH_REPO" \
+            --ref main \
+            -f organization=hacker-house-medellin-test \
+            -f repository= \
+            -f authentication=github-app \
+            -f confirm=APPLY_TEST_FLEET
+          echo 'Dispatched the exact Hacker House Medellin test fleet through GitHub App authentication.' >> "$GITHUB_STEP_SUMMARY"

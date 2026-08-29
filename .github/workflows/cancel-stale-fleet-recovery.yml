@@ -1,4 +1,4 @@
-# One-time cancellation of the superseded legacy recovery run.
+# One-time cancellation of superseded fleet runs.
 name: cancel stale fleet recovery
 
 on:
@@ -16,42 +16,55 @@ jobs:
   cancel:
     if: github.repository == 'zed-pkg-test/zed-pkg-e2e' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
-    timeout-minutes: 5
+    timeout-minutes: 8
     env:
       GH_TOKEN: ${{ github.token }}
-      STALE_RUN_ID: "30972717804"
+      STALE_RUN_IDS: "30972717804 30973196337"
     steps:
-      - name: Cancel the superseded legacy recovery run
+      - name: Cancel superseded recovery and full-apply runs
         shell: bash
         run: |
           set -euo pipefail
+          read -r -a run_ids <<< "$STALE_RUN_IDS"
 
-          endpoint="repos/$GITHUB_REPOSITORY/actions/runs/$STALE_RUN_ID"
-          status="$(gh api "$endpoint" --jq '.status')"
-          conclusion="$(gh api "$endpoint" --jq '.conclusion // ""')"
-
-          if [[ "$status" == "completed" ]]; then
-            echo "Legacy run already completed with conclusion: ${conclusion:-unknown}"
-            exit 0
-          fi
-
-          if ! gh api --method POST "$endpoint/cancel" --silent; then
-            status="$(gh api "$endpoint" --jq '.status')"
-            if [[ "$status" != "completed" ]]; then
-              echo "::error::Unable to cancel legacy recovery run $STALE_RUN_ID"
-              exit 1
-            fi
-          fi
-
-          for _ in $(seq 1 90); do
+          for run_id in "${run_ids[@]}"; do
+            endpoint="repos/$GITHUB_REPOSITORY/actions/runs/$run_id"
             status="$(gh api "$endpoint" --jq '.status')"
             conclusion="$(gh api "$endpoint" --jq '.conclusion // ""')"
+
             if [[ "$status" == "completed" ]]; then
-              echo "Legacy run stopped with conclusion: ${conclusion:-unknown}"
-              exit 0
+              echo "Run $run_id already completed with conclusion: ${conclusion:-unknown}"
+              continue
             fi
-            sleep 2
+
+            if gh api --method POST "$endpoint/cancel" --silent; then
+              echo "Cancellation requested for run $run_id"
+              continue
+            fi
+
+            status="$(gh api "$endpoint" --jq '.status')"
+            if [[ "$status" != "completed" ]]; then
+              echo "::error::Unable to cancel stale run $run_id"
+              exit 1
+            fi
           done
 
-          echo "::error::Legacy recovery run did not stop after cancellation"
-          exit 1
+          for run_id in "${run_ids[@]}"; do
+            endpoint="repos/$GITHUB_REPOSITORY/actions/runs/$run_id"
+            stopped=false
+            for _ in $(seq 1 120); do
+              status="$(gh api "$endpoint" --jq '.status')"
+              conclusion="$(gh api "$endpoint" --jq '.conclusion // ""')"
+              if [[ "$status" == "completed" ]]; then
+                echo "Run $run_id stopped with conclusion: ${conclusion:-unknown}"
+                stopped=true
+                break
+              fi
+              sleep 2
+            done
+
+            if [[ "$stopped" != true ]]; then
+              echo "::error::Run $run_id did not stop after cancellation"
+              exit 1
+            fi
+          done
