@@ -84,6 +84,18 @@ semantics. The smoke workflow is now repinned to the formatted candidate above;
 a successful matrix rerun is still required before the candidate is treated as
 passing.
 
+## Current full-lifecycle baseline
+
+The full fixture lifecycle uses reviewed `zed-pkg/zed-cli` commit
+`d8763b8dcc3bd5c5b6b4b1d13519065a6a2cb99a`. Its locked interface dependency
+and the explicitly checked-out sibling both use
+`8428bc574111fa148e590c8350c7855035ce2046`, which contains the canonical
+whole-repository target identity contract. Keeping those two interface pins
+identical prevents the test harness from compiling one contract while
+reporting evidence for another. The candidate smoke workflow uses the same
+product pair and rejects drift from `.zed-cli-ref` before it builds or runs any
+fixture.
+
 Record the smoke workflow run and any later lifecycle, browser, and
 install-boundary runs on the owning Linear issue. A smoke failure must be
 classified as a product regression, fixture drift, harness defect, or

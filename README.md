@@ -9,6 +9,22 @@ repository owns three complementary suites:
 3. pinned cross-repository acceptance canaries for CLI behavior that must be
    proven with real package-author and consumer repositories before release.
 
+## GitHub API fallback (registry down, GitHub up)
+
+`.github/workflows/github-api-fallback.yml` calls `api.github.com` for real.
+`scripts/github_api_fallback.py` publishes a packed tarball to
+[`zed-pkg-test/github-api-fallback-canary`](https://github.com/zed-pkg-test/github-api-fallback-canary)
+Releases, then downloads the same sha256 from the public
+`/releases/download/` URL with no `registry.zpkg.net` hop. Optional `--zed`
+proves `zed install --frozen` against a closed loopback registry still
+materializes that payload (needs zed-cli#294). Pull requests only compile the
+script; `workflow_dispatch` runs the live GitHub APIs. See
+`docs/github-api-fallback-canary.md`.
+
+Cloudflare Workers in [`zed-pkg/zed-infra`](https://github.com/zed-pkg/zed-infra)
+(`workers/registry-proxy`, `workers/cdn-proxy`) reconstruct the same GitHub
+URLs at `registry.zpkg.net` / `cdn.zpkg.net` when the k8s origin is 502.
+
 ## How this differs from `zed-pkg/zed-e2e`
 
 [`zed-pkg/zed-e2e`](https://github.com/zed-pkg/zed-e2e) owns registry-stack
@@ -76,6 +92,20 @@ python3 scripts/lifecycle.py \
 
 The work root is disposable. Reusing the same path is safe because the harness
 requires a fresh root and GitHub-hosted jobs receive a new runner filesystem.
+
+
+## GitHub / R2 fallback (registry down, CDN up)
+
+`.github/workflows/github-r2-fallback.yml` is a reusable canary for the
+`cdn.zpkg.net` guessable-object contract. `scripts/github_r2_fallback.py`
+publishes a disposable package to a `file://` registry, copies the tarball onto
+`packages/` and `github/` keys, points `--registry` at a closed loopback port,
+and proves `zed install --frozen` restores the packed payload from a loopback
+CDN. It also round-trips the typed `get_version` RPC frame over TCP NDJSON
+(from `github.com/oresoftware/api-docs`). Pull requests only compile the
+script; a full product run needs exact `zed-cli` and `zed-interfaces` commits
+via `workflow_call` or `workflow_dispatch`. See
+`docs/github-r2-fallback-canary.md`.
 
 ## Durable first-install acceptance
 
@@ -183,6 +213,21 @@ bash scripts/durable-first-install-polyglot.sh \
 | --- | --- |
 | `suites/fixture-package-pages.spec.ts` | Each single-language fixture (`node-lib`, `rust-lib`, `go-lib`, `python-lib`) renders the version, description, repository URL, and install snippet persisted from its `.zpkg.toml`; each is findable through HTMX search; a missing package is a real 404. |
 | `suites/polyglot-fan-out.spec.ts` | `polyglot-lib` becomes four separately addressable packages with distinct content hashes, and the unsuffixed repository name is not itself a package. Ecosystem-specific install enforcement remains in the lifecycle matrix, which reads each derived artifact manifest and exercises the native toolchain. |
+
+## Managed application lifecycle certification
+
+`.github/workflows/formal-app-lifecycle.yml` pins the exact production
+`zed-pkg/zed-sync` commit for DEN-4181. It verifies immutable commit and artifact
+provenance, cross-checks the registered Quint model against the canonical trace
+and JSON Schema, requires Rust, JavaScript, and Dart to consume the same fixture,
+and executes the production repository's complete pinned verification matrix.
+
+Run the cross-repository structural check against a sibling checkout:
+
+```bash
+python3 scripts/verify_formal_app_lifecycle_contract.py ../zed-sync
+python3 -m unittest -v tests/test_formal_app_lifecycle_contract.py
+```
 
 The browser workflow pins the stack, CLI, interfaces, Rust servers, and fixture
 inputs to immutable commit SHAs. Both Node workspaces install from their checked-in

@@ -5,8 +5,8 @@ by `zed-pkg/zed-cli#108` rather than relying only on product-repository tests.
 The workflow pins these immutable shipped inputs:
 
 ```text
-zed-pkg/zed-cli@b427e11fa9f592de88907320eff3293d0837b2b3
-zed-pkg/zed-interfaces@c2e049006453c26ca8ca291783f681fce75cb01f
+zed-pkg/zed-cli@d8763b8dcc3bd5c5b6b4b1d13519065a6a2cb99a
+zed-pkg/zed-interfaces@8428bc574111fa148e590c8350c7855035ce2046
 ```
 
 The same merged CLI commit is recorded in `.zed-cli-ref`, so this PR also
