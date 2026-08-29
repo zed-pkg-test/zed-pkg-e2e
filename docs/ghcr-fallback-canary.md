@@ -9,8 +9,11 @@ forces the Packages branch.
 
 The fixture repository is
 [`zed-pkg-test/ghcr-fallback-canary`](https://github.com/zed-pkg-test/ghcr-fallback-canary)
-(created by the script if missing). The OCI artifact uses Zed media types
-(`application/vnd.zed.package.v1.tar+gzip` layer).
+(created by the script if missing). A lightweight git tag `v0.0.1` exists so
+the CLI resolver sees the version; there is still **no GitHub Release**. The
+OCI artifact uses Zed media types (`application/vnd.zed.package.v1.tar+gzip`
+layer). GHCR token exchange uses Docker Basic (`x-access-token:<pat>`); a
+Bearer PAT is pull-only and is rejected on `/v2`.
 
 ## What is asserted
 
