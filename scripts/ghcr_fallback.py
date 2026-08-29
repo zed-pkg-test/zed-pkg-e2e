@@ -12,6 +12,7 @@ with `write:packages` on zed-pkg-test.
 from __future__ import annotations
 
 import argparse
+import base64
 import hashlib
 import io
 import json
@@ -195,17 +196,67 @@ adapter = "none"
     print(f"wrote .zpkg.toml on {branch}", flush=True)
 
 
-def ghcr_bearer(token: str, scope: str) -> str:
-    query = urllib.parse.urlencode({"service": "ghcr.io", "scope": scope})
+def ensure_lightweight_tag(token: str, repo: dict[str, Any]) -> None:
+    """Advertise version `v0.0.1` to the CLI resolver without a Release.
+
+    `zed install` lists versions from git tags. A Release sidecar would win
+    over GHCR, so this tag must stay a ref-only tag.
+    """
     status, _headers, raw = api_request(
-        "GET",
-        f"{GHCR}/token?{query}",
-        token,
-        accept="application/json",
+        "GET", f"{API}/repos/{ORG}/{REPO}/git/ref/tags/{TAG}", token
     )
+    if status == 200:
+        return
+    default_branch = repo.get("default_branch") or "main"
+    branch = api_json(
+        "GET", f"{API}/repos/{ORG}/{REPO}/branches/{default_branch}", token
+    )
+    sha = (branch.get("commit") or {}).get("sha")
+    if not sha:
+        raise RuntimeError(f"missing sha for {default_branch}")
+    created = api_json(
+        "POST",
+        f"{API}/repos/{ORG}/{REPO}/git/refs",
+        token,
+        {"ref": f"refs/tags/{TAG}", "sha": sha},
+    )
+    print(f"created lightweight tag {TAG} -> {sha[:12]}", flush=True)
+    if not created.get("ref"):
+        raise RuntimeError("git ref create returned no ref")
+
+
+def github_login(token: str) -> str:
+    status, _headers, raw = api_request("GET", f"{API}/user", token)
+    if status != 200:
+        raise RuntimeError(f"GET /user returned {status}: {raw[:200]!r}")
+    login = json.loads(raw.decode("utf-8")).get("login")
+    if not login:
+        raise RuntimeError("GET /user missing login")
+    return login
+
+
+def ghcr_bearer(token: str, scope: str) -> str:
+    # GHCR's /token endpoint treats a Bearer GitHub PAT as pull-only. Push
+    # requires Docker-style Basic (username:pat). Never log the header.
+    query = urllib.parse.urlencode({"service": "ghcr.io", "scope": scope})
+    basic = base64.b64encode(f"{github_login(token)}:{token}".encode("ascii")).decode("ascii")
+    request = urllib.request.Request(
+        f"{GHCR}/token?{query}",
+        headers={
+            "Authorization": f"Basic {basic}",
+            "User-Agent": USER_AGENT,
+            "Accept": "application/json",
+        },
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=60) as response:
+            status, raw = response.status, response.read()
+    except urllib.error.HTTPError as error:
+        status, raw = error.code, error.read()
     if status != 200:
         raise RuntimeError(f"GHCR token returned {status}: {raw[:200]!r}")
-    bearer = json.loads(raw.decode("utf-8")).get("token")
+    body = json.loads(raw.decode("utf-8"))
+    bearer = body.get("token") or body.get("access_token")
     if not bearer:
         raise RuntimeError("GHCR token response missing token")
     return bearer
@@ -262,7 +313,9 @@ def put_blob(repo: str, bearer: str, digest: str, media: str, data: bytes) -> No
         f"{location}{sep}digest={digest}",
         bearer,
         body=data,
-        content_type=media,
+        # GHCR rejects custom artifact media types on the blob PUT.
+        # The real type lives on the manifest descriptor.
+        content_type="application/octet-stream",
     )
     if status not in {201, 202}:
         raise RuntimeError(f"put blob {digest} returned {status}: {raw[:200]!r}")
@@ -487,6 +540,7 @@ def main() -> int:
     token = token_from_env()
     repo = ensure_repo(token)
     ensure_manifest_on_default_branch(token, repo)
+    ensure_lightweight_tag(token, repo)
     tarball, _path = pack_canary(work)
     digest = sha256_hex(tarball)
     published = push_ghcr(token, tarball)
