@@ -5,16 +5,17 @@ The write phase must run in the public canary repository so its repository-scope
 GITHUB_TOKEN can create Releases there. The harness deliberately points the
 registry write at an unreachable non-loopback origin, requiring `zed publish`
 to host the packed artifact and VersionMetadata sidecar on the canary's GitHub
-Release. It then proves four independent consumption paths:
+Release. It independently proves four consumption paths:
 
 1. the unauthenticated GitHub Release asset;
 2. the Cloudflare CDN `/github/...` byte proxy;
-3. the Cloudflare registry metadata fallback;
-4. `zed install` and `zed install --frozen` with both registry and R2 disabled,
-   forcing direct GitHub source fallback.
+3. `zed install` and `zed install --frozen` with both registry and R2 disabled,
+   forcing direct GitHub source fallback; and
+4. the Cloudflare registry metadata fallback.
 
-No credential value is printed. The script uses only the Python standard
-library so the workflow does not need a second package manager.
+The direct GitHub restore runs before the registry-edge assertion so one broken
+surface cannot hide evidence for the other. No credential value is printed.
+The script uses only the Python standard library.
 """
 
 from __future__ import annotations
@@ -36,14 +37,14 @@ from typing import Any, Mapping, Sequence
 ORG = "zed-pkg-test"
 REPO = "github-api-fallback-canary"
 PACKAGE = "github-api-fallback-canary"
-DEFAULT_VERSION = "0.0.2"
+DEFAULT_VERSION = "0.0.3"
 GITHUB_API = "https://api.github.com"
 GITHUB_WEB = "https://github.com"
 DEFAULT_REGISTRY = "https://registry.zpkg.net"
 DEFAULT_CDN = "https://cdn.zpkg.net"
 DEAD_REGISTRY = "https://registry-write-intentionally-unavailable.invalid"
 DEAD_R2 = "http://127.0.0.1:1"
-USER_AGENT = "zed-pkg-live-github-cloudflare-e2e/1.0"
+USER_AGENT = "zed-pkg-live-github-cloudflare-e2e/1.1"
 VERSION_RE = re.compile(r'^version\s*=\s*"([^"]+)"\s*$', re.MULTILINE)
 
 
@@ -101,18 +102,6 @@ def request_bytes(
         raise RuntimeError(f"GET failed for {url}: {error.reason}") from error
 
 
-def json_get(url: str, *, token: str | None = None) -> tuple[dict[str, str], Any]:
-    status, headers, raw, _final = request_bytes(
-        url,
-        token=token,
-        accept="application/vnd.github+json" if token else "application/json",
-    )
-    if status != 200:
-        snippet = raw.decode("utf-8", errors="replace")[:800]
-        raise RuntimeError(f"GET {url} returned {status}: {snippet}")
-    return headers, json.loads(raw.decode("utf-8"))
-
-
 def poll_bytes(
     url: str,
     *,
@@ -121,17 +110,27 @@ def poll_bytes(
     delay_seconds: float = 3.0,
 ) -> tuple[dict[str, str], bytes, str]:
     last_status = 0
+    last_headers: dict[str, str] = {}
     last_body = b""
     for attempt in range(1, attempts + 1):
         status, headers, body, final = request_bytes(url, accept=accept)
         if status == 200:
             return headers, body, final
         last_status = status
+        last_headers = headers
         last_body = body
         if attempt != attempts:
             time.sleep(delay_seconds)
     snippet = last_body.decode("utf-8", errors="replace")[:500]
-    raise RuntimeError(f"GET {url} never returned 200 (last={last_status}: {snippet})")
+    selected = {
+        key: last_headers[key]
+        for key in ("content-type", "retry-after", "x-zed-edge", "x-zed-source")
+        if key in last_headers
+    }
+    raise RuntimeError(
+        f"GET {url} never returned 200 "
+        f"(last={last_status}, headers={selected!r}, body={snippet})"
+    )
 
 
 def run(
@@ -174,6 +173,10 @@ def package_contract(package_root: Path, version: str) -> str:
         raise AssertionError(f"missing canary manifest: {manifest}")
     if not payload.is_file():
         raise AssertionError(f"missing canary payload: {payload}")
+    if (package_root / "product").exists():
+        raise AssertionError(
+            "the canary package checkout must be isolated from product source checkouts"
+        )
     text = manifest.read_text(encoding="utf-8")
     match = VERSION_RE.search(text)
     if not match or match.group(1) != version:
@@ -213,12 +216,11 @@ def publish_through_github(zed: Path, package_root: Path, work: Path) -> str:
     return output
 
 
-def release_contract(
+def github_and_cdn_contract(
     token: str,
     version: str,
-    registry_base: str,
     cdn_base: str,
-) -> tuple[dict[str, Any], bytes]:
+) -> dict[str, Any]:
     tag = f"v{version}"
     asset = f"zpkg-{ORG}-{PACKAGE}-{version}.tar.gz"
     sidecar_asset = f"zpkg-{ORG}-{PACKAGE}-{version}.json"
@@ -282,50 +284,63 @@ def release_contract(
     if "immutable" not in cdn_headers.get("cache-control", ""):
         raise AssertionError("Cloudflare CDN response is not immutable")
 
-    registry_url = (
-        f"{registry_base.rstrip('/')}/v1/packages/{ORG}/{PACKAGE}/versions/{version}"
-    )
-    registry_headers: dict[str, str] | None = None
-    registry_metadata: dict[str, Any] | None = None
-    for attempt in range(1, 19):
-        status, headers, raw, _final = request_bytes(registry_url, accept="application/json")
-        if status == 200:
-            registry_headers = headers
-            registry_metadata = json.loads(raw.decode("utf-8"))
-            break
-        if attempt != 18:
-            time.sleep(3)
-    if registry_headers is None or registry_metadata is None:
-        raise RuntimeError("Cloudflare registry fallback never returned the canary metadata")
-    if registry_headers.get("x-zed-source") != "github-public":
-        raise AssertionError(
-            f"unexpected registry source header: {registry_headers.get('x-zed-source')!r}"
-        )
-    for key in ("org", "name", "version", "sha256", "size", "download_url"):
-        if registry_metadata.get(key) != metadata.get(key):
-            raise AssertionError(
-                f"registry metadata {key} differs from release sidecar: "
-                f"{registry_metadata.get(key)!r} != {metadata.get(key)!r}"
-            )
-
     print(
         json.dumps(
             {
                 "ok": True,
-                "phase": "github-cloudflare",
+                "phase": "github-release-and-cloudflare-cdn",
                 "release": release.get("html_url"),
                 "version": version,
                 "sha256": digest,
                 "bytes": len(direct_bytes),
                 "direct_github": direct_url,
                 "cloudflare_cdn": cdn_url,
+            },
+            indent=2,
+        ),
+        flush=True,
+    )
+    return metadata
+
+
+def registry_fallback_contract(
+    version: str,
+    registry_base: str,
+    expected_metadata: Mapping[str, Any],
+) -> None:
+    registry_url = (
+        f"{registry_base.rstrip('/')}/v1/packages/{ORG}/{PACKAGE}/versions/{version}"
+    )
+    registry_headers, raw, _final = poll_bytes(registry_url, accept="application/json")
+    registry_metadata = json.loads(raw.decode("utf-8"))
+    if registry_headers.get("x-zed-edge") != "registry":
+        raise AssertionError(
+            f"unexpected registry edge header: {registry_headers.get('x-zed-edge')!r}"
+        )
+    if registry_headers.get("x-zed-source") != "github-public":
+        raise AssertionError(
+            f"unexpected registry source header: {registry_headers.get('x-zed-source')!r}"
+        )
+    for key in ("org", "name", "version", "sha256", "size", "download_url"):
+        if registry_metadata.get(key) != expected_metadata.get(key):
+            raise AssertionError(
+                f"registry metadata {key} differs from release sidecar: "
+                f"{registry_metadata.get(key)!r} != {expected_metadata.get(key)!r}"
+            )
+
+    print(
+        json.dumps(
+            {
+                "ok": True,
+                "phase": "cloudflare-registry-public-fallback",
+                "version": version,
+                "sha256": expected_metadata["sha256"],
                 "cloudflare_registry": registry_url,
             },
             indent=2,
         ),
         flush=True,
     )
-    return metadata, direct_bytes
 
 
 def install_direct_from_github(
@@ -455,10 +470,9 @@ def main() -> int:
 
     expected_payload = package_contract(package_root, args.version)
     publish_through_github(zed, package_root, work)
-    metadata, _direct_bytes = release_contract(
+    metadata = github_and_cdn_contract(
         token_from_env(),
         args.version,
-        args.registry_base,
         args.cdn_base,
     )
     install_direct_from_github(
@@ -468,6 +482,7 @@ def main() -> int:
         expected_payload,
         metadata,
     )
+    registry_fallback_contract(args.version, args.registry_base, metadata)
     return 0
 
 
