@@ -1,10 +1,13 @@
 #!/usr/bin/env python3
 """Credential-free Zed fallback attestation using zed-pkg-test fixtures.
 
-The harness never publishes or mutates GitHub/Cloudflare state. It proves two
-immutable GitHub Release fixtures, the public Cloudflare CDN byte path, safe
-HEAD/range/negative behavior, and (optionally) a real zed CLI install while the
+The harness never publishes or mutates GitHub or Cloudflare state. It verifies
+multiple immutable GitHub Release fixtures, the live Cloudflare CDN byte path,
+HEAD/range/negative behavior, and optionally a real Zed CLI install while the
 configured registry is an unreachable loopback endpoint.
+
+Redirect destinations are sanitized before they are written to logs or retained
+evidence: signed GitHub asset query strings are never persisted.
 """
 
 from __future__ import annotations
@@ -17,13 +20,14 @@ import re
 import sys
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from pathlib import Path
 from typing import Any, Callable, Mapping
 
 from github_api_fallback import zed_frozen_install
 
-USER_AGENT = "zed-pkg-test-public-fallback/1.0"
+USER_AGENT = "zed-pkg-test-public-fallback/1.1"
 MAX_JSON = 1024 * 1024
 MAX_HTML = 2 * 1024 * 1024
 MAX_ARTIFACT = 110 * 1024 * 1024
@@ -32,6 +36,13 @@ SHA256 = re.compile(r"^[0-9a-f]{64}$")
 
 def lower_headers(headers: Mapping[str, str]) -> dict[str, str]:
     return {str(key).lower(): str(value) for key, value in headers.items()}
+
+
+def sanitize_url(raw_url: str) -> str:
+    """Retain only scheme, authority, and path from an observed URL."""
+
+    parsed = urllib.parse.urlsplit(raw_url)
+    return urllib.parse.urlunsplit((parsed.scheme, parsed.netloc, parsed.path, "", ""))
 
 
 def request(
@@ -44,6 +55,7 @@ def request(
 ) -> tuple[int, dict[str, str], bytes, str]:
     merged = {"User-Agent": USER_AGENT, **dict(headers or {})}
     last_error: Exception | None = None
+
     for attempt in range(1, attempts + 1):
         req = urllib.request.Request(url, method=method, headers=merged)
         try:
@@ -69,7 +81,9 @@ def request(
             last_error = error
             if attempt == attempts:
                 break
+
         time.sleep(attempt * 0.5)
+
     raise RuntimeError(f"request failed after {attempts} attempts: {url}: {last_error}")
 
 
@@ -99,19 +113,34 @@ def proof_headers(headers: Mapping[str, str]) -> dict[str, str]:
         "x-zed-source",
         "x-zpkg-mirror",
     )
-    return {name: headers[name] for name in names if name in headers}
+    selected = {name: headers[name] for name in names if name in headers}
+    if "location" in selected:
+        selected["location"] = sanitize_url(selected["location"])
+    return selected
 
 
 def require_config(raw: Any) -> dict[str, Any]:
-    if not isinstance(raw, dict) or raw.get("schema") != "zed-pkg-test.public-edge-fallback-canaries/v1":
+    if (
+        not isinstance(raw, dict)
+        or raw.get("schema") != "zed-pkg-test.public-edge-fallback-canaries/v1"
+    ):
         raise AssertionError("unexpected canary schema")
-    repo = raw.get("repository")
+
+    repository = raw.get("repository")
     canaries = raw.get("canaries")
-    if not isinstance(repo, dict) or not isinstance(canaries, list) or len(canaries) < 2:
-        raise AssertionError("canary ledger requires repository metadata and at least two versions")
+    if (
+        not isinstance(repository, dict)
+        or not isinstance(canaries, list)
+        or len(canaries) < 2
+    ):
+        raise AssertionError(
+            "canary ledger requires repository metadata and at least two versions"
+        )
+
     for key in ("org", "repo", "package"):
-        if not isinstance(repo.get(key), str) or not repo[key]:
+        if not isinstance(repository.get(key), str) or not repository[key]:
             raise AssertionError(f"repository.{key} is required")
+
     seen: set[str] = set()
     for item in canaries:
         if not isinstance(item, dict):
@@ -124,11 +153,19 @@ def require_config(raw: Any) -> dict[str, Any]:
             raise AssertionError(f"canary {version} tag must be v{version}")
         if not isinstance(item.get("bytes"), int) or item["bytes"] <= 0:
             raise AssertionError(f"canary {version} bytes must be positive")
-        if not isinstance(item.get("sha256"), str) or not SHA256.fullmatch(item["sha256"]):
+        if (
+            not isinstance(item.get("sha256"), str)
+            or not SHA256.fullmatch(item["sha256"])
+        ):
             raise AssertionError(f"canary {version} has invalid sha256")
         for key in ("asset", "sidecar"):
-            if not isinstance(item.get(key), str) or "/" in item[key] or ".." in item[key]:
+            value = item.get(key)
+            if not isinstance(value, str) or "/" in value or ".." in value:
                 raise AssertionError(f"canary {version} has unsafe {key}")
+
+    negative = raw.get("negative")
+    if not isinstance(negative, dict):
+        raise AssertionError("negative fixture metadata is required")
     return raw
 
 
@@ -142,7 +179,7 @@ def main() -> int:
     args = parser.parse_args()
 
     config = require_config(json.loads(args.config.read_text(encoding="utf-8")))
-    repo = config["repository"]
+    repository = config["repository"]
     canaries: list[dict[str, Any]] = config["canaries"]
     enforce_registry = os.environ.get("ENFORCE_LIVE_REGISTRY", "false").lower() in {
         "1",
@@ -154,18 +191,23 @@ def main() -> int:
         "generated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         "git_sha": os.environ.get("GITHUB_SHA"),
         "github_run_id": os.environ.get("GITHUB_RUN_ID"),
+        "canary_versions": [item["version"] for item in canaries],
         "checks": {},
     }
     failures: list[str] = []
 
-    def record(name: str, required: bool, operation: Callable[[], dict[str, Any]]) -> None:
+    def record(
+        name: str,
+        required: bool,
+        operation: Callable[[], dict[str, Any]],
+    ) -> None:
         try:
             result = operation()
             ok = result.get("ok", True) is not False
             evidence["checks"][name] = {"ok": ok, "required": required, **result}
             if required and not ok:
                 failures.append(name)
-        except Exception as error:  # noqa: BLE001 - evidence must survive every boundary failure
+        except Exception as error:  # noqa: BLE001 - evidence must survive failures
             evidence["checks"][name] = {
                 "ok": False,
                 "required": required,
@@ -177,10 +219,13 @@ def main() -> int:
     direct: dict[str, tuple[dict[str, Any], bytes]] = {}
 
     def prove_github_repository() -> dict[str, Any]:
-        url = f"https://api.github.com/repos/{repo['org']}/{repo['repo']}"
+        url = f"https://api.github.com/repos/{repository['org']}/{repository['repo']}"
         status, headers, body, final_url = request(
             url,
-            headers={"Accept": "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28"},
+            headers={
+                "Accept": "application/vnd.github+json",
+                "X-GitHub-Api-Version": "2022-11-28",
+            },
         )
         metadata = json_body(body, "GitHub repository")
         ok = (
@@ -188,12 +233,12 @@ def main() -> int:
             and metadata.get("private") is False
             and metadata.get("visibility") == "public"
             and str(metadata.get("full_name", "")).lower()
-            == f"{repo['org']}/{repo['repo']}".lower()
+            == f"{repository['org']}/{repository['repo']}".lower()
         )
         return {
             "ok": ok,
             "status": status,
-            "final_url": final_url,
+            "final_url": sanitize_url(final_url),
             "headers": proof_headers(headers),
             "full_name": metadata.get("full_name"),
             "visibility": metadata.get("visibility"),
@@ -205,25 +250,43 @@ def main() -> int:
         for item in canaries:
             version = item["version"]
             tag = item["tag"]
-            release_base = f"https://github.com/{repo['org']}/{repo['repo']}/releases/download/{tag}"
+            release_base = (
+                f"https://github.com/{repository['org']}/{repository['repo']}"
+                f"/releases/download/{tag}"
+            )
             asset_url = f"{release_base}/{item['asset']}"
             sidecar_url = f"{release_base}/{item['sidecar']}"
-            cdn_url = f"https://cdn.zpkg.net/github/{repo['org']}/{repo['repo']}/{tag}/{item['asset']}"
+            cdn_url = (
+                f"https://cdn.zpkg.net/github/{repository['org']}/"
+                f"{repository['repo']}/{tag}/{item['asset']}"
+            )
 
-            def github_release(item: dict[str, Any] = item, tag: str = tag) -> dict[str, Any]:
-                url = f"https://api.github.com/repos/{repo['org']}/{repo['repo']}/releases/tags/{tag}"
+            def github_release(
+                item: dict[str, Any] = item,
+                tag: str = tag,
+            ) -> dict[str, Any]:
+                url = (
+                    f"https://api.github.com/repos/{repository['org']}/"
+                    f"{repository['repo']}/releases/tags/{tag}"
+                )
                 status, headers, body, final_url = request(
                     url,
-                    headers={"Accept": "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28"},
+                    headers={
+                        "Accept": "application/vnd.github+json",
+                        "X-GitHub-Api-Version": "2022-11-28",
+                    },
                 )
                 release = json_body(body, f"GitHub release {tag}")
-                assets = {asset.get("name"): asset for asset in release.get("assets", [])}
+                assets = {
+                    asset.get("name"): asset for asset in release.get("assets", [])
+                }
                 artifact = assets.get(item["asset"], {})
                 sidecar_asset = assets.get(item["sidecar"], {})
                 digest = str(artifact.get("digest", "")).removeprefix("sha256:")
                 ok = (
                     status == 200
                     and release.get("draft") is False
+                    and release.get("prerelease") is False
                     and release.get("tag_name") == tag
                     and digest == item["sha256"]
                     and artifact.get("size") == item["bytes"]
@@ -232,7 +295,7 @@ def main() -> int:
                 return {
                     "ok": ok,
                     "status": status,
-                    "final_url": final_url,
+                    "final_url": sanitize_url(final_url),
                     "headers": proof_headers(headers),
                     "release_id": release.get("id"),
                     "asset_digest": digest,
@@ -261,8 +324,8 @@ def main() -> int:
                     and asset_status == 200
                     and digest == item["sha256"]
                     and len(asset_bytes) == item["bytes"]
-                    and sidecar_data.get("org") == repo["org"]
-                    and sidecar_data.get("name") == repo["package"]
+                    and sidecar_data.get("org") == repository["org"]
+                    and sidecar_data.get("name") == repository["package"]
                     and sidecar_data.get("version") == item["version"]
                     and sidecar_data.get("sha256") == item["sha256"]
                     and sidecar_data.get("size") == item["bytes"]
@@ -274,8 +337,8 @@ def main() -> int:
                     "ok": ok,
                     "sidecar_status": side_status,
                     "archive_status": asset_status,
-                    "sidecar_final_url": side_final,
-                    "archive_final_url": asset_final,
+                    "sidecar_final_url": sanitize_url(side_final),
+                    "archive_final_url": sanitize_url(asset_final),
                     "sidecar_headers": proof_headers(side_headers),
                     "archive_headers": proof_headers(asset_headers),
                     "sha256": digest,
@@ -287,7 +350,9 @@ def main() -> int:
                 cdn_url: str = cdn_url,
             ) -> dict[str, Any]:
                 if item["version"] not in direct:
-                    raise AssertionError("direct GitHub proof must pass before CDN comparison")
+                    raise AssertionError(
+                        "direct GitHub proof must pass before CDN comparison"
+                    )
                 expected_sidecar, expected_bytes = direct[item["version"]]
                 status, headers, body, final_url = request(
                     cdn_url,
@@ -309,7 +374,7 @@ def main() -> int:
                 return {
                     "ok": ok,
                     "status": status,
-                    "final_url": final_url,
+                    "final_url": sanitize_url(final_url),
                     "headers": proof_headers(headers),
                     "sha256": digest,
                     "bytes": len(body),
@@ -338,7 +403,7 @@ def main() -> int:
                 return {
                     "ok": ok,
                     "status": status,
-                    "final_url": final_url,
+                    "final_url": sanitize_url(final_url),
                     "headers": proof_headers(headers),
                 }
 
@@ -347,11 +412,16 @@ def main() -> int:
                 cdn_url: str = cdn_url,
             ) -> dict[str, Any]:
                 if item["version"] not in direct:
-                    raise AssertionError("direct GitHub proof must pass before range comparison")
+                    raise AssertionError(
+                        "direct GitHub proof must pass before range comparison"
+                    )
                 _sidecar, expected_bytes = direct[item["version"]]
                 status, headers, body, final_url = request(
                     cdn_url,
-                    headers={"Accept": "application/octet-stream", "Range": "bytes=0-127"},
+                    headers={
+                        "Accept": "application/octet-stream",
+                        "Range": "bytes=0-127",
+                    },
                     max_bytes=MAX_ARTIFACT,
                 )
                 partial = (
@@ -370,8 +440,14 @@ def main() -> int:
                 return {
                     "ok": ok,
                     "status": status,
-                    "mode": "partial" if partial else "safe-full-object" if safe_full else "invalid",
-                    "final_url": final_url,
+                    "mode": (
+                        "partial"
+                        if partial
+                        else "safe-full-object"
+                        if safe_full
+                        else "invalid"
+                    ),
+                    "final_url": sanitize_url(final_url),
                     "headers": proof_headers(headers),
                     "bytes": len(body),
                 }
@@ -384,8 +460,9 @@ def main() -> int:
 
         negative = config["negative"]
         missing_url = (
-            f"https://cdn.zpkg.net/github/{repo['org']}/{repo['repo']}/"
-            f"{negative['missing_tag']}/{negative['missing_asset']}"
+            f"https://cdn.zpkg.net/github/{repository['org']}/"
+            f"{repository['repo']}/{negative['missing_tag']}/"
+            f"{negative['missing_asset']}"
         )
 
         def missing_asset() -> dict[str, Any]:
@@ -395,23 +472,31 @@ def main() -> int:
                 max_bytes=MAX_JSON,
             )
             return {
-                "ok": status == 404 and final_url == missing_url and "location" not in headers,
+                "ok": (
+                    status == 404
+                    and final_url == missing_url
+                    and "location" not in headers
+                ),
                 "status": status,
-                "final_url": final_url,
+                "final_url": sanitize_url(final_url),
                 "headers": proof_headers(headers),
                 "body_preview": body.decode("utf-8", errors="replace")[:300],
             }
 
         def malformed_path() -> dict[str, Any]:
             url = (
-                f"https://cdn.zpkg.net/github/{repo['org']}/{repo['repo']}/"
-                "v0.0.2/%252e%252e%252fprivate"
+                f"https://cdn.zpkg.net/github/{repository['org']}/"
+                f"{repository['repo']}/v0.0.4/%252e%252e%252fprivate"
             )
             status, headers, body, final_url = request(url, max_bytes=MAX_JSON)
             return {
-                "ok": status in (400, 404) and status != 200 and "location" not in headers,
+                "ok": (
+                    status in (400, 404)
+                    and status != 200
+                    and "location" not in headers
+                ),
                 "status": status,
-                "final_url": final_url,
+                "final_url": sanitize_url(final_url),
                 "headers": proof_headers(headers),
                 "body_preview": body.decode("utf-8", errors="replace")[:300],
             }
@@ -424,17 +509,21 @@ def main() -> int:
             )
             html = body.decode("utf-8", errors="replace")
             return {
-                "ok": status == 200 and "https://github.com/zed-pkg" in html and "Zed" in html,
+                "ok": (
+                    status == 200
+                    and "https://github.com/zed-pkg" in html
+                    and "Zed" in html
+                ),
                 "status": status,
-                "final_url": final_url,
+                "final_url": sanitize_url(final_url),
                 "headers": proof_headers(headers),
                 "github_org_link_present": "https://github.com/zed-pkg" in html,
             }
 
         latest = canaries[-1]
         registry_url = (
-            f"https://registry.zpkg.net/v1/packages/{repo['org']}/{repo['package']}/"
-            f"versions/{latest['version']}"
+            f"https://registry.zpkg.net/v1/packages/{repository['org']}/"
+            f"{repository['package']}/versions/{latest['version']}"
         )
 
         def live_registry() -> dict[str, Any]:
@@ -460,10 +549,14 @@ def main() -> int:
                 "ok": ok,
                 "enforced": enforce_registry,
                 "status": status,
-                "final_url": final_url,
+                "final_url": sanitize_url(final_url),
                 "headers": proof_headers(headers),
                 "metadata": metadata,
-                "body_preview": None if metadata is not None else body.decode("utf-8", errors="replace")[:500],
+                "body_preview": (
+                    None
+                    if metadata is not None
+                    else body.decode("utf-8", errors="replace")[:500]
+                ),
             }
 
         record("cloudflare_missing_asset_fails_closed", True, missing_asset)
@@ -475,12 +568,15 @@ def main() -> int:
         zed = args.zed.resolve()
         if not zed.is_file():
             raise AssertionError(f"zed binary not found: {zed}")
-        cli_canary = next((item for item in canaries if item.get("cli_payload")), None)
+        cli_canary = next(
+            (item for item in canaries if item.get("cli_payload")),
+            None,
+        )
         if cli_canary is None:
             raise AssertionError("canary ledger has no cli_payload fixture")
         release_base = (
-            f"https://github.com/{repo['org']}/{repo['repo']}/releases/download/"
-            f"{cli_canary['tag']}"
+            f"https://github.com/{repository['org']}/{repository['repo']}"
+            f"/releases/download/{cli_canary['tag']}"
         )
         status, _headers, body, _final_url = request(
             f"{release_base}/{cli_canary['sidecar']}",
@@ -500,12 +596,15 @@ def main() -> int:
             payloads = sorted(work.rglob("payload.txt"))
             expected_payload = cli_canary["cli_payload"]
             ok = bool(payloads) and all(
-                payload.read_text(encoding="utf-8") == expected_payload for payload in payloads
+                payload.read_text(encoding="utf-8") == expected_payload
+                for payload in payloads
             )
             return {
                 "ok": ok,
                 "zed": str(zed),
-                "payload_files": [str(path.relative_to(work)) for path in payloads],
+                "payload_files": [
+                    str(payload.relative_to(work)) for payload in payloads
+                ],
                 "sha256": sidecar.get("sha256"),
                 "registry_mode": "unreachable-loopback",
                 "frozen_reinstall": True,
@@ -522,12 +621,20 @@ def main() -> int:
         "mode": "cli-only" if args.cli_only else "edge",
     }
     args.evidence.parent.mkdir(parents=True, exist_ok=True)
-    args.evidence.write_text(json.dumps(evidence, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    args.evidence.write_text(
+        json.dumps(evidence, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
     print(json.dumps(evidence, indent=2, sort_keys=True), flush=True)
 
     summary_path = os.environ.get("GITHUB_STEP_SUMMARY")
     if summary_path:
-        rows = ["# Zed public fallback attestation", "", "| Check | Required | Result |", "|---|---:|---:|"]
+        rows = [
+            "# Zed public fallback attestation",
+            "",
+            "| Check | Required | Result |",
+            "|---|---:|---:|",
+        ]
         for name, result in evidence["checks"].items():
             rows.append(
                 f"| `{name}` | {'yes' if result.get('required') else 'no'} | "
