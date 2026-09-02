@@ -1,45 +1,74 @@
-# Live GitHub API fallback canary
+# Live GitHub and Cloudflare fallback canary
 
-This proves GitHub can host a packed Zed artifact **without** `registry.zpkg.net`
-or `cdn.zpkg.net`. It talks to `api.github.com` and `uploads.github.com` in
-the sibling test org [`zed-pkg-test`](https://github.com/zed-pkg-test), then
-downloads the same bytes from the public Release URL.
+The fallback program has two complementary harnesses and one explicit GitHub
+Actions ownership boundary.
 
-The fixture repository is
+## Product-path canary
+
+`scripts/zed_github_cloudflare_e2e.py` runs the released product path rather
+than manufacturing Release assets itself. It requires the workflow in
 [`zed-pkg-test/github-api-fallback-canary`](https://github.com/zed-pkg-test/github-api-fallback-canary)
-(created by the script if missing; always public so unauthenticated `GET`
-works when the registry is down).
+because the repository-scoped `GITHUB_TOKEN` may write Releases only in the
+repository that owns the workflow.
 
-## What is asserted
+The workflow builds an exact `zed-pkg/zed-cli` commit and deliberately points
+its registry write at an unreachable non-loopback host. A passing run proves:
 
-1. GitHub REST: repo, git ref, tags, Releases, asset upload, asset download.
-2. Unauthenticated `https://github.com/{org}/{repo}/releases/download/{tag}/{asset}`
-   returns the exact sha256 that was uploaded.
-3. Optional: `zed install` / `zed install --frozen` against a **closed**
-   `127.0.0.1` registry, with `ZED_PKG_SOURCE_FALLBACK_ALLOW_LOOPBACK=true`,
-   restores the payload from GitHub. That needs a zed-cli build that contains
-   `source_fallback.rs` (zed-pkg/zed-cli#294).
+1. `zed publish` falls back to a GitHub Release and uploads both the packed
+   artifact and its `VersionMetadata` sidecar.
+2. The unauthenticated GitHub Release URL returns bytes whose SHA-256 and size
+   match the sidecar.
+3. `cdn.zpkg.net/github/{owner}/{repo}/{tag}/{asset}` returns byte-identical
+   content with `x-zed-edge: cdn`, `x-zed-source: github-release`, and immutable
+   caching.
+4. `registry.zpkg.net/v1/packages/{org}/{name}/versions/{version}` reconstructs
+   the same metadata from the public sidecar with
+   `x-zed-source: github-public`.
+5. With both the configured registry and R2 source unavailable, `zed install`
+   and `zed install --frozen` restore the payload directly from GitHub and keep
+   the lockfile unchanged.
 
-This is complementary to the loopback CDN mock (`scripts/github_r2_fallback.py`
-on `feat/github-r2-fallback-canary`): that test never leaves 127.0.0.1. This
-one is the GitHub-API proof.
+The canary uses a public repository and a non-secret payload. Tokens are read
+from `GITHUB_TOKEN`, `GH_TOKEN`, or `ZED_PKG_GITHUB_TOKEN` and are never
+printed or written into package metadata.
 
-## Local run
+## API-helper canary
+
+`scripts/github_api_fallback.py` remains a lower-level GitHub REST contract.
+It creates deterministic test bytes with Python, publishes them through GitHub
+REST, then optionally asks `zed install` to consume them. This is useful for
+separating a GitHub API regression from a `zed publish` regression, but it is
+not a substitute for the product-path canary above.
+
+## Credential-free checks
+
+The `zed-pkg-e2e` pull-request workflow performs only syntax and local naming
+contracts. It intentionally does not attempt a sibling-repository write with
+its own scoped token.
 
 ```bash
-# Contract only (no GitHub):
-python3 scripts/github_api_fallback.py --work-root /tmp/zed-gh-api-contract --skip-network
+python3 -m py_compile \
+  scripts/github_api_fallback.py \
+  scripts/zed_github_cloudflare_e2e.py
 
-# Live GitHub APIs (creates/updates the public canary repo + release):
-python3 scripts/github_api_fallback.py --work-root /tmp/zed-gh-api-live
-
-# Plus zed install through GitHub fallback:
-cargo build --release --manifest-path ../zed-pkg/zed-cli/Cargo.toml --bin zed
 python3 scripts/github_api_fallback.py \
-  --work-root /tmp/zed-gh-api-zed \
-  --zed ../zed-pkg/zed-cli/target/release/zed
+  --work-root /tmp/zed-gh-api-contract \
+  --skip-network
+
+python3 scripts/zed_github_cloudflare_e2e.py \
+  --work-root /tmp/zed-gh-cloudflare-contract \
+  --skip-network
 ```
 
-The token is read from `GITHUB_TOKEN` / `GH_TOKEN` / `ZED_PKG_GITHUB_TOKEN`
-and is never printed. The canary repo is public; do not put secrets in the
-sidecar JSON.
+For a live local run, use a token authorized for the canary repository and an
+exact `zed` binary under test:
+
+```bash
+python3 scripts/zed_github_cloudflare_e2e.py \
+  --zed /absolute/path/to/zed \
+  --package-root /absolute/path/to/github-api-fallback-canary \
+  --work-root /tmp/zed-gh-cloudflare-live
+```
+
+Do not place credentials, private repository data, or user content in the
+public Release assets or sidecars.

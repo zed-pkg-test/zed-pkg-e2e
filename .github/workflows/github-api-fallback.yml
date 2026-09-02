@@ -1,48 +1,35 @@
-name: GitHub API live fallback canary
+name: GitHub and Cloudflare fallback harness
 
 on:
   pull_request:
     paths:
       - ".github/workflows/github-api-fallback.yml"
       - "scripts/github_api_fallback.py"
+      - "scripts/zed_github_cloudflare_e2e.py"
       - "docs/github-api-fallback-canary.md"
-  workflow_dispatch:
-    inputs:
-      zed_cli_ref:
-        description: Exact 40-character zed-pkg/zed-cli commit with source fallback
-        required: false
-        type: string
-      run_zed_install:
-        description: Also build zed and install through GitHub fallback
-        required: false
-        type: boolean
-        default: true
-  workflow_call:
-    inputs:
-      zed_cli_ref:
-        description: Exact 40-character zed-pkg/zed-cli commit with source fallback
-        required: true
-        type: string
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/github-api-fallback.yml"
+      - "scripts/github_api_fallback.py"
+      - "scripts/zed_github_cloudflare_e2e.py"
+      - "docs/github-api-fallback-canary.md"
 
 permissions:
   contents: read
 
 concurrency:
-  group: github-api-fallback-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref || github.run_id }}
+  group: github-cloudflare-contract-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 defaults:
   run:
     shell: bash
 
-env:
-  CARGO_TERM_COLOR: always
-  RUST_BACKTRACE: "1"
-
 jobs:
-  syntax:
-    name: Canary script compiles
-    if: github.event_name == 'pull_request'
+  contract:
+    name: Fallback harness contracts
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
@@ -52,89 +39,24 @@ jobs:
           fetch-depth: 1
           persist-credentials: false
           show-progress: false
-      - name: py_compile and naming contract
+
+      - name: Compile and exercise credential-free contracts
         run: |
           set -euo pipefail
-          python3 -m py_compile scripts/github_api_fallback.py
+          python3 -m py_compile \
+            scripts/github_api_fallback.py \
+            scripts/zed_github_cloudflare_e2e.py
           python3 scripts/github_api_fallback.py \
             --work-root "$RUNNER_TEMP/github-api-contract" \
             --skip-network
+          python3 scripts/zed_github_cloudflare_e2e.py \
+            --work-root "$RUNNER_TEMP/github-cloudflare-contract" \
+            --skip-network
 
-  github-api:
-    name: Live GitHub Releases round-trip
-    if: github.event_name != 'pull_request'
-    runs-on: ubuntu-24.04
-    timeout-minutes: 45
-    permissions:
-      contents: write
-    steps:
-      - name: Check out harness
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          fetch-depth: 1
-          persist-credentials: false
-          show-progress: false
-
-      - name: GitHub API publish and public download
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Explain live ownership boundary
         run: |
-          set -euo pipefail
-          python3 -m py_compile scripts/github_api_fallback.py
-          python3 scripts/github_api_fallback.py \
-            --work-root "$RUNNER_TEMP/github-api-live"
-
-      - name: Resolve zed-cli pin
-        id: pins
-        env:
-          CLI_IN: ${{ inputs.zed_cli_ref || '' }}
-          WANT_ZED: ${{ github.event.inputs.run_zed_install || 'true' }}
-        run: |
-          set -euo pipefail
-          cli="${CLI_IN:-}"
-          if [[ -z "$cli" ]]; then
-            # zed-pkg/zed-cli#294 (source fallback + GitHub Release fetch)
-            cli="ac27d4ec353a91486fe8a8fa9c61bdb4f073fb63"
-          fi
-          [[ "$cli" =~ ^[0-9a-f]{40}$ ]]
-          printf 'cli=%s\n' "$cli" >> "$GITHUB_OUTPUT"
-          printf 'want_zed=%s\n' "$WANT_ZED" >> "$GITHUB_OUTPUT"
-
-      - name: Check out exact zed-cli candidate
-        if: steps.pins.outputs.want_zed != 'false'
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          repository: zed-pkg/zed-cli
-          ref: ${{ steps.pins.outputs.cli }}
-          path: product/zed-cli
-          fetch-depth: 1
-          persist-credentials: false
-          show-progress: false
-
-      - name: Install Rust
-        if: steps.pins.outputs.want_zed != 'false'
-        uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30
-        with:
-          toolchain: stable
-
-      - name: Build zed and install from GitHub with registry down
-        if: steps.pins.outputs.want_zed != 'false'
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          set -euo pipefail
-          test "$(git -C product/zed-cli rev-parse HEAD)" = "${{ steps.pins.outputs.cli }}"
-          cargo build --release --manifest-path product/zed-cli/Cargo.toml --bin zed
-          python3 scripts/github_api_fallback.py \
-            --work-root "$RUNNER_TEMP/github-api-zed" \
-            --zed product/zed-cli/target/release/zed
-
-      - name: Upload failure diagnostics
-        if: failure()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: github-api-fallback-${{ github.run_id }}-${{ github.run_attempt }}
-          path: ${{ runner.temp }}/github-api-*
-          if-no-files-found: warn
-          retention-days: 14
-          include-hidden-files: false
+          cat <<'EOF'
+          The write-capable workflow lives in zed-pkg-test/github-api-fallback-canary.
+          GitHub Actions tokens are repository-scoped; a harness token must not be
+          assumed to have Release write permission in a sibling repository.
+          EOF
