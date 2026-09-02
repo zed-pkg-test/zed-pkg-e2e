@@ -1,0 +1,139 @@
+name: public GitHub and Cloudflare fallback (read-only)
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/public-edge-fallback-readonly.yml"
+      - "config/public-edge-fallback-canaries.json"
+      - "scripts/public_edge_fallback_readonly.py"
+      - "scripts/github_api_fallback.py"
+      - "docs/public-edge-fallback-readonly.md"
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/public-edge-fallback-readonly.yml"
+      - "config/public-edge-fallback-canaries.json"
+      - "scripts/public_edge_fallback_readonly.py"
+      - "scripts/github_api_fallback.py"
+      - "docs/public-edge-fallback-readonly.md"
+  schedule:
+    - cron: "37 7 * * *"
+  workflow_dispatch:
+    inputs:
+      enforce_live_registry:
+        description: Require registry.zpkg.net to serve the GitHub fallback
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: public-edge-fallback-readonly-${{ github.event.pull_request.number || github.ref || github.run_id }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  CANARY_CONFIG: config/public-edge-fallback-canaries.json
+  ZED_CLI_REF: c122d3b53f4d0a0021e60928e000132d33ea2c72
+
+jobs:
+  edge-matrix:
+    name: GitHub Releases and Cloudflare CDN matrix
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Check out the test-org harness
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+          show-progress: false
+
+      - name: Validate scripts and run the credential-free edge matrix
+        env:
+          ENFORCE_LIVE_REGISTRY: ${{ github.event_name == 'workflow_dispatch' && inputs.enforce_live_registry && 'true' || vars.PUBLIC_REGISTRY_FALLBACK_ENFORCE || 'false' }}
+        run: |
+          set -euo pipefail
+          python3 -m py_compile \
+            scripts/github_api_fallback.py \
+            scripts/public_edge_fallback_readonly.py
+          python3 scripts/public_edge_fallback_readonly.py \
+            --config "$CANARY_CONFIG" \
+            --work-root "$RUNNER_TEMP/public-edge-unused" \
+            --evidence "$RUNNER_TEMP/public-edge-fallback.json"
+
+      - name: Retain sanitized edge evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: public-edge-fallback-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/public-edge-fallback.json
+          if-no-files-found: warn
+          retention-days: 90
+          include-hidden-files: false
+
+  cli-origin-down:
+    name: zed install and frozen reinstall with registry down
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - name: Check out the test-org harness
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+          show-progress: false
+
+      - name: Check out the exact Zed CLI
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: zed-pkg/zed-cli
+          ref: ${{ env.ZED_CLI_REF }}
+          path: product/zed-cli
+          fetch-depth: 1
+          persist-credentials: false
+          show-progress: false
+
+      - name: Verify the immutable CLI source
+        run: test "$(git -C product/zed-cli rev-parse HEAD)" = "$ZED_CLI_REF"
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30
+        with:
+          toolchain: stable
+
+      - name: Cache the exact CLI build
+        uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          workspaces: product/zed-cli
+
+      - name: Build the exact Zed CLI
+        run: cargo build --release --locked --manifest-path product/zed-cli/Cargo.toml --bin zed
+
+      - name: Install twice from public GitHub while the registry is unreachable
+        run: |
+          set -euo pipefail
+          python3 scripts/public_edge_fallback_readonly.py \
+            --config "$CANARY_CONFIG" \
+            --work-root "$RUNNER_TEMP/zed-cli-public-fallback" \
+            --evidence "$RUNNER_TEMP/zed-cli-public-fallback.json" \
+            --cli-only \
+            --zed product/zed-cli/target/release/zed
+
+      - name: Retain sanitized CLI evidence and bounded diagnostics
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: zed-cli-public-fallback-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/zed-cli-public-fallback.json
+            ${{ runner.temp }}/zed-cli-public-fallback/consumer/.zpkg.toml
+            ${{ runner.temp }}/zed-cli-public-fallback/consumer/.zpkg.lock
+          if-no-files-found: warn
+          retention-days: 30
+          include-hidden-files: true
