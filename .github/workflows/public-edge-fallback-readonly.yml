@@ -116,6 +116,14 @@ jobs:
         run: cargo build --release --locked --manifest-path product/zed-cli/Cargo.toml --bin zed
 
       - name: Install twice from public GitHub while the registry is unreachable
+        env:
+          # Release sidecars and archives remain anonymously readable and are
+          # proven without this credential in edge-matrix. The CLI needs tags
+          # metadata to resolve the exact dependency; use only the job-scoped,
+          # contents:read Actions token so shared-runner anonymous API quotas do
+          # not make the install proof intermittent.
+          ZED_PKG_GITHUB_TOKEN: ${{ github.token }}
+          ZED_PKG_CLI_METADATA_AUTH: actions-read-token
         run: |
           set -euo pipefail
           python3 scripts/public_edge_fallback_readonly.py \
