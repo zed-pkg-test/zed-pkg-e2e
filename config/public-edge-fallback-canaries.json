@@ -1,0 +1,47 @@
+{
+  "schema": "zed-pkg-test.public-edge-fallback-canaries/v1",
+  "repository": {
+    "org": "zed-pkg-test",
+    "repo": "github-api-fallback-canary",
+    "package": "github-api-fallback-canary"
+  },
+  "canaries": [
+    {
+      "version": "0.0.1",
+      "tag": "v0.0.1",
+      "asset": "zpkg-zed-pkg-test-github-api-fallback-canary-0.0.1.tar.gz",
+      "sidecar": "zpkg-zed-pkg-test-github-api-fallback-canary-0.0.1.json",
+      "sha256": "0279fe023f516d7077aae2176821d89ee459733f80d0a894006652029d7f10d4",
+      "bytes": 486,
+      "cli_payload": "github-api-fallback\n"
+    },
+    {
+      "version": "0.0.2",
+      "tag": "v0.0.2",
+      "asset": "zpkg-zed-pkg-test-github-api-fallback-canary-0.0.2.tar.gz",
+      "sidecar": "zpkg-zed-pkg-test-github-api-fallback-canary-0.0.2.json",
+      "sha256": "b05c249a8a9cd0a383d042580b6dbaa4e828dd5ec201936d865055f26a023f43",
+      "bytes": 1578807
+    },
+    {
+      "version": "0.0.3",
+      "tag": "v0.0.3",
+      "asset": "zpkg-zed-pkg-test-github-api-fallback-canary-0.0.3.tar.gz",
+      "sidecar": "zpkg-zed-pkg-test-github-api-fallback-canary-0.0.3.json",
+      "sha256": "400dd982923d917edbc766c8e63b2e3abbab69b95eea49d100701570baed3f56",
+      "bytes": 347
+    },
+    {
+      "version": "0.0.4",
+      "tag": "v0.0.4",
+      "asset": "zpkg-zed-pkg-test-github-api-fallback-canary-0.0.4.tar.gz",
+      "sidecar": "zpkg-zed-pkg-test-github-api-fallback-canary-0.0.4.json",
+      "sha256": "84267e787faeb1cda1855f9d515cf4225e3476149656904a9e143c825cff6062",
+      "bytes": 347
+    }
+  ],
+  "negative": {
+    "missing_tag": "v99.99.99-missing",
+    "missing_asset": "zpkg-zed-pkg-test-github-api-fallback-canary-99.99.99-missing.tar.gz"
+  }
+}
