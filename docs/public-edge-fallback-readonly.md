@@ -4,7 +4,7 @@ This canary is deliberately read-only. It uses immutable public release assets
 in `zed-pkg-test/github-api-fallback-canary` and never creates a repository,
 tag, release, object, token, account, or Cloudflare resource.
 
-The edge matrix proves two release sizes independently:
+The edge matrix proves all four current release fixtures independently:
 
 - direct anonymous GitHub repository and Release API visibility;
 - sidecar, compressed byte count, and SHA-256 agreement;
@@ -13,6 +13,10 @@ The edge matrix proves two release sizes independently:
 - `HEAD` behavior and bounded range behavior;
 - missing and malformed paths fail closed; and
 - the `zpkg.net` public site remains independently hosted by GitHub Pages.
+
+GitHub redirects release downloads through short-lived signed object URLs. The
+attestation strips every query string and fragment before writing logs or the
+retained JSON artifact, so only the public hostname and path are preserved.
 
 `registry.zpkg.net` is always observed. It becomes a required check only when
 `PUBLIC_REGISTRY_FALLBACK_ENFORCE=true` or a manual dispatch selects
