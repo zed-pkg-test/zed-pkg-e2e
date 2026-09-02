@@ -16,8 +16,8 @@ concurrency:
 env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: "1"
-  ZED_CLI_REF: 0786987fe3a173659463940f4f905dc3b5bd19a8
-  ZED_INTERFACES_REF: c2e049006453c26ca8ca291783f681fce75cb01f
+  ZED_CLI_REF: c122d3b53f4d0a0021e60928e000132d33ea2c72
+  ZED_INTERFACES_REF: 0c51d732cb01a377b2bc00e8d945b355e41961c1
 
 jobs:
   unix-black-box:
@@ -78,12 +78,12 @@ jobs:
           rustc --version --verbose
           cargo --version --verbose
 
-      - name: Enforce formatting and focused metadata tests
+      - name: Enforce formatting and git-submodule metadata tests
         run: |
           set -euo pipefail
           cargo fmt --all --check --manifest-path zed-cli/Cargo.toml
           cargo test --locked --manifest-path zed-cli/Cargo.toml --lib \
-            git_submodules::manifest_kind_tests -- --nocapture
+            git_submodules::tests -- --nocapture
 
       - name: Run all-target lint gate
         if: runner.os == 'Linux'
@@ -159,11 +159,11 @@ jobs:
           rustc --version --verbose
           cargo --version --verbose
 
-      - name: Enforce formatting and focused metadata tests
+      - name: Enforce formatting and git-submodule metadata tests
         run: |
           cargo fmt --all --check --manifest-path zed-cli/Cargo.toml
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          cargo test --locked --manifest-path zed-cli/Cargo.toml --lib git_submodules::manifest_kind_tests -- --nocapture
+          cargo test --locked --manifest-path zed-cli/Cargo.toml --lib git_submodules::tests -- --nocapture
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Run all-target Windows lint gate
