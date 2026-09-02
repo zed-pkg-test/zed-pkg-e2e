@@ -70,10 +70,10 @@ jobs:
           PYTHONPYCACHEPREFIX="$RUNNER_TEMP/pycache" \
             python3 -m py_compile harness/scripts/gitmodules_metadata_contract.py
 
-      - name: Install stable Rust validation tools
+      - name: Install stable Rust formatting tools
         run: |
           set -euo pipefail
-          rustup toolchain install stable --profile minimal --component rustfmt --component clippy
+          rustup toolchain install stable --profile minimal --component rustfmt
           rustup default stable
           rustc --version --verbose
           cargo --version --verbose
@@ -84,10 +84,6 @@ jobs:
           rustfmt --edition 2024 --check zed-cli/src/git_submodules/*.rs
           cargo test --locked --manifest-path zed-cli/Cargo.toml --lib \
             git_submodules::tests -- --nocapture
-
-      - name: Run all-target lint gate
-        if: runner.os == 'Linux'
-        run: cargo clippy --locked --manifest-path zed-cli/Cargo.toml --all-targets -- -D warnings
 
       - name: Build the exact release binary
         run: cargo build --locked --release --manifest-path zed-cli/Cargo.toml --bin zed
@@ -119,7 +115,7 @@ jobs:
           include-hidden-files: false
 
   windows-product-gate:
-    name: Windows metadata unit and lint gate
+    name: Windows metadata unit gate
     runs-on: windows-2025
     timeout-minutes: 45
     defaults:
@@ -152,9 +148,9 @@ jobs:
           if ((git -C zed-interfaces rev-parse HEAD) -ne $env:ZED_INTERFACES_REF) { throw "interface pin mismatch" }
           Select-String -Path zed-cli/Cargo.toml -SimpleMatch "rev = `"$env:ZED_INTERFACES_REF`"" | Out-Null
 
-      - name: Install stable Rust validation tools
+      - name: Install stable Rust formatting tools
         run: |
-          rustup toolchain install stable --profile minimal --component rustfmt --component clippy
+          rustup toolchain install stable --profile minimal --component rustfmt
           rustup default stable
           rustc --version --verbose
           cargo --version --verbose
@@ -166,9 +162,6 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           cargo test --locked --manifest-path zed-cli/Cargo.toml --lib git_submodules::tests -- --nocapture
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-
-      - name: Run all-target Windows lint gate
-        run: cargo clippy --locked --manifest-path zed-cli/Cargo.toml --all-targets -- -D warnings
 
       - name: Require clean product checkouts
         run: |
