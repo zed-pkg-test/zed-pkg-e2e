@@ -2,9 +2,10 @@
 
 This canary is deliberately read-only. It uses immutable public release assets
 in `zed-pkg-test/github-api-fallback-canary` and never creates a repository,
-tag, release, object, token, account, or Cloudflare resource.
+tag, release, object, account, R2 object, DNS record, or Cloudflare Worker.
 
-The edge matrix proves all four current release fixtures independently:
+The edge matrix proves all four current release fixtures independently and
+without a GitHub credential:
 
 - direct anonymous GitHub repository and Release API visibility;
 - sidecar, compressed byte count, and SHA-256 agreement;
@@ -27,4 +28,8 @@ false green.
 The second job builds an immutable `zed-pkg/zed-cli` commit and points it at an
 unreachable loopback registry. It requires both the initial install and a wiped,
 frozen reinstall to restore the public GitHub Release payload without changing
-the lockfile.
+the lockfile. Release sidecars and archive bytes remain publicly readable. The
+CLI's package-resolution phase additionally reads the GitHub tags API; that
+request receives only the job-scoped `contents:read` Actions token so shared
+GitHub-hosted runner IPs do not make the test intermittent by exhausting the
+anonymous API quota. The token value is never printed or retained.
