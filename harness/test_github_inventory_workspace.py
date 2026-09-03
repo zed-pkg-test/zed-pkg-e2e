@@ -132,7 +132,9 @@ class WorkspaceInventoryTests(InventoryTestCase):
         core_id = package_id("workspace-core")
         utils_id = package_id("workspace-utils")
         cli_id = package_id("workspace-cli")
-        self.assertEqual(result["package_roots"]["acme/app"], root_id)
+        root_node = next(node for node in result["nodes"] if node["id"] == root_id)
+        self.assertEqual(root_node["repository"], "acme/app")
+        self.assertEqual(root_node["zed_manifest_path"], ".zpkg.toml")
 
         memberships = [
             edge for edge in result["edges"] if edge["kind"] == "zed-workspace-member"
