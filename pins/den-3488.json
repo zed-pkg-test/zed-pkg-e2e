@@ -1,0 +1,6 @@
+{
+  "schemaVersion": 1,
+  "ready": false,
+  "zed-pkg/zed-cli": "1f5594c162a2a31af59271b7ae6ffd49f9911260",
+  "note": "Set ready=true only after the exact-graph repair commit passes its in-repository gates."
+}
