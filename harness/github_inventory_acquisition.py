@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Immutable GitHub repository selection and manifest acquisition for DEN-2957."""
+"""Repository discovery and immutable workspace-aware source acquisition."""
 
 from __future__ import annotations
 
@@ -10,62 +10,56 @@ from github_inventory_zed_workspace import (
     workspace_member_declarations,
 )
 
+_bounded_text = _core._bounded_text
+_error_code = _core._error_code
 _metadata_full_name = _core._metadata_full_name
-_quote = _core._quote
 _validate_repo_path = _core._validate_repo_path
 
 
-class RepositoryAcquisitionMixin:
-    def _resolve_repositories(
-        self,
-        repositories: Sequence[str],
-        organizations: Sequence[str],
-    ) -> list[RepoInfo]:
-        selected: dict[str, RepoInfo] = {}
-        for repository in normalize_repositories(repositories):
-            owner, name = repository.split("/", 1)
-            metadata = self.client.get_json(
-                f"/repos/{_quote(owner)}/{_quote(name)}",
-                expected_type=dict,
-            )
-            full_name = _metadata_full_name(metadata)
-            selected[full_name] = RepoInfo(
-                full_name=full_name,
-                private=bool(metadata.get("private", False)),
-                archived=bool(metadata.get("archived", False)),
-                default_branch=_bounded_text(
-                    str(metadata.get("default_branch", "main")),
-                    "default branch",
-                    self.limits.max_field_bytes,
-                ),
-            )
+class InventoryAcquisitionMixin:
+    """Acquire exact GitHub sources without changing the historical builder API."""
 
-        for organization in normalize_organizations(organizations):
-            items = self.client.paginate(f"/orgs/{_quote(organization)}/repos?type=all&per_page=100")
-            for metadata in items:
-                full_name = _metadata_full_name(metadata)
-                if not full_name.startswith(organization + "/"):
-                    raise ParseFailure(
-                        f"organization listing for {organization} returned {full_name}"
-                    )
-                selected.setdefault(
-                    full_name,
-                    RepoInfo(
-                        full_name=full_name,
-                        private=bool(metadata.get("private", False)),
-                        archived=bool(metadata.get("archived", False)),
-                        default_branch=_bounded_text(
-                            str(metadata.get("default_branch", "main")),
-                            "default branch",
-                            self.limits.max_field_bytes,
-                        ),
-                    ),
-                )
-                if len(selected) > self.limits.max_repositories:
+    def _discover_repositories(self) -> dict[str, dict[str, Any]]:
+        metadata: dict[str, dict[str, Any]] = {}
+        for org in self.requested_organizations:
+            try:
+                listed = self.client.list_org_repositories(org)
+            except LimitError:
+                raise
+            except InventoryError as error:
+                self._failure(org, "org-pagination", error)
+                continue
+            for item in listed:
+                try:
+                    full_name = _metadata_full_name(item)
+                except InventoryError as error:
+                    self._failure(org, "org-pagination", error)
+                    continue
+                metadata[full_name] = item
+                if len(metadata) > self.limits.max_repositories:
                     raise LimitError(
-                        f"repository limit exceeded ({len(selected)} > {self.limits.max_repositories})"
+                        "repository limit exceeded during organization pagination "
+                        f"({len(metadata)} > {self.limits.max_repositories})"
                     )
-        return [selected[key] for key in sorted(selected)]
+        for full_name in self.requested_repositories:
+            try:
+                metadata[full_name] = self.client.get_repository(full_name)
+            except LimitError:
+                raise
+            except InventoryError as error:
+                self._failure(full_name, "repository-metadata", error)
+                self.repository_records[full_name] = {
+                    "full_name": full_name,
+                    "status": "failed",
+                    "archived": None,
+                    "private": None,
+                    "disabled": None,
+                    "default_branch": None,
+                    "commit_sha": None,
+                    "manifests": [],
+                    "missing_manifests": self._expected_manifest_paths(),
+                }
+        return metadata
 
     def _read_manifest_blob(
         self,
@@ -79,24 +73,18 @@ class RepositoryAcquisitionMixin:
         if entry.get("type") != "blob":
             raise ParseFailure(f"manifest path {path} is not a blob")
         declared_size = entry.get("size")
-        if not isinstance(declared_size, int) or declared_size < 0:
-            raise ParseFailure(f"tree entry for {path} is missing a valid size")
-        if declared_size > self.limits.max_manifest_bytes:
-            raise LimitError(
-                f"manifest {path} exceeds {self.limits.max_manifest_bytes} bytes"
-            )
-        blob_sha = entry.get("sha")
-        if not isinstance(blob_sha, str):
-            raise ParseFailure(f"manifest {path} is missing a blob SHA")
-        data = self.client.get_blob(full_name, blob_sha)
-        if len(data) != declared_size:
-            raise ParseFailure(
-                f"manifest {path} size mismatch: tree={declared_size} blob={len(data)}"
-            )
-        if len(data) > self.limits.max_manifest_bytes:
-            raise LimitError(
-                f"manifest {path} exceeds {self.limits.max_manifest_bytes} bytes"
-            )
+        if declared_size is not None:
+            if not isinstance(declared_size, int) or declared_size < 0:
+                raise ParseFailure(f"tree entry {path} has invalid size")
+            if declared_size > self.limits.max_manifest_bytes:
+                raise LimitError(
+                    f"manifest {full_name}:{path} exceeded "
+                    f"{self.limits.max_manifest_bytes} bytes"
+                )
+        blob_sha = str(entry.get("sha", "")).lower()
+        if not GIT_SHA_RE.fullmatch(blob_sha):
+            raise ParseFailure(f"tree entry {path} has invalid blob SHA")
+        data = self.client.get_blob(full_name, blob_sha, declared_size)
         return SourceBlob(
             repository=full_name,
             repository_commit=commit_sha,
@@ -145,7 +133,9 @@ class RepositoryAcquisitionMixin:
                         f"{declaration.member_manifest_path!r} is declared by "
                         f"{previous_parent!r} and {declaration.parent_manifest_path!r}"
                     )
-                declared_by[declaration.member_manifest_path] = declaration.parent_manifest_path
+                declared_by[declaration.member_manifest_path] = (
+                    declaration.parent_manifest_path
+                )
                 declarations.append(declaration)
                 if len(declarations) > self.limits.max_tree_entries:
                     raise LimitError(
@@ -169,70 +159,44 @@ class RepositoryAcquisitionMixin:
 
         return tuple(declarations)
 
-    def _scan_repository(self, repo: RepoInfo) -> None:
-        full_name = repo.full_name
-        repo_node = self._ensure_repo_node(full_name, scanned=True)
-        record: dict[str, Any] = {
-            "full_name": full_name,
-            "private": repo.private,
-            "archived": repo.archived,
-            "default_branch": repo.default_branch,
-            "status": "scanned",
-            "manifests": [],
-            "missing_manifests": [],
-        }
+    def _scan_repository(self, full_name: str, metadata: Mapping[str, Any]) -> None:
         try:
-            owner, name = full_name.split("/", 1)
-            commit = self.client.get_json(
-                f"/repos/{_quote(owner)}/{_quote(name)}/commits/{_quote(repo.default_branch)}",
-                expected_type=dict,
-            )
-            commit_sha = normalize_commit_sha(commit.get("sha"), "repository commit")
+            canonical = _metadata_full_name(metadata)
+            if canonical != full_name:
+                raise ParseFailure("GitHub metadata full_name changed during scan")
+            default_branch = metadata.get("default_branch")
+            if not isinstance(default_branch, str) or not default_branch:
+                raise ParseFailure("repository metadata is missing default_branch")
+            _bounded_text(default_branch, "default branch", self.limits.max_field_bytes)
+            record: dict[str, Any] = {
+                "full_name": full_name,
+                "status": "scanning",
+                "archived": bool(metadata.get("archived", False)),
+                "private": bool(metadata.get("private", False)),
+                "disabled": bool(metadata.get("disabled", False)),
+                "default_branch": default_branch,
+                "commit_sha": None,
+                "manifests": [],
+                "missing_manifests": [],
+            }
+            self.repository_records[full_name] = record
+            self._ensure_repo_node(full_name, scanned=True)
+            commit_sha = self.client.pin_default_branch(full_name, default_branch)
             record["commit_sha"] = commit_sha
-            self.nodes[repo_node]["commit_sha"] = commit_sha
-            tree = self.client.get_json(
-                f"/repos/{_quote(owner)}/{_quote(name)}/git/trees/{commit_sha}?recursive=1",
-                expected_type=dict,
+            tree = self.client.get_tree(full_name, commit_sha)
+            entries = self._tree_entries(tree)
+            selected_paths = self._selected_manifest_paths(entries)
+            record["missing_manifests"] = sorted(
+                path for path in self._expected_manifest_paths() if path not in entries
             )
-            if tree.get("truncated") is True:
-                raise ApiError(200, f"tree:{full_name}", code="github_tree_truncated")
-            tree_items = tree.get("tree")
-            if not isinstance(tree_items, list):
-                raise ParseFailure("recursive tree response is missing tree array")
-            if len(tree_items) > self.limits.max_tree_entries:
-                raise LimitError(
-                    f"tree entry limit exceeded ({len(tree_items)} > {self.limits.max_tree_entries})"
-                )
-            entries: dict[str, Mapping[str, Any]] = {}
-            for entry in tree_items:
-                if not isinstance(entry, dict):
-                    raise ParseFailure("recursive tree entry must be an object")
-                path = entry.get("path")
-                if not isinstance(path, str):
-                    raise ParseFailure("recursive tree entry is missing path")
-                _validate_repo_path(path)
-                if path in entries:
-                    raise ParseFailure(f"duplicate recursive tree path {path}")
-                entries[path] = entry
 
-            requested_paths = sorted(
-                {
-                    path
-                    for include in self.includes
-                    for path in EXPECTED_MANIFESTS[include]
-                }
-            )
             blobs: dict[str, SourceBlob] = {}
-            for path in requested_paths:
-                entry = entries.get(path)
-                if entry is None:
-                    record["missing_manifests"].append(path)
-                    continue
+            for path in sorted(selected_paths):
                 blobs[path] = self._read_manifest_blob(
                     full_name=full_name,
                     commit_sha=commit_sha,
                     path=path,
-                    entry=entry,
+                    entry=entries[path],
                 )
 
             workspace_declarations: tuple[WorkspaceMemberDeclaration, ...] = ()
@@ -251,9 +215,10 @@ class RepositoryAcquisitionMixin:
                         "kind": blob.kind,
                         "path": blob.path,
                         "blob_sha": blob.blob_sha,
-                        "size": len(blob.data),
+                        "bytes": len(blob.data),
                     }
                 )
+            record["manifests"].sort(key=lambda item: (item["kind"], item["path"]))
             if workspace_declarations:
                 record["zed_workspace_members"] = [
                     {
@@ -265,30 +230,98 @@ class RepositoryAcquisitionMixin:
                 ]
 
             if ".zpkg.toml" in blobs:
-                self._parse_zed_manifests(blobs, workspace_declarations)
+                if workspace_declarations:
+                    self._parse_zed_manifests(blobs, workspace_declarations)
+                else:
+                    self._parse_zed_manifest(blobs[".zpkg.toml"])
             if ".zpkg.lock" in blobs:
                 self._parse_zed_lock(blobs[".zpkg.lock"])
-            if ".gitmodules" in blobs:
-                self._parse_gitmodules(blobs[".gitmodules"], full_name)
-            if "flake.lock" in blobs:
-                self._parse_flake_lock(blobs["flake.lock"], full_name)
-            if "flake.nix" in blobs:
-                self._parse_flake_nix(blobs["flake.nix"], full_name)
-            if "nix/sources.json" in blobs:
-                self._parse_nix_sources(blobs["nix/sources.json"], full_name)
-            if "npins/sources.json" in blobs:
-                self._parse_npins(blobs["npins/sources.json"], full_name)
-            for path, entry in sorted(entries.items()):
-                if path == "Dockerfile" or path.endswith("/Dockerfile"):
-                    self._parse_container_path(full_name, path, entry, commit_sha)
-            self.repo_records.append(record)
-        except Exception as error:  # controlled per-repository failure
-            record["status"] = "failed"
-            record["failure_code"] = _error_code(error)
-            record["failure_message"] = redact_text(str(error), self.token)
-            self.repo_records.append(record)
+            gitmodules = blobs.get(".gitmodules")
+            gitlinks = self._exact_gitlinks(entries)
+            if "git-submodule" in self.includes:
+                self._parse_git_submodules(gitmodules, full_name, commit_sha, gitlinks)
+            if "nix" in self.includes:
+                if "flake.lock" in blobs:
+                    self._parse_flake_lock(blobs["flake.lock"])
+                if "flake.nix" in blobs:
+                    self._parse_flake_nix(blobs["flake.nix"])
+                for path in sorted(blobs):
+                    if path.endswith("sources.json") and path != "flake.lock":
+                        self._parse_nix_sources(blobs[path])
+            record["status"] = "scanned"
+        except LimitError:
+            raise
+        except InventoryError as error:
             self._failure(full_name, "repository-scan", error)
+            record = self.repository_records.setdefault(
+                full_name,
+                {
+                    "full_name": full_name,
+                    "archived": bool(metadata.get("archived", False)),
+                    "private": bool(metadata.get("private", False)),
+                    "disabled": bool(metadata.get("disabled", False)),
+                    "default_branch": metadata.get("default_branch"),
+                    "commit_sha": None,
+                    "manifests": [],
+                    "missing_manifests": self._expected_manifest_paths(),
+                },
+            )
+            record["status"] = "failed"
 
+    def _tree_entries(
+        self, tree: Sequence[Mapping[str, Any]]
+    ) -> dict[str, dict[str, Any]]:
+        result: dict[str, dict[str, Any]] = {}
+        for entry in tree:
+            path = entry.get("path")
+            if not isinstance(path, str):
+                raise ParseFailure("tree entry path is missing")
+            _validate_repo_path(path)
+            if path in result:
+                raise ParseFailure(f"duplicate tree path {path}")
+            result[path] = dict(entry)
+        return result
 
-# Preserve the public builder contract while keeping the narrower implementation name.
-InventoryAcquisitionMixin = RepositoryAcquisitionMixin
+    def _exact_gitlinks(
+        self, entries: Mapping[str, Mapping[str, Any]]
+    ) -> dict[str, str]:
+        gitlinks: dict[str, str] = {}
+        for path, entry in entries.items():
+            type_is_commit = entry.get("type") == "commit"
+            mode_is_gitlink = str(entry.get("mode", "")) == "160000"
+            if type_is_commit != mode_is_gitlink:
+                raise ParseFailure(
+                    f"tree entry {path} has contradictory gitlink type/mode"
+                )
+            if not type_is_commit:
+                continue
+            object_id = str(entry.get("sha", "")).lower()
+            if not GIT_SHA_RE.fullmatch(object_id):
+                raise ParseFailure(f"gitlink tree entry {path} has invalid object ID")
+            gitlinks[path] = object_id
+        return gitlinks
+
+    def _selected_manifest_paths(
+        self, entries: Mapping[str, Mapping[str, Any]]
+    ) -> set[str]:
+        selected: set[str] = set()
+        for include in self.includes:
+            for path in EXPECTED_MANIFESTS[include]:
+                entry = entries.get(path)
+                if entry and entry.get("type") == "blob":
+                    selected.add(path)
+        if "nix" in self.includes:
+            for path, entry in entries.items():
+                if entry.get("type") != "blob":
+                    continue
+                if (
+                    path.startswith("nix/") or path.startswith("npins/")
+                ) and path.endswith("sources.json"):
+                    selected.add(path)
+        return selected
+
+    def _expected_manifest_paths(self) -> list[str]:
+        paths: set[str] = set()
+        for include in self.includes:
+            paths.update(EXPECTED_MANIFESTS[include])
+        return sorted(paths)

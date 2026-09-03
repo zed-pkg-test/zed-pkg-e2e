@@ -1,0 +1,11 @@
+flowchart LR
+  n_125f180792aab3e52804["acme/workspace-cli@0.1.0"]
+  n_27b3cf4ff18c08b9c34b["acme/workspace-core@0.1.0"]
+  n_2bd7ac034ca2e23294cb["acme/workspace-monorepo@0.1.0"]
+  n_bb7e39bd0a78213d0536["acme/workspace-utils@0.1.0"]
+  n_125f180792aab3e52804 -->|"zed-declared"| n_27b3cf4ff18c08b9c34b
+  n_125f180792aab3e52804 -->|"zed-declared"| n_bb7e39bd0a78213d0536
+  n_2bd7ac034ca2e23294cb -->|"zed-workspace-member"| n_125f180792aab3e52804
+  n_2bd7ac034ca2e23294cb -->|"zed-workspace-member"| n_27b3cf4ff18c08b9c34b
+  n_2bd7ac034ca2e23294cb -->|"zed-workspace-member"| n_bb7e39bd0a78213d0536
+  n_bb7e39bd0a78213d0536 -->|"zed-declared"| n_27b3cf4ff18c08b9c34b

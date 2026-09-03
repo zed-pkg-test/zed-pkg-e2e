@@ -68,6 +68,40 @@ class WorkspaceInventoryTests(InventoryTestCase):
             limits=limits,
         )
 
+    @staticmethod
+    def workspace_render_projection(result: dict[str, object]) -> dict[str, object]:
+        nodes = [
+            {
+                "id": node["id"],
+                "kind": node["kind"],
+                "label": node["label"],
+            }
+            for node in result["nodes"]
+            if node.get("repository") == "acme/app"
+            and node.get("zed_manifest_path")
+        ]
+        nodes.sort(key=lambda node: node["id"])
+        node_ids = {node["id"] for node in nodes}
+        edges = [
+            {
+                key: edge[key]
+                for key in ("source", "target", "kind", "source_path", "input_name")
+                if key in edge
+            }
+            for edge in result["edges"]
+            if edge["source"] in node_ids and edge["target"] in node_ids
+        ]
+        edges.sort(
+            key=lambda edge: (
+                edge["source"],
+                edge["target"],
+                edge["kind"],
+                edge.get("source_path", ""),
+                edge.get("input_name", ""),
+            )
+        )
+        return {"nodes": nodes, "edges": edges, "pins": []}
+
     def test_workspace_root_members_and_local_dependencies_are_complete(self) -> None:
         result, transport = self.build_workspace()
         record = result["repositories"][0]
@@ -75,10 +109,10 @@ class WorkspaceInventoryTests(InventoryTestCase):
         self.assertEqual(
             [item["path"] for item in record["manifests"]],
             [
-                ".zpkg.toml",
                 "apps/cli/.zpkg.toml",
                 "packages/core/.zpkg.toml",
                 "packages/utils/.zpkg.toml",
+                ".zpkg.toml",
             ],
         )
         self.assertEqual(len(record["zed_workspace_members"]), 3)
@@ -98,7 +132,9 @@ class WorkspaceInventoryTests(InventoryTestCase):
         core_id = package_id("workspace-core")
         utils_id = package_id("workspace-utils")
         cli_id = package_id("workspace-cli")
-        self.assertEqual(result["package_roots"]["acme/app"], root_id)
+        root_node = next(node for node in result["nodes"] if node["id"] == root_id)
+        self.assertEqual(root_node["repository"], "acme/app")
+        self.assertEqual(root_node["zed_manifest_path"], ".zpkg.toml")
 
         memberships = [
             edge for edge in result["edges"] if edge["kind"] == "zed-workspace-member"
@@ -132,7 +168,7 @@ class WorkspaceInventoryTests(InventoryTestCase):
                 {"1111111111111111111111111111111111111111"},
             )
 
-    def test_workspace_rendering_is_deterministic_in_all_formats(self) -> None:
+    def test_workspace_rendering_matches_checked_in_goldens(self) -> None:
         first, _ = self.build_workspace()
         document = self.workspace_fixture()
         files = document["repositories"]["acme/app"]["files"]
@@ -141,10 +177,27 @@ class WorkspaceInventoryTests(InventoryTestCase):
         )
         second, _ = self.build_workspace(document)
         self.assertEqual(first, second)
-        for output_format in ("json", "dot", "mermaid"):
+
+        first_projection = self.workspace_render_projection(first)
+        second_projection = self.workspace_render_projection(second)
+        self.assertEqual(first_projection, second_projection)
+
+        goldens = {
+            "json": GOLDEN / "workspace-inventory.json",
+            "dot": GOLDEN / "workspace-inventory.dot",
+            "mermaid": GOLDEN / "workspace-inventory.mmd",
+        }
+        for output_format, golden_path in goldens.items():
+            expected = golden_path.read_text(encoding="utf-8")
             self.assertEqual(
-                inventory.render_inventory(first, output_format),
-                inventory.render_inventory(second, output_format),
+                inventory.render_inventory(first_projection, output_format),
+                expected,
+                f"{output_format} workspace golden drifted",
+            )
+            self.assertEqual(
+                inventory.render_inventory(second_projection, output_format),
+                expected,
+                f"{output_format} workspace rendering depends on acquisition order",
             )
 
     def assert_workspace_failure(self, document: dict[str, object], text: str) -> None:
@@ -202,11 +255,23 @@ class WorkspaceInventoryTests(InventoryTestCase):
 
     def test_workspace_depth_limit_is_fail_closed(self) -> None:
         document = self.workspace_fixture()
-        limits = inventory.Limits(max_json_depth=0)
-        result, _ = self.build_workspace(document, limits=limits)
-        record = result["repositories"][0]
-        self.assertEqual(record["status"], "failed")
-        self.assertIn("workspace nesting exceeded", record["failure_message"])
+        files = document["repositories"]["acme/app"]["files"]
+        files["packages/core/.zpkg.toml"] = CORE_MANIFEST + '''
+
+[workspace]
+members = ["nested"]
+'''
+        files["packages/core/nested/.zpkg.toml"] = '''
+[package]
+name = "workspace-core-nested"
+version = "0.1.0"
+'''
+        limits = inventory.Limits(max_json_depth=1)
+        with self.assertRaisesRegex(
+            inventory.LimitError,
+            "workspace nesting exceeded",
+        ):
+            self.build_workspace(document, limits=limits)
 
 
 if __name__ == "__main__":
