@@ -253,11 +253,23 @@ class WorkspaceInventoryTests(InventoryTestCase):
 
     def test_workspace_depth_limit_is_fail_closed(self) -> None:
         document = self.workspace_fixture()
-        limits = inventory.Limits(max_json_depth=0)
-        result, _ = self.build_workspace(document, limits=limits)
-        record = result["repositories"][0]
-        self.assertEqual(record["status"], "failed")
-        self.assertIn("workspace nesting exceeded", record["failure_message"])
+        files = document["repositories"]["acme/app"]["files"]
+        files["packages/core/.zpkg.toml"] = CORE_MANIFEST + '''
+
+[workspace]
+members = ["nested"]
+'''
+        files["packages/core/nested/.zpkg.toml"] = '''
+[package]
+name = "workspace-core-nested"
+version = "0.1.0"
+'''
+        limits = inventory.Limits(max_json_depth=1)
+        with self.assertRaisesRegex(
+            inventory.LimitError,
+            "workspace nesting exceeded",
+        ):
+            self.build_workspace(document, limits=limits)
 
 
 if __name__ == "__main__":
