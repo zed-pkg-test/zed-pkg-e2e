@@ -1,0 +1,141 @@
+name: versioned circular dependency acceptance
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/versioned-circular-dependency.yml"
+      - "scripts/versioned-circular-dependency.sh"
+      - "pins/den-3488.json"
+      - "docs/versioned-circular-dependency-canary.md"
+  push:
+    branches:
+      - main
+      - feat/den-3488-versioned-cycle-e2e
+    paths:
+      - ".github/workflows/versioned-circular-dependency.yml"
+      - "scripts/versioned-circular-dependency.sh"
+      - "pins/den-3488.json"
+      - "docs/versioned-circular-dependency-canary.md"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: versioned-cycle-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  preflight:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      ready: ${{ steps.pin.outputs.ready }}
+      zed_cli_sha: ${{ steps.pin.outputs.zed_cli_sha }}
+    steps:
+      - name: Check out acceptance harness
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+          show-progress: false
+      - name: Validate shell and immutable source pin
+        id: pin
+        run: |
+          set -euo pipefail
+          bash -n scripts/versioned-circular-dependency.sh
+          python3 - <<'PY' >> "$GITHUB_OUTPUT"
+          import json
+          import re
+
+          pin = json.load(open("pins/den-3488.json"))
+          sha = pin["zed-pkg/zed-cli"]
+          if re.fullmatch(r"[0-9a-f]{40}", sha) is None:
+              raise SystemExit("DEN-3488 zed-cli pin must be a full lowercase commit SHA")
+          print(f"ready={str(bool(pin['ready'])).lower()}")
+          print(f"zed_cli_sha={sha}")
+          PY
+      - name: Explain staged product validation
+        if: steps.pin.outputs.ready != 'true'
+        run: |
+          echo "The harness is valid; product execution remains staged until the tested repair SHA is pinned."
+
+  exact-cycle:
+    needs: preflight
+    if: needs.preflight.outputs.ready == 'true'
+    name: public executable / ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-15]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    env:
+      CARGO_TERM_COLOR: always
+      RUST_BACKTRACE: "1"
+    steps:
+      - name: Check out acceptance harness
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: harness
+          persist-credentials: false
+          fetch-depth: 1
+          show-progress: false
+      - name: Check out exact zed-cli implementation
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: zed-pkg/zed-cli
+          ref: ${{ needs.preflight.outputs.zed_cli_sha }}
+          path: zed-cli
+          persist-credentials: false
+          fetch-depth: 1
+          show-progress: false
+      - name: Verify immutable product checkout
+        run: |
+          set -euo pipefail
+          test "$(git -C zed-cli rev-parse HEAD)" = "${{ needs.preflight.outputs.zed_cli_sha }}"
+      - name: Install Rust toolchain
+        run: |
+          set -euo pipefail
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+          rustc --version --verbose
+          cargo --version --verbose
+      - name: Build the exact release binary
+        run: |
+          set -euo pipefail
+          cargo build --locked --release \
+            --manifest-path zed-cli/Cargo.toml \
+            --bin zed
+          test -x zed-cli/target/release/zed
+          zed-cli/target/release/zed --version
+      - name: Run independent public-CLI cycle canary
+        run: |
+          set -o pipefail
+          bash harness/scripts/versioned-circular-dependency.sh \
+            "$GITHUB_WORKSPACE/zed-cli/target/release/zed" \
+            "$RUNNER_TEMP/den-3488-cycle" \
+            2>&1 | tee "$RUNNER_TEMP/den-3488-cycle.log"
+      - name: Re-run product executable regressions at the same SHA
+        run: |
+          cargo test --locked \
+            --manifest-path zed-cli/Cargo.toml \
+            --test versioned_dependency_cycles \
+            -- --nocapture
+      - name: Upload bounded failure diagnostics
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: den-3488-cycle-${{ matrix.os }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/den-3488-cycle.log
+            ${{ runner.temp }}/den-3488-cycle/first.log
+            ${{ runner.temp }}/den-3488-cycle/second.log
+            ${{ runner.temp }}/den-3488-cycle/copy.stderr
+            ${{ runner.temp }}/den-3488-cycle/plan.json
+          if-no-files-found: warn
+          retention-days: 7
+          include-hidden-files: true
