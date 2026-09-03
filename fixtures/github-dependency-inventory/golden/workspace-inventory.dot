@@ -1,0 +1,14 @@
+digraph zpkg_github_dependency_inventory {
+  graph [rankdir="LR"];
+  node [shape="box"];
+  n_125f180792aab3e52804 [label="acme/workspace-cli@0.1.0", tooltip="package"];
+  n_27b3cf4ff18c08b9c34b [label="acme/workspace-core@0.1.0", tooltip="package"];
+  n_2bd7ac034ca2e23294cb [label="acme/workspace-monorepo@0.1.0", tooltip="package"];
+  n_bb7e39bd0a78213d0536 [label="acme/workspace-utils@0.1.0", tooltip="package"];
+  n_125f180792aab3e52804 -> n_27b3cf4ff18c08b9c34b [label="zed-declared"];
+  n_125f180792aab3e52804 -> n_bb7e39bd0a78213d0536 [label="zed-declared"];
+  n_2bd7ac034ca2e23294cb -> n_125f180792aab3e52804 [label="zed-workspace-member"];
+  n_2bd7ac034ca2e23294cb -> n_27b3cf4ff18c08b9c34b [label="zed-workspace-member"];
+  n_2bd7ac034ca2e23294cb -> n_bb7e39bd0a78213d0536 [label="zed-workspace-member"];
+  n_bb7e39bd0a78213d0536 -> n_27b3cf4ff18c08b9c34b [label="zed-declared"];
+}
