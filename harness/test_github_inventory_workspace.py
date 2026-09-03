@@ -68,6 +68,40 @@ class WorkspaceInventoryTests(InventoryTestCase):
             limits=limits,
         )
 
+    @staticmethod
+    def workspace_render_projection(result: dict[str, object]) -> dict[str, object]:
+        nodes = [
+            {
+                "id": node["id"],
+                "kind": node["kind"],
+                "label": node["label"],
+            }
+            for node in result["nodes"]
+            if node.get("repository") == "acme/app"
+            and node.get("zed_manifest_path")
+        ]
+        nodes.sort(key=lambda node: node["id"])
+        node_ids = {node["id"] for node in nodes}
+        edges = [
+            {
+                key: edge[key]
+                for key in ("source", "target", "kind", "source_path", "input_name")
+                if key in edge
+            }
+            for edge in result["edges"]
+            if edge["source"] in node_ids and edge["target"] in node_ids
+        ]
+        edges.sort(
+            key=lambda edge: (
+                edge["source"],
+                edge["target"],
+                edge["kind"],
+                edge.get("source_path", ""),
+                edge.get("input_name", ""),
+            )
+        )
+        return {"nodes": nodes, "edges": edges, "pins": []}
+
     def test_workspace_root_members_and_local_dependencies_are_complete(self) -> None:
         result, transport = self.build_workspace()
         record = result["repositories"][0]
@@ -132,7 +166,7 @@ class WorkspaceInventoryTests(InventoryTestCase):
                 {"1111111111111111111111111111111111111111"},
             )
 
-    def test_workspace_rendering_is_deterministic_in_all_formats(self) -> None:
+    def test_workspace_rendering_matches_checked_in_goldens(self) -> None:
         first, _ = self.build_workspace()
         document = self.workspace_fixture()
         files = document["repositories"]["acme/app"]["files"]
@@ -141,10 +175,27 @@ class WorkspaceInventoryTests(InventoryTestCase):
         )
         second, _ = self.build_workspace(document)
         self.assertEqual(first, second)
-        for output_format in ("json", "dot", "mermaid"):
+
+        first_projection = self.workspace_render_projection(first)
+        second_projection = self.workspace_render_projection(second)
+        self.assertEqual(first_projection, second_projection)
+
+        goldens = {
+            "json": GOLDEN / "workspace-inventory.json",
+            "dot": GOLDEN / "workspace-inventory.dot",
+            "mermaid": GOLDEN / "workspace-inventory.mmd",
+        }
+        for output_format, golden_path in goldens.items():
+            expected = golden_path.read_text(encoding="utf-8")
             self.assertEqual(
-                inventory.render_inventory(first, output_format),
-                inventory.render_inventory(second, output_format),
+                inventory.render_inventory(first_projection, output_format),
+                expected,
+                f"{output_format} workspace golden drifted",
+            )
+            self.assertEqual(
+                inventory.render_inventory(second_projection, output_format),
+                expected,
+                f"{output_format} workspace rendering depends on acquisition order",
             )
 
     def assert_workspace_failure(self, document: dict[str, object], text: str) -> None:
