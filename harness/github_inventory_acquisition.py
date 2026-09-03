@@ -230,7 +230,10 @@ class InventoryAcquisitionMixin:
                 ]
 
             if ".zpkg.toml" in blobs:
-                self._parse_zed_manifests(blobs, workspace_declarations)
+                if workspace_declarations:
+                    self._parse_zed_manifests(blobs, workspace_declarations)
+                else:
+                    self._parse_zed_manifest(blobs[".zpkg.toml"])
             if ".zpkg.lock" in blobs:
                 self._parse_zed_lock(blobs[".zpkg.lock"])
             gitmodules = blobs.get(".gitmodules")
