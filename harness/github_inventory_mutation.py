@@ -120,6 +120,10 @@ class InventoryMutationMixin:
         if path:
             item["path"] = path
         self.failures.append(item)
+        record = self.repository_records.get(repository)
+        if record is not None:
+            record["failure_code"] = code
+            record["failure_message"] = message
 
     def _source_failure(
         self,
