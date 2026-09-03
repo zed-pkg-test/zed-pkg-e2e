@@ -109,10 +109,10 @@ class WorkspaceInventoryTests(InventoryTestCase):
         self.assertEqual(
             [item["path"] for item in record["manifests"]],
             [
-                ".zpkg.toml",
                 "apps/cli/.zpkg.toml",
                 "packages/core/.zpkg.toml",
                 "packages/utils/.zpkg.toml",
+                ".zpkg.toml",
             ],
         )
         self.assertEqual(len(record["zed_workspace_members"]), 3)
