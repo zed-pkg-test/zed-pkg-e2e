@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "ready": false,
-  "zed-pkg/zed-cli": "1f5594c162a2a31af59271b7ae6ffd49f9911260",
-  "note": "Set ready=true only after the exact-graph repair commit passes its in-repository gates."
+  "ready": true,
+  "zed-pkg/zed-cli": "ebe42c6385aacdbfe3d37d17a253e900db1bc8a1",
+  "note": "Immutable product head for zed-pkg/zed-cli#315."
 }
