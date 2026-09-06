@@ -39,7 +39,7 @@ defaults:
 
 env:
   CANARY_CONFIG: config/public-edge-fallback-canaries.json
-  ZED_CLI_REF: c122d3b53f4d0a0021e60928e000132d33ea2c72
+  ZED_CLI_REF: 5d0cbc0609703e7516e2185ea3c1749c9feda482
 
 jobs:
   edge-matrix:
