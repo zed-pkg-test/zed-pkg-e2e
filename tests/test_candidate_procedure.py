@@ -46,6 +46,10 @@ jobs:
           ref: ${{{{ matrix.fixture.ref }}}}
           persist-credentials: false
       - run: |
+          test -f zed-cli/rust-toolchain.toml
+          toolchain="1.98.1"
+          rustup toolchain install "$toolchain" --profile minimal --component rustfmt
+          rustup default "$toolchain"
           python3 scripts/candidate_lifecycle.py --fixture-refs-json "$FIXTURE_REFS"
           sha256sum --check SHA256SUMS
 '''
@@ -110,6 +114,16 @@ class WorkflowPolicyTests(unittest.TestCase):
             procedure_contract.audit_workflow(
                 VALID_WORKFLOW.replace('re.fullmatch(r"[0-9a-f]{40}", ref)', "pass")
             )
+
+    def test_hardcoded_stable_toolchain_install_is_rejected(self) -> None:
+        with self.assertRaisesRegex(procedure_contract.ContractViolation, "moving stable"):
+            procedure_contract.audit_workflow(
+                VALID_WORKFLOW + "\nrustup toolchain install stable --profile minimal\n"
+            )
+
+    def test_hardcoded_stable_default_is_rejected(self) -> None:
+        with self.assertRaisesRegex(procedure_contract.ContractViolation, "moving stable"):
+            procedure_contract.audit_workflow(VALID_WORKFLOW + "\nrustup default stable\n")
 
 
 class WrapperAndDocumentationTests(unittest.TestCase):
