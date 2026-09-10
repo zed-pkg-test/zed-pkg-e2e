@@ -15,6 +15,13 @@ for an unmerged `zed-pkg/zed-cli` commit. A caller supplies:
 - the exact 40-character `zed-pkg-e2e` harness commit; and
 - a JSON matrix of fixture repositories pinned to exact commits.
 
+The candidate and harness identities are independent. The checked-in
+`.zed-cli-ref` owns the default candidate used by direct and pull-request runs
+of the harness repository. A reusable caller may provide a different exact
+candidate commit while still pinning the reviewed harness commit; the contract
+validates both identities without requiring the explicit candidate to equal the
+default baseline.
+
 The workflow builds the candidate once, checks its checksum in every matrix
 job, and runs the existing stateless lifecycle contract against representative
 libraries, applications, polyglot targets, workspaces, multi-version packages,
@@ -60,7 +67,8 @@ jobs:
 
 Do not call a mutable branch or tag. The workflow receives no secrets and
 declares only read access to repository contents, so pull-request code cannot
-inherit publication credentials.
+inherit publication credentials. The contract job checks out the harness at
+`harness_ref`; it does not rely on the reusable-workflow caller checkout.
 
 ## Initial candidate rollout
 
@@ -92,9 +100,13 @@ and the explicitly checked-out sibling both use
 `8428bc574111fa148e590c8350c7855035ce2046`, which contains the canonical
 whole-repository target identity contract. Keeping those two interface pins
 identical prevents the test harness from compiling one contract while
-reporting evidence for another. The candidate smoke workflow uses the same
-product pair and rejects drift from `.zed-cli-ref` before it builds or runs any
-fixture.
+reporting evidence for another.
+
+The candidate smoke workflow retains that product pair as its default baseline
+and verifies `.zed-cli-ref` against the declared default before it builds or
+runs any fixture. A reusable caller's explicit `zed_cli_ref` is separately
+validated as an immutable 40-character commit and may intentionally differ from
+the default baseline.
 
 Record the smoke workflow run and any later lifecycle, browser, and
 install-boundary runs on the owning Linear issue. A smoke failure must be
