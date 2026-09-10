@@ -76,11 +76,22 @@ def audit_workflow(text: str) -> None:
             "${{ env.HARNESS_REF }}",
             "${{ env.ZED_CLI_REF }}",
             "${{ env.ZED_INTERFACES_REF }}",
+            "zed-cli/rust-toolchain.toml",
+            'rustup toolchain install "$toolchain"',
+            'rustup default "$toolchain"',
             "scripts/candidate_lifecycle.py",
             "--fixture-refs-json",
             "sha256sum --check SHA256SUMS",
         ),
         "candidate workflow",
+    )
+    require(
+        "rustup toolchain install stable" not in text,
+        "candidate workflow must not bypass rust-toolchain.toml with moving stable",
+    )
+    require(
+        "rustup default stable" not in text,
+        "candidate workflow must not select moving stable independently of the candidate",
     )
 
 
