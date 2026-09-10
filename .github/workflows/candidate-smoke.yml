@@ -14,6 +14,11 @@ on:
         required: false
         default: d8763b8dcc3bd5c5b6b4b1d13519065a6a2cb99a
         type: string
+      zed_interfaces_ref:
+        description: Exact 40-character zed-pkg/zed-interfaces commit locked by the CLI candidate
+        required: false
+        default: 8428bc574111fa148e590c8350c7855035ce2046
+        type: string
       harness_ref:
         description: Exact 40-character zed-pkg-test/zed-pkg-e2e commit
         required: false
@@ -28,6 +33,10 @@ on:
     inputs:
       zed_cli_ref:
         description: Exact 40-character zed-pkg/zed-cli commit to test
+        required: true
+        type: string
+      zed_interfaces_ref:
+        description: Exact 40-character zed-pkg/zed-interfaces commit locked by the CLI candidate
         required: true
         type: string
       harness_ref:
@@ -58,7 +67,7 @@ env:
   ZED_CLI_DEFAULT_REF: d8763b8dcc3bd5c5b6b4b1d13519065a6a2cb99a
   ZED_CLI_REF: ${{ inputs.zed_cli_ref || 'd8763b8dcc3bd5c5b6b4b1d13519065a6a2cb99a' }}
   HARNESS_REF: ${{ inputs.harness_ref || github.event.pull_request.head.sha || github.sha }}
-  ZED_INTERFACES_REF: 8428bc574111fa148e590c8350c7855035ce2046
+  ZED_INTERFACES_REF: ${{ inputs.zed_interfaces_ref || '8428bc574111fa148e590c8350c7855035ce2046' }}
 
 jobs:
   contract:
