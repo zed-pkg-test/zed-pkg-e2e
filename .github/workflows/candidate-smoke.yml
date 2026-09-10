@@ -172,11 +172,26 @@ jobs:
           persist-credentials: false
           show-progress: false
 
-      - name: Install declared Rust toolchain
+      - name: Install candidate-declared Rust toolchain
         run: |
           set -euo pipefail
-          rustup toolchain install stable --profile minimal --component rustfmt
-          rustup default stable
+          toolchain="$(python3 - <<'PY'
+          import pathlib
+          import tomllib
+
+          path = pathlib.Path("zed-cli/rust-toolchain.toml")
+          data = tomllib.loads(path.read_text(encoding="utf-8"))
+          channel = data.get("toolchain", {}).get("channel")
+          if not isinstance(channel, str) or not channel.strip():
+              raise SystemExit("zed-cli/rust-toolchain.toml must declare toolchain.channel")
+          print(channel.strip())
+          PY
+          )"
+          rustup toolchain install "$toolchain" --profile minimal --component rustfmt
+          rustup default "$toolchain"
+          if [[ "$toolchain" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            test "$(rustc --version | awk '{print $2}')" = "$toolchain"
+          fi
           rustc --version --verbose
           cargo --version --verbose
 
