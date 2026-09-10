@@ -12,6 +12,7 @@ to the independent `zed-pkg` package manager. Production repositories remain in
 for an unmerged `zed-pkg/zed-cli` commit. A caller supplies:
 
 - the exact 40-character `zed-cli` commit;
+- the exact 40-character `zed-interfaces` commit locked by that CLI candidate;
 - the exact 40-character `zed-pkg-e2e` harness commit; and
 - a JSON matrix of fixture repositories pinned to exact commits.
 
@@ -21,6 +22,12 @@ of the harness repository. A reusable caller may provide a different exact
 candidate commit while still pinning the reviewed harness commit; the contract
 validates both identities without requiring the explicit candidate to equal the
 default baseline.
+
+The candidate and interface revisions form one explicit product tuple. The
+workflow checks out the supplied interface commit and then verifies that the
+candidate's `Cargo.toml` and `Cargo.lock` both name that exact revision. A stale
+caller pin therefore fails before compilation instead of compiling or reporting
+evidence against a different contract package.
 
 The workflow builds the candidate once, checks its checksum in every matrix
 job, and runs the existing stateless lifecycle contract against representative
@@ -54,7 +61,8 @@ failure-classification rules live in the Linear document
 
 ## Reusable caller
 
-A production repository should pin the reusable workflow itself by commit:
+A production repository should pin the reusable workflow itself by commit and
+pass the candidate's exact locked interface revision:
 
 ```yaml
 jobs:
@@ -62,6 +70,7 @@ jobs:
     uses: zed-pkg-test/zed-pkg-e2e/.github/workflows/candidate-smoke.yml@<exact-harness-sha>
     with:
       zed_cli_ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      zed_interfaces_ref: <exact-zed-interfaces-sha-from-candidate-cargo>
       harness_ref: <exact-harness-sha>
 ```
 
@@ -106,7 +115,8 @@ The candidate smoke workflow retains that product pair as its default baseline
 and verifies `.zed-cli-ref` against the declared default before it builds or
 runs any fixture. A reusable caller's explicit `zed_cli_ref` is separately
 validated as an immutable 40-character commit and may intentionally differ from
-the default baseline.
+the default baseline. Its explicit `zed_interfaces_ref` must match that
+candidate's immutable Cargo manifest and lockfile.
 
 Record the smoke workflow run and any later lifecycle, browser, and
 install-boundary runs on the owning Linear issue. A smoke failure must be
