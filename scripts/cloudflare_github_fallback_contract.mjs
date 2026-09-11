@@ -2,6 +2,7 @@
 
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
+import fs from 'node:fs';
 import path from 'node:path';
 import process from 'node:process';
 import { pathToFileURL } from 'node:url';
@@ -19,6 +20,30 @@ function parseArgs(argv) {
   const infraRoot = args.get('infra-root');
   if (!infraRoot) throw new Error('--infra-root is required');
   return { infraRoot: path.resolve(infraRoot) };
+}
+
+function attestCloudflareConfig(infraRoot) {
+  const wranglerPath = path.join(infraRoot, 'workers', 'cdn-proxy', 'wrangler.toml');
+  const wrangler = fs.readFileSync(wranglerPath, 'utf8');
+  assert.match(wrangler, /^name = "zpkg-cdn"$/m);
+  assert.match(wrangler, /^main = "src\/index\.js"$/m);
+  assert.match(wrangler, /^REGISTRY_URL = "https:\/\/registry\.zpkg\.net"$/m);
+  assert.match(
+    wrangler,
+    /\[\[r2_buckets\]\][\s\S]*?binding = "ARTIFACTS"[\s\S]*?bucket_name = "zed-pkg-artifacts"/,
+    'production CDN Worker must bind the owned ARTIFACTS R2 bucket',
+  );
+  assert.match(
+    wrangler,
+    /\[\[routes\]\][\s\S]*?pattern = "cdn\.zpkg\.net\/\*"[\s\S]*?zone_name = "zpkg\.net"/,
+    'production CDN Worker must intercept the cdn.zpkg.net zone route',
+  );
+  return {
+    worker_name: 'zpkg-cdn',
+    route: 'cdn.zpkg.net/*',
+    r2_binding: 'ARTIFACTS',
+    r2_bucket: 'zed-pkg-artifacts',
+  };
 }
 
 function fakeR2(objects, reads) {
@@ -85,6 +110,7 @@ async function responseBytes(response) {
 
 async function run() {
   const { infraRoot } = parseArgs(process.argv.slice(2));
+  const cloudflareConfig = attestCloudflareConfig(infraRoot);
   const workerPath = path.join(infraRoot, 'workers', 'cdn-proxy', 'src', 'index.js');
   const workerUrl = `${pathToFileURL(workerPath).href}?contract=${Date.now()}`;
   const { default: worker } = await import(workerUrl);
@@ -159,6 +185,7 @@ async function run() {
         {
           ok: true,
           order: ['owned-registry', 'cloudflare-r2', 'cloudflare-github-proxy'],
+          cloudflare_config: cloudflareConfig,
           content_path: contentPath,
           github_path: githubPath,
           r2_source: r2Response.headers.get('x-zed-source'),
