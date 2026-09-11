@@ -34,18 +34,22 @@ and network adapters. It proves:
 ## Black-box CLI canary
 
 `scripts/github_r2_fallback.py` publishes a disposable package through a `file://`
-registry, creates a frozen lock, and then points the CLI at a closed loopback
-registry port. The canary performs two clean installs against a loopback stand-in
-for `cdn.zpkg.net`:
+registry, creates a frozen lock, and performs three clean installs while recording
+the actual HTTP paths requested by the CLI:
 
-1. with `artifacts/{sha256}.tar.gz` present, the first request must be the
-   content-addressed object and the `/github/*` route must not be touched;
-2. after removing the digest object and using a fresh Zed home, the observed request
-   prefix must be `artifacts/{sha256}.tar.gz` followed by
+1. a healthy loopback stand-in for the owned registry serves
+   `/v1/artifacts/{sha256}`; the canary requires that path first and requires zero
+   CDN requests;
+2. with the registry unavailable and `artifacts/{sha256}.tar.gz` present in the CDN
+   stand-in, the content-addressed R2 path must be first and `/github/*` must not be
+   touched;
+3. after removing the digest object and using a fresh Zed home, the observed CDN
+   request prefix must be `artifacts/{sha256}.tar.gz` followed by
    `github/{owner}/{repo}/{tag}/{filename}`.
 
-Both installs verify the packed payload and digest. The canary also round-trips the
-`get_version` JSON call/receipt frame over TCP NDJSON using the same key as
+All three installs verify the packed payload, and the artifact digest is checked
+against the frozen metadata. The canary also round-trips the `get_version` JSON
+call/receipt frame over TCP NDJSON using the same key as
 `zed-interfaces/route-maps/zed-api.route-map.json`, and compares generated
 TypeScript route contracts between `zed-interfaces` and `zed-clients` when those
 files are supplied.
