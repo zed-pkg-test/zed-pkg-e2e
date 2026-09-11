@@ -1,10 +1,11 @@
-name: GitHub R2 fallback and typed RPC canary
+name: Cloudflare R2-first and GitHub fallback canary
 
 on:
   pull_request:
     paths:
       - ".github/workflows/github-r2-fallback.yml"
       - "scripts/github_r2_fallback.py"
+      - "scripts/cloudflare_github_fallback_contract.mjs"
       - "docs/github-r2-fallback-canary.md"
   workflow_dispatch:
     inputs:
@@ -16,6 +17,11 @@ on:
         description: Exact 40-character zed-pkg/zed-interfaces commit
         required: false
         type: string
+      zed_infra_ref:
+        description: Exact 40-character zed-pkg/zed-infra commit
+        required: false
+        type: string
+        default: "2150c08b94ae64bb6a30ef7d2465462b6d65cd48"
   workflow_call:
     inputs:
       zed_cli_ref:
@@ -26,6 +32,11 @@ on:
         description: Exact 40-character zed-pkg/zed-interfaces commit
         required: true
         type: string
+      zed_infra_ref:
+        description: Exact 40-character zed-pkg/zed-infra commit
+        required: false
+        type: string
+        default: "2150c08b94ae64bb6a30ef7d2465462b6d65cd48"
 
 permissions:
   contents: read
@@ -41,13 +52,14 @@ defaults:
 env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: "1"
+  DEFAULT_ZED_INFRA_REF: "2150c08b94ae64bb6a30ef7d2465462b6d65cd48"
 
 jobs:
-  syntax:
-    name: Canary script compiles
+  contract:
+    name: Exact Cloudflare Worker fallback contract
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-24.04
-    timeout-minutes: 5
+    timeout-minutes: 10
     steps:
       - name: Check out harness
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -55,11 +67,35 @@ jobs:
           fetch-depth: 1
           persist-credentials: false
           show-progress: false
-      - name: py_compile
-        run: python3 -m py_compile scripts/github_r2_fallback.py
+
+      - name: Check out exact zed-infra Worker
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: zed-pkg/zed-infra
+          ref: ${{ env.DEFAULT_ZED_INFRA_REF }}
+          path: product/zed-infra
+          fetch-depth: 1
+          persist-credentials: false
+          show-progress: false
+
+      - name: Install Node.js
+        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v6.0.0
+        with:
+          node-version: "22"
+
+      - name: Verify immutable Worker identity
+        run: test "$(git -C product/zed-infra rev-parse HEAD)" = "$DEFAULT_ZED_INFRA_REF"
+
+      - name: Compile harnesses and execute the real Worker
+        run: |
+          set -euo pipefail
+          python3 -m py_compile scripts/github_r2_fallback.py
+          node --check scripts/cloudflare_github_fallback_contract.mjs
+          node scripts/cloudflare_github_fallback_contract.mjs \
+            --infra-root product/zed-infra
 
   canary:
-    name: Registry-down CDN install
+    name: Registry-down R2-first install with Cloudflare GitHub proxy
     if: github.event_name != 'pull_request'
     runs-on: ubuntu-24.04
     timeout-minutes: 45
@@ -76,10 +112,12 @@ jobs:
         env:
           CLI_IN: ${{ inputs.zed_cli_ref || '' }}
           INTERFACES_IN: ${{ inputs.zed_interfaces_ref || '' }}
+          INFRA_IN: ${{ inputs.zed_infra_ref || '' }}
         run: |
           set -euo pipefail
           cli="${CLI_IN:-}"
           interfaces="${INTERFACES_IN:-}"
+          infra="${INFRA_IN:-$DEFAULT_ZED_INFRA_REF}"
           if [[ -z "$cli" ]]; then
             echo "zed_cli_ref is required (workflow_call or workflow_dispatch)" >&2
             exit 1
@@ -90,8 +128,10 @@ jobs:
           fi
           [[ "$cli" =~ ^[0-9a-f]{40}$ ]]
           [[ "$interfaces" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$infra" =~ ^[0-9a-f]{40}$ ]]
           printf 'cli=%s\n' "$cli" >> "$GITHUB_OUTPUT"
           printf 'interfaces=%s\n' "$interfaces" >> "$GITHUB_OUTPUT"
+          printf 'infra=%s\n' "$infra" >> "$GITHUB_OUTPUT"
 
       - name: Check out exact zed-cli candidate
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -109,6 +149,16 @@ jobs:
           repository: zed-pkg/zed-interfaces
           ref: ${{ steps.pins.outputs.interfaces }}
           path: product/zed-interfaces
+          fetch-depth: 1
+          persist-credentials: false
+          show-progress: false
+
+      - name: Check out exact zed-infra Worker
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: zed-pkg/zed-infra
+          ref: ${{ steps.pins.outputs.infra }}
+          path: product/zed-infra
           fetch-depth: 1
           persist-credentials: false
           show-progress: false
@@ -136,6 +186,7 @@ jobs:
           set -euo pipefail
           test "$(git -C product/zed-cli rev-parse HEAD)" = "${{ steps.pins.outputs.cli }}"
           test "$(git -C product/zed-interfaces rev-parse HEAD)" = "${{ steps.pins.outputs.interfaces }}"
+          test "$(git -C product/zed-infra rev-parse HEAD)" = "${{ steps.pins.outputs.infra }}"
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30
@@ -148,10 +199,18 @@ jobs:
         with:
           node-version: "22"
 
+      - name: Cloudflare R2 and GitHub proxy contract
+        run: |
+          set -euo pipefail
+          node --check scripts/cloudflare_github_fallback_contract.mjs
+          node scripts/cloudflare_github_fallback_contract.mjs \
+            --infra-root product/zed-infra
+
       - name: Contract tests (interfaces, clients, lib-core)
         run: |
           set -euo pipefail
           cargo test --manifest-path product/zed-interfaces/src/rust/Cargo.toml --lib zed_api
+          cargo test --manifest-path product/zed-interfaces/src/rust/Cargo.toml --lib locators_try_registry_then_r2_then_github
           cargo test --manifest-path product/zed-lib-core/src/rust-orm/Cargo.toml \
             --features read-write \
             publication::tests::canonical_artifact_key_is_content_addressed
@@ -165,7 +224,7 @@ jobs:
           install -Dm755 product/zed-cli/target/release/zed "$RUNNER_TEMP/zed-bin/zed"
           "$RUNNER_TEMP/zed-bin/zed" --version
 
-      - name: Run registry-down CDN canary
+      - name: Run registry-down R2-first and GitHub-proxy canary
         run: |
           set -euo pipefail
           python3 -m py_compile scripts/github_r2_fallback.py
