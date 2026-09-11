@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
-"""Black-box canary: registry down, public CDN still installs.
+"""Black-box canary: owned registry, R2, then Cloudflare GitHub proxy.
 
-Publishes a disposable package through a file:// registry, copies the packed
-tarball onto the guessable R2 keys (`packages/…` and `github/…`), takes the
-HTTP registry down, and proves `zed install --frozen` fetches from a loopback
-stand-in for `https://cdn.zpkg.net`. Also round-trips the oresoftware/api-docs
-JSON call/receipt frame for `get_version` over TCP NDJSON.
+Publishes a disposable package through a file:// registry, takes the HTTP
+registry down, and proves `zed install --frozen` first fetches the immutable
+content-addressed R2 object. A second clean install removes that object and
+proves the next request stays on the Cloudflare custom domain at `/github/*`.
+The exact Worker proxy behavior is independently exercised by the companion
+Node contract. The canary also round-trips the typed get_version TCP receipt.
 """
 
 from __future__ import annotations
@@ -149,10 +150,25 @@ adapter = "none"
     )
 
 
-def start_cdn(root: Path, port: int) -> http.server.ThreadingHTTPServer:
+def start_cdn(
+    root: Path, port: int
+) -> tuple[http.server.ThreadingHTTPServer, list[tuple[str, str]]]:
+    requests: list[tuple[str, str]] = []
+
     class BoundHandler(http.server.SimpleHTTPRequestHandler):
         def __init__(self, *args, **kwargs):
             super().__init__(*args, directory=str(root), **kwargs)
+
+        def _record(self) -> None:
+            requests.append((self.command, self.path.partition("?")[0]))
+
+        def do_GET(self) -> None:  # noqa: N802 — http.server hook
+            self._record()
+            super().do_GET()
+
+        def do_HEAD(self) -> None:  # noqa: N802 — http.server hook
+            self._record()
+            super().do_HEAD()
 
         def log_message(self, format: str, *args) -> None:  # noqa: A003
             print(f"cdn: {format % args}", flush=True)
@@ -160,7 +176,16 @@ def start_cdn(root: Path, port: int) -> http.server.ThreadingHTTPServer:
     server = http.server.ThreadingHTTPServer(("127.0.0.1", port), BoundHandler)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
-    return server
+    return server, requests
+
+
+def unique_request_paths(requests: Sequence[tuple[str, str]]) -> list[str]:
+    paths: list[str] = []
+    for _, path in requests:
+        if not paths or paths[-1] != path:
+            paths.append(path)
+    return paths
+
 
 
 class VersionRpcHandler(socketserver.StreamRequestHandler):
@@ -335,6 +360,7 @@ def main() -> int:
     publish_home = root / "publish-home"
     install_home = root / "install-home"
     fallback_home = root / "fallback-home"
+    github_fallback_home = root / "github-fallback-home"
     cdn_root = root / "cdn"
     cdn_root.mkdir()
 
@@ -385,7 +411,7 @@ def main() -> int:
     dead_port = free_port()
     cdn_port = free_port()
     tcp_port = free_port()
-    cdn = start_cdn(cdn_root, cdn_port)
+    cdn, cdn_requests = start_cdn(cdn_root, cdn_port)
     rpc = start_tcp_rpc(tcp_port)
     try:
         receipt = tcp_get_version(tcp_port)
@@ -396,36 +422,72 @@ def main() -> int:
 
         fallback_registry = f"http://127.0.0.1:{dead_port}"
         cdn_base = f"http://127.0.0.1:{cdn_port}"
-        run(
-            [
-                zed,
-                "--registry",
-                fallback_registry,
-                "--home",
-                fallback_home,
-                "--r2-public-base",
-                cdn_base,
-                "install",
-                "--frozen",
-                "--install-mode",
-                "copy",
-                "--adapter",
-                "none",
-                "--allow-ecosystem-mismatch",
-            ],
-            cwd=consumer,
-            extra_env={
-                "ZED_PKG_SOURCE_FALLBACK": "true",
-                "ZED_PKG_SOURCE_FALLBACK_ALLOW_LOOPBACK": "true",
-                "ZED_PKG_R2_PUBLIC_BASE": cdn_base,
-            },
-        )
+        content_path = f"/artifacts/{sha256}.tar.gz"
+        github_path = f"/github/{ORG}/{NAME}/{TAG}/{FILENAME}"
+
+        def install_from_fallback(home: Path) -> None:
+            run(
+                [
+                    zed,
+                    "--registry",
+                    fallback_registry,
+                    "--home",
+                    home,
+                    "--r2-public-base",
+                    cdn_base,
+                    "install",
+                    "--frozen",
+                    "--install-mode",
+                    "copy",
+                    "--adapter",
+                    "none",
+                    "--allow-ecosystem-mismatch",
+                ],
+                cwd=consumer,
+                extra_env={
+                    "ZED_PKG_SOURCE_FALLBACK": "true",
+                    "ZED_PKG_SOURCE_FALLBACK_ALLOW_LOOPBACK": "true",
+                    "ZED_PKG_R2_PUBLIC_BASE": cdn_base,
+                },
+            )
+
+        # Phase 1: the immutable content-addressed R2 object exists. It must
+        # win without touching the Cloudflare /github proxy path.
+        cdn_requests.clear()
+        install_from_fallback(fallback_home)
         restored = consumer / "zed_modules" / ORG / NAME / "src" / "payload.txt"
         if restored.read_text(encoding="utf-8") != "cdn-fallback\n":
-            raise AssertionError("CDN fallback did not restore the packed payload")
+            raise AssertionError("R2 fallback did not restore the packed payload")
+        r2_request_order = unique_request_paths(cdn_requests)
+        if not r2_request_order or r2_request_order[0] != content_path:
+            raise AssertionError(
+                f"content-addressed R2 must be first, saw {r2_request_order!r}"
+            )
+        if github_path in r2_request_order:
+            raise AssertionError(
+                "Cloudflare GitHub proxy was reached even though the R2 object existed"
+            )
+
         digest = hashlib.sha256(artifact.read_bytes()).hexdigest()
         if digest != sha256:
             raise AssertionError("packed artifact digest drifted")
+
+        # Phase 2: remove the R2 digest object. The next locator must stay on
+        # the Cloudflare custom domain and use its /github proxy route.
+        shutil.rmtree(consumer / "zed_modules")
+        content_copy.unlink()
+        cdn_requests.clear()
+        install_from_fallback(github_fallback_home)
+        restored = consumer / "zed_modules" / ORG / NAME / "src" / "payload.txt"
+        if restored.read_text(encoding="utf-8") != "cdn-fallback\n":
+            raise AssertionError("Cloudflare GitHub proxy did not restore the payload")
+        github_request_order = unique_request_paths(cdn_requests)
+        expected_prefix = [content_path, github_path]
+        if github_request_order[:2] != expected_prefix:
+            raise AssertionError(
+                "R2 miss must fall through to the Cloudflare /github proxy; "
+                f"expected {expected_prefix!r}, saw {github_request_order!r}"
+            )
         print(
             json.dumps(
                 {
@@ -434,6 +496,8 @@ def main() -> int:
                     "cdn": cdn_base,
                     "tcp_rpc": f"127.0.0.1:{tcp_port}",
                     "sha256": sha256,
+                    "r2_request_order": r2_request_order,
+                    "github_proxy_request_order": github_request_order,
                     "cdn_keys": [
                         f"packages/{ORG}/{NAME}/{VERSION}/{FILENAME}",
                         f"github/{ORG}/{NAME}/{TAG}/{FILENAME}",
