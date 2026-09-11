@@ -359,8 +359,10 @@ def main() -> int:
     consumer = root / "consumer"
     publish_home = root / "publish-home"
     install_home = root / "install-home"
+    owned_registry_home = root / "owned-registry-home"
     fallback_home = root / "fallback-home"
     github_fallback_home = root / "github-fallback-home"
+    owned_registry_root = root / "owned-registry-http"
     cdn_root = root / "cdn"
     cdn_root.mkdir()
 
@@ -385,6 +387,9 @@ def main() -> int:
     content_copy = cdn_root / "artifacts" / f"{sha256}.tar.gz"
     content_copy.parent.mkdir(parents=True, exist_ok=True)
     shutil.copy2(artifact, content_copy)
+    owned_artifact = owned_registry_root / "v1" / "artifacts" / sha256
+    owned_artifact.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(artifact, owned_artifact)
 
     zed_cmd(
         "install",
@@ -409,8 +414,12 @@ def main() -> int:
         raise AssertionError("uninstall left materialization behind")
 
     dead_port = free_port()
+    owned_registry_port = free_port()
     cdn_port = free_port()
     tcp_port = free_port()
+    owned_registry_server, owned_registry_requests = start_cdn(
+        owned_registry_root, owned_registry_port
+    )
     cdn, cdn_requests = start_cdn(cdn_root, cdn_port)
     rpc = start_tcp_rpc(tcp_port)
     try:
@@ -420,17 +429,19 @@ def main() -> int:
         if receipt["transport"] != "tcp":
             raise AssertionError(receipt)
 
+        owned_registry_base = f"http://127.0.0.1:{owned_registry_port}"
         fallback_registry = f"http://127.0.0.1:{dead_port}"
         cdn_base = f"http://127.0.0.1:{cdn_port}"
+        registry_artifact_path = f"/v1/artifacts/{sha256}"
         content_path = f"/artifacts/{sha256}.tar.gz"
         github_path = f"/github/{ORG}/{NAME}/{TAG}/{FILENAME}"
 
-        def install_from_fallback(home: Path) -> None:
+        def install_with_registry(home: Path, registry_base: str) -> None:
             run(
                 [
                     zed,
                     "--registry",
-                    fallback_registry,
+                    registry_base,
                     "--home",
                     home,
                     "--r2-public-base",
@@ -451,10 +462,32 @@ def main() -> int:
                 },
             )
 
-        # Phase 1: the immutable content-addressed R2 object exists. It must
-        # win without touching the Cloudflare /github proxy path.
+        # Phase 0: a healthy owned registry must serve the digest and
+        # prevent any request from reaching the CDN or GitHub.
+        owned_registry_requests.clear()
         cdn_requests.clear()
-        install_from_fallback(fallback_home)
+        install_with_registry(owned_registry_home, owned_registry_base)
+        restored = consumer / "zed_modules" / ORG / NAME / "src" / "payload.txt"
+        if restored.read_text(encoding="utf-8") != "cdn-fallback\n":
+            raise AssertionError("owned registry did not restore the packed payload")
+        owned_registry_request_order = unique_request_paths(owned_registry_requests)
+        if (
+            not owned_registry_request_order
+            or owned_registry_request_order[0] != registry_artifact_path
+        ):
+            raise AssertionError(
+                "owned registry digest endpoint must be first; "
+                f"saw {owned_registry_request_order!r}"
+            )
+        if cdn_requests:
+            raise AssertionError(
+                f"CDN was touched while owned registry was healthy: {cdn_requests!r}"
+            )
+        shutil.rmtree(consumer / "zed_modules")
+
+        # Phase 1: after registry failure, immutable R2 must win.
+        cdn_requests.clear()
+        install_with_registry(fallback_home, fallback_registry)
         restored = consumer / "zed_modules" / ORG / NAME / "src" / "payload.txt"
         if restored.read_text(encoding="utf-8") != "cdn-fallback\n":
             raise AssertionError("R2 fallback did not restore the packed payload")
@@ -472,12 +505,11 @@ def main() -> int:
         if digest != sha256:
             raise AssertionError("packed artifact digest drifted")
 
-        # Phase 2: remove the R2 digest object. The next locator must stay on
-        # the Cloudflare custom domain and use its /github proxy route.
+        # Phase 2: after removing the R2 digest, Cloudflare may proxy GitHub.
         shutil.rmtree(consumer / "zed_modules")
         content_copy.unlink()
         cdn_requests.clear()
-        install_from_fallback(github_fallback_home)
+        install_with_registry(github_fallback_home, fallback_registry)
         restored = consumer / "zed_modules" / ORG / NAME / "src" / "payload.txt"
         if restored.read_text(encoding="utf-8") != "cdn-fallback\n":
             raise AssertionError("Cloudflare GitHub proxy did not restore the payload")
@@ -492,7 +524,9 @@ def main() -> int:
             json.dumps(
                 {
                     "ok": True,
-                    "registry": fallback_registry,
+                    "owned_registry": owned_registry_base,
+                    "fallback_registry": fallback_registry,
+                    "owned_registry_request_order": owned_registry_request_order,
                     "cdn": cdn_base,
                     "tcp_rpc": f"127.0.0.1:{tcp_port}",
                     "sha256": sha256,
@@ -509,6 +543,7 @@ def main() -> int:
             flush=True,
         )
     finally:
+        owned_registry_server.shutdown()
         cdn.shutdown()
         rpc.shutdown()
     return 0
