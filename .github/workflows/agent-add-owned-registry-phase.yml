@@ -107,8 +107,8 @@ jobs:
                           },
                       )
 
-                  # Phase 0: the owned registry is healthy. It must serve the exact
-                  # digest endpoint without any request reaching the CDN or GitHub.
+                  # Phase 0: a healthy owned registry must serve the digest and
+                  # prevent any request from reaching the CDN or GitHub.
                   owned_registry_requests.clear()
                   cdn_requests.clear()
                   install_with_registry(owned_registry_home, owned_registry_base)
@@ -130,8 +130,7 @@ jobs:
                       )
                   shutil.rmtree(consumer / "zed_modules")
 
-                  # Phase 1: the immutable content-addressed R2 object exists. It must
-                  # win without touching the Cloudflare /github proxy path.
+                  # Phase 1: after registry failure, immutable R2 must win.
                   cdn_requests.clear()
                   install_with_registry(fallback_home, fallback_registry)
                   restored = consumer / "zed_modules" / ORG / NAME / "src" / "payload.txt"
@@ -151,8 +150,7 @@ jobs:
                   if digest != sha256:
                       raise AssertionError("packed artifact digest drifted")
 
-                  # Phase 2: remove the R2 digest object. The next locator must stay on
-                  # the Cloudflare custom domain and use its /github proxy route.
+                  # Phase 2: after removing the R2 digest, Cloudflare may proxy GitHub.
                   shutil.rmtree(consumer / "zed_modules")
                   content_copy.unlink()
                   cdn_requests.clear()
@@ -170,17 +168,17 @@ jobs:
           '''
           text = text[:block_start] + replacement + text[block_end:]
 
-          marker = '''                    "registry": fallback_registry,
-                      "cdn": cdn_base,
-          '''
-          enriched = '''                    "owned_registry": owned_registry_base,
-                      "fallback_registry": fallback_registry,
-                      "cdn": cdn_base,
-                      "owned_registry_request_order": owned_registry_request_order,
-          '''
-          if text.count(marker) != 1:
-              raise SystemExit(f'expected one result marker, found {text.count(marker)}')
-          text = text.replace(marker, enriched, 1)
+          needle = '"registry": fallback_registry,'
+          marker_start = text.index(needle)
+          line_start = text.rfind('\n', 0, marker_start) + 1
+          line_end = text.index('\n', marker_start)
+          indent = text[line_start:marker_start]
+          enriched = (
+              f'{indent}"owned_registry": owned_registry_base,\n'
+              f'{indent}"fallback_registry": fallback_registry,\n'
+              f'{indent}"owned_registry_request_order": owned_registry_request_order,'
+          )
+          text = text[:line_start] + enriched + text[line_end:]
 
           old_finally = '''    finally:
                   cdn.shutdown()
