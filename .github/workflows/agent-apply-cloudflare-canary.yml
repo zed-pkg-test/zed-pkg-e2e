@@ -163,14 +163,12 @@ jobs:
           '''
           text = text[:block_start] + replacement + text[block_end:]
 
-          marker = '''                    "sha256": sha256,
-                      "cdn_keys": [
-          '''
-          enriched = '''                    "sha256": sha256,
-                      "r2_request_order": r2_request_order,
-                      "github_proxy_request_order": github_request_order,
-                      "cdn_keys": [
-          '''
+          marker = '"sha256": sha256,\n'
+          enriched = (
+              '"sha256": sha256,\n'
+              + ' ' * 20 + '"r2_request_order": r2_request_order,\n'
+              + ' ' * 20 + '"github_proxy_request_order": github_request_order,\n'
+          )
           if text.count(marker) != 1:
               raise SystemExit(f'expected one result marker, found {text.count(marker)}')
           text = text.replace(marker, enriched, 1)
