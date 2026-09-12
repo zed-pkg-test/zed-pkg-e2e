@@ -1,0 +1,194 @@
+name: certify final VS Code inspect v1 interop
+
+on:
+  push:
+    branches:
+      - agent/den-2278-vscode-inspect-v1-interop
+    paths:
+      - .github/workflows/vscode-inspect-final-interop.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: vscode-inspect-final-interop
+  cancel-in-progress: true
+
+env:
+  CLI_REPO: zed-pkg/zed-cli
+  CLI_BRANCH: agent/den-2175-inspect-json-v1
+  CLI_PR: '235'
+  CLI_EXPECTED_TIP_SUBJECT: 'style(DEN-2175): satisfy strict inspect Clippy gate'
+  VSCODE_REPO: zed-pkg/zed-vscode
+  VSCODE_BRANCH: agent/den-2278-inspect-v1-adoption
+  VSCODE_PR: '2'
+
+jobs:
+  resolve:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    outputs:
+      cli_sha: ${{ steps.resolve.outputs.cli_sha }}
+      vscode_sha: ${{ steps.resolve.outputs.vscode_sha }}
+    steps:
+      - name: Resolve final CLI repair and stable VS Code adapter
+        id: resolve
+        shell: bash
+        run: |
+          set -euo pipefail
+          cli_remote="https://github.com/${CLI_REPO}.git"
+          cli_sha=''
+          for _ in $(seq 1 180); do
+            candidate="$(git ls-remote "$cli_remote" "refs/heads/${CLI_BRANCH}" | cut -f1)"
+            if [[ "$candidate" =~ ^[0-9a-f]{40}$ ]]; then
+              rm -rf "$RUNNER_TEMP/cli-probe"
+              git init -q "$RUNNER_TEMP/cli-probe"
+              git -C "$RUNNER_TEMP/cli-probe" remote add origin "$cli_remote"
+              git -C "$RUNNER_TEMP/cli-probe" fetch -q --depth=1 origin "$candidate"
+              subject="$(git -C "$RUNNER_TEMP/cli-probe" show -s --format=%s FETCH_HEAD)"
+              if [[ "$subject" == "$CLI_EXPECTED_TIP_SUBJECT" ]]; then
+                cli_sha="$candidate"
+                break
+              fi
+            fi
+            sleep 10
+          done
+          test -n "$cli_sha"
+          vscode_sha="$(git ls-remote "https://github.com/${VSCODE_REPO}.git" "refs/heads/${VSCODE_BRANCH}" | cut -f1)"
+          [[ "$vscode_sha" =~ ^[0-9a-f]{40}$ ]]
+          echo "cli_sha=$cli_sha" >> "$GITHUB_OUTPUT"
+          echo "vscode_sha=$vscode_sha" >> "$GITHUB_OUTPUT"
+          printf 'cli=%s\nvscode=%s\n' "$cli_sha" "$vscode_sha" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Prove PR heads match resolved SHAs
+        env:
+          CLI_SHA: ${{ steps.resolve.outputs.cli_sha }}
+          VSCODE_SHA: ${{ steps.resolve.outputs.vscode_sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json, os, urllib.request
+          for repo, number, branch, expected in [
+              (os.environ['CLI_REPO'], os.environ['CLI_PR'], os.environ['CLI_BRANCH'], os.environ['CLI_SHA']),
+              (os.environ['VSCODE_REPO'], os.environ['VSCODE_PR'], os.environ['VSCODE_BRANCH'], os.environ['VSCODE_SHA']),
+          ]:
+              req = urllib.request.Request(
+                  f"https://api.github.com/repos/{repo}/pulls/{number}",
+                  headers={"Accept":"application/vnd.github+json","User-Agent":"zed-pkg-test-vscode-interop/1"},
+              )
+              with urllib.request.urlopen(req, timeout=30) as response:
+                  data = json.load(response)
+              assert data['state'] == 'open', (repo, data['state'])
+              assert data['head']['ref'] == branch, (repo, data['head'])
+              assert data['head']['sha'] == expected, (repo, data['head']['sha'], expected)
+          PY
+
+  interop:
+    needs: resolve
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      ZED_CLI_REF: ${{ needs.resolve.outputs.cli_sha }}
+      ZED_VSCODE_REF: ${{ needs.resolve.outputs.vscode_sha }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: zed-pkg/zed-cli
+          ref: ${{ env.ZED_CLI_REF }}
+          path: zed-cli
+          fetch-depth: 1
+          persist-credentials: false
+          show-progress: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: zed-pkg/zed-vscode
+          ref: ${{ env.ZED_VSCODE_REF }}
+          path: zed-vscode
+          fetch-depth: 1
+          persist-credentials: false
+          show-progress: false
+      - name: Install Rust
+        run: |
+          set -euo pipefail
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+      - name: Build exact CLI
+        run: |
+          set -euo pipefail
+          test "$(git -C zed-cli rev-parse HEAD)" = "$ZED_CLI_REF"
+          cargo build --locked --release --manifest-path zed-cli/Cargo.toml --bin zed
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: zed-vscode/package-lock.json
+      - name: Run exact adapter unit tests
+        working-directory: zed-vscode
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$ZED_VSCODE_REF"
+          npm ci --ignore-scripts --no-audit --no-fund
+          npm test
+      - name: Exercise real inspect JSON through real VS Code adapter
+        env:
+          ZED_BINARY: ${{ github.workspace }}/zed-cli/target/release/zed
+        run: |
+          set -euo pipefail
+          node <<'NODE'
+          'use strict';
+          const assert = require('node:assert/strict');
+          const crypto = require('node:crypto');
+          const fs = require('node:fs');
+          const os = require('node:os');
+          const path = require('node:path');
+          const {inspectRoot} = require('./zed-vscode/src/inspector');
+          function snapshot(root) {
+            const rows = [];
+            function walk(directory) {
+              for (const name of fs.readdirSync(directory).sort()) {
+                const absolute = path.join(directory, name);
+                const relative = path.relative(root, absolute);
+                const stat = fs.lstatSync(absolute);
+                if (stat.isDirectory()) { rows.push([relative,'dir']); walk(absolute); }
+                else if (stat.isSymbolicLink()) rows.push([relative,'symlink',fs.readlinkSync(absolute)]);
+                else rows.push([relative,'file',crypto.createHash('sha256').update(fs.readFileSync(absolute)).digest('hex')]);
+              }
+            }
+            walk(root);
+            return rows;
+          }
+          (async () => {
+            const root = fs.mkdtempSync(path.join(os.tmpdir(), 'zed-vscode-inspect-final-'));
+            fs.writeFileSync(path.join(root,'.zpkg.toml'),'[package]\norg = "acme"\nname = "widget"\nversion = "1.0.0"\n\n[package.repository]\nvcs = "git"\nurl = "https://example.invalid/acme/widget"\n');
+            fs.writeFileSync(path.join(root,'.zpkg.lock'),'version = 1\n');
+            fs.mkdirSync(path.join(root,'.zpkg-staging'));
+            fs.writeFileSync(path.join(root,'.zpkg-staging','sentinel'),'must-survive');
+            const before = snapshot(root);
+            const report = await inspectRoot(root,{executable:process.env.ZED_BINARY,timeoutMs:10000});
+            assert.equal(report.source,'cli',JSON.stringify(report));
+            assert.equal(path.resolve(report.workspaceRoot),path.resolve(root));
+            const recovery = report.issues.find((issue)=>issue.id==='RECOVERY_PENDING');
+            assert.ok(recovery,JSON.stringify(report));
+            assert.deepEqual(recovery.actions[0],{
+              id:'recover-frozen',title:'Recover with the locked graph',kind:'command',command:'zed',
+              arguments:['install','--frozen'],requiresConfirmation:true,
+              workingDirectory:fs.realpathSync.native(root),mutatesProject:true,requiresNetwork:true,executesPackageCode:true,
+            });
+            assert.deepEqual(snapshot(root),before);
+            assert.equal(fs.readFileSync(path.join(root,'.zpkg-staging','sentinel'),'utf8'),'must-survive');
+            assert.equal(fs.existsSync(path.join(root,'zed_modules')),false);
+            console.log(`certified cli=${process.env.ZED_CLI_REF} vscode=${process.env.ZED_VSCODE_REF}`);
+          })().catch((error)=>{ console.error(error); process.exitCode=1; });
+          NODE
+      - name: Prove both product branches stayed on certified SHAs
+        run: |
+          set -euo pipefail
+          cli_current="$(git ls-remote "https://github.com/${CLI_REPO}.git" "refs/heads/${CLI_BRANCH}" | cut -f1)"
+          vscode_current="$(git ls-remote "https://github.com/${VSCODE_REPO}.git" "refs/heads/${VSCODE_BRANCH}" | cut -f1)"
+          test "$cli_current" = "$ZED_CLI_REF"
+          test "$vscode_current" = "$ZED_VSCODE_REF"
