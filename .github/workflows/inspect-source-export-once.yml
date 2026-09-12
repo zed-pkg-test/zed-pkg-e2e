@@ -1,0 +1,42 @@
+name: export exact inspect source once
+
+on:
+  push:
+    branches:
+      - agent/den-2175-inspect-cli-contract
+    paths:
+      - .github/workflows/inspect-source-export-once.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  ZED_CLI_REF: d6842bd1219a657bcfbabd8d2cd2361a1a57dfba
+
+jobs:
+  export:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: zed-pkg/zed-cli
+          ref: ${{ env.ZED_CLI_REF }}
+          path: zed-cli
+          fetch-depth: 1
+          persist-credentials: false
+          show-progress: false
+      - name: Verify exact source head
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git -C zed-cli rev-parse HEAD)" = "$ZED_CLI_REF"
+      - name: Retain exact inspector source
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: inspect-source-${{ env.ZED_CLI_REF }}
+          path: zed-cli/src/inspect.rs
+          if-no-files-found: error
+          retention-days: 1
+          include-hidden-files: false
