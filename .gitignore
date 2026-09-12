@@ -10,3 +10,7 @@ temp
 tmp/worktrees
 temp/worktrees
 /scripts/.audit-test-org-fleet-live-*.mjs
+
+# Sanctioned scratch locations - AGENTS.md requires both, trailing-slash form
+tmp/
+temp/
