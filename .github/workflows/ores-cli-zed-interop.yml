@@ -44,7 +44,15 @@ jobs:
           rustup toolchain install "$toolchain" --profile minimal
           rustup default "$toolchain"
 
-      - name: Build exact zed-cli
+      - name: Refresh stale zed-lock pin in runner only
+        working-directory: tmp/zed-cli
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo update -p zed-lock
+          git diff -- Cargo.lock
+
+      - name: Build exact zed-cli source with refreshed lock witness
         working-directory: tmp/zed-cli
         run: cargo build --locked --release --bin zed
 
