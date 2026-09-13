@@ -1,0 +1,189 @@
+name: ORE worker Cargo locks
+
+on:
+  push:
+    branches:
+      - alex-oresc-zed-interop
+    paths:
+      - .github/workflows/ore-worker-cargo-locks.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  generate-locks:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30
+        with:
+          toolchain: '1.85.0'
+      - name: Reconstruct exact Cargo workspace manifests
+        shell: bash
+        run: |
+          set -euo pipefail
+          root="$RUNNER_TEMP/ore-locks"
+          mkdir -p "$root/desktop/shared_ipc/src" "$root/desktop/core_engine/src" "$root/desktop/daemon_desktop/src"
+          mkdir -p "$root/mobile/rust/core_engine/src" "$root/mobile/rust/rust_ffi/src"
+
+          cat > "$root/desktop/Cargo.toml" <<'EOF'
+          [package]
+          name = "ores-desktop-bg-procs"
+          version = "0.1.0"
+          edition.workspace = true
+          license.workspace = true
+          rust-version.workspace = true
+          description = "Native desktop background-process runtime for ORESoftware Flutter and Rust applications"
+          repository = "https://github.com/ORESoftware/ores-desktop-bg-procs"
+
+          [lib]
+          path = "lib.rs"
+
+          [workspace]
+          members = ["shared_ipc", "core_engine", "daemon_desktop"]
+          resolver = "2"
+
+          [workspace.package]
+          edition = "2024"
+          license = "MIT"
+          rust-version = "1.85"
+
+          [workspace.dependencies]
+          axum = "0.8.9"
+          fs2 = "0.4.3"
+          rusqlite = { version = "0.40.2", features = ["bundled"] }
+          serde = { version = "1", features = ["derive"] }
+          serde_json = "1"
+          tokio = { version = "~1.51", features = ["macros", "rt-multi-thread", "net", "signal", "sync"] }
+          uuid = { version = "1", features = ["v4", "serde"] }
+          EOF
+          cat > "$root/desktop/shared_ipc/Cargo.toml" <<'EOF'
+          [package]
+          name = "ores-desktop-bg-ipc"
+          version = "0.1.0"
+          edition.workspace = true
+          license.workspace = true
+          rust-version.workspace = true
+          [dependencies]
+          serde.workspace = true
+          EOF
+          cat > "$root/desktop/core_engine/Cargo.toml" <<'EOF'
+          [package]
+          name = "ores-desktop-bg-core"
+          version = "0.1.0"
+          edition.workspace = true
+          license.workspace = true
+          rust-version.workspace = true
+          [dependencies]
+          rusqlite.workspace = true
+          serde.workspace = true
+          EOF
+          cat > "$root/desktop/daemon_desktop/Cargo.toml" <<'EOF'
+          [package]
+          name = "ores-desktop-bg-daemon"
+          version = "0.1.0"
+          edition.workspace = true
+          license.workspace = true
+          rust-version.workspace = true
+          [dependencies]
+          axum.workspace = true
+          fs2.workspace = true
+          ores-desktop-bg-core = { path = "../core_engine" }
+          ores-desktop-bg-ipc = { path = "../shared_ipc" }
+          serde.workspace = true
+          serde_json.workspace = true
+          tokio.workspace = true
+          uuid.workspace = true
+          EOF
+          echo 'pub fn fixture() {}' > "$root/desktop/lib.rs"
+          echo 'pub fn fixture() {}' > "$root/desktop/shared_ipc/src/lib.rs"
+          echo 'pub fn fixture() {}' > "$root/desktop/core_engine/src/lib.rs"
+          echo 'fn main() {}' > "$root/desktop/daemon_desktop/src/main.rs"
+
+          cat > "$root/mobile/Cargo.toml" <<'EOF'
+          [package]
+          name = "ores-mobile-bg-procs"
+          version = "0.1.0"
+          edition.workspace = true
+          license.workspace = true
+          rust-version.workspace = true
+
+          [lib]
+          path = "lib.rs"
+
+          [dependencies]
+          ores-mobile-bg-core = { path = "rust/core_engine" }
+
+          [workspace]
+          members = ["rust/core_engine", "rust/rust_ffi"]
+          resolver = "2"
+
+          [workspace.package]
+          edition = "2024"
+          license = "MIT"
+          rust-version = "1.85"
+
+          [workspace.dependencies]
+          flutter_rust_bridge = "2.13.0"
+          rusqlite = { version = "0.40.2", features = ["bundled"] }
+          serde = { version = "1", features = ["derive"] }
+          thiserror = "2"
+          EOF
+          cat > "$root/mobile/rust/core_engine/Cargo.toml" <<'EOF'
+          [package]
+          name = "ores-mobile-bg-core"
+          version = "0.1.0"
+          edition.workspace = true
+          license.workspace = true
+          rust-version.workspace = true
+          [dependencies]
+          rusqlite.workspace = true
+          serde.workspace = true
+          thiserror.workspace = true
+          EOF
+          cat > "$root/mobile/rust/rust_ffi/Cargo.toml" <<'EOF'
+          [package]
+          name = "ores-mobile-bg-ffi"
+          version = "0.1.0"
+          edition.workspace = true
+          license.workspace = true
+          rust-version.workspace = true
+          [lib]
+          crate-type = ["cdylib", "staticlib", "rlib"]
+          [dependencies]
+          flutter_rust_bridge.workspace = true
+          ores-mobile-bg-core = { path = "../core_engine" }
+          serde.workspace = true
+          EOF
+          echo 'pub fn fixture() {}' > "$root/mobile/lib.rs"
+          echo 'pub fn fixture() {}' > "$root/mobile/rust/core_engine/src/lib.rs"
+          echo 'pub fn fixture() {}' > "$root/mobile/rust/rust_ffi/src/lib.rs"
+
+          echo "LOCK_ROOT=$root" >> "$GITHUB_ENV"
+      - name: Generate and verify locks under declared MSRV
+        shell: bash
+        run: |
+          set -euo pipefail
+          for package in desktop mobile; do
+            echo "=== $package ==="
+            cd "$LOCK_ROOT/$package"
+            cargo generate-lockfile
+            cargo check --locked --workspace --all-targets
+          done
+      - name: Publish generated lock evidence on harness branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p generated-locks
+          cp "$LOCK_ROOT/desktop/Cargo.lock" generated-locks/ores-desktop-bg-procs.Cargo.lock
+          cp "$LOCK_ROOT/mobile/Cargo.lock" generated-locks/ores-mobile-bg-procs.Cargo.lock
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add generated-locks
+          if git diff --cached --quiet; then
+            exit 0
+          fi
+          git commit -m 'chore: refresh certified ORE worker Cargo locks [skip ci]'
+          git push origin HEAD:alex-oresc-zed-interop
