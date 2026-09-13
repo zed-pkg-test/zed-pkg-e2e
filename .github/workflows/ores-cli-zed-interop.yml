@@ -1,0 +1,116 @@
+name: ores-cli zed-pkg interop
+
+on:
+  push:
+    branches:
+      - alex-oresc-zed-interop
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  ZED_CLI_SHA: a80dad717dbff82ef6fff237e13ccf3820f074c4
+
+jobs:
+  interop:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Check out harness
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Check out immutable zed-cli main
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: zed-pkg/zed-cli
+          ref: ${{ env.ZED_CLI_SHA }}
+          path: tmp/zed-cli
+          persist-credentials: false
+
+      - name: Install zed-cli declared Rust toolchain
+        shell: bash
+        run: |
+          set -euo pipefail
+          toolchain="$(python3 - <<'PY'
+          import pathlib, tomllib
+          data = tomllib.loads(pathlib.Path('tmp/zed-cli/rust-toolchain.toml').read_text())
+          print(data['toolchain']['channel'])
+          PY
+          )"
+          rustup toolchain install "$toolchain" --profile minimal
+          rustup default "$toolchain"
+
+      - name: Build exact zed-cli
+        working-directory: tmp/zed-cli
+        run: cargo build --locked --release --bin zed
+
+      - name: Create package-audit fixture
+        shell: bash
+        run: |
+          set -euo pipefail
+          fixture="$RUNNER_TEMP/oresc-zed-fixture"
+          mkdir -p "$fixture/src"
+          cat > "$fixture/Cargo.toml" <<'EOF'
+          [package]
+          name = "oresc-zed-fixture"
+          version = "0.1.0"
+          edition = "2021"
+          license = "MIT"
+          repository = "https://github.com/zed-pkg-test/zed-pkg-e2e"
+          description = "zed-pkg and ores-cli audit interoperability fixture"
+          EOF
+          cat > "$fixture/src/lib.rs" <<'EOF'
+          pub fn fixture() -> &'static str { "oresc-zed-fixture" }
+          EOF
+          cat > "$fixture/.zpkg.toml" <<'EOF'
+          [package]
+          org = "zed-pkg-test"
+          name = "oresc-zed-fixture"
+          version = "0.1.0"
+          description = "zed-pkg and ores-cli audit interoperability fixture"
+          license = "MIT"
+          language = "rust"
+
+          [package.repository]
+          vcs = "git"
+          url = "https://github.com/zed-pkg-test/zed-pkg-e2e"
+
+          [build]
+          command = "cargo build --release"
+          outputs = ["target/release/liboresc_zed_fixture.rlib"]
+
+          [scripts]
+          test = "cargo test"
+          EOF
+          echo "FIXTURE=$fixture" >> "$GITHUB_ENV"
+
+      - name: Validate fixture with zed-pkg
+        shell: bash
+        run: |
+          set -euo pipefail
+          zed="$GITHUB_WORKSPACE/tmp/zed-cli/target/release/zed"
+          "$zed" validate --manifest "$FIXTURE/.zpkg.toml"
+          "$zed" inspect --root "$FIXTURE" --format json > "$RUNNER_TEMP/zed-inspect.json"
+          test -s "$RUNNER_TEMP/zed-inspect.json"
+          (cd "$FIXTURE" && "$zed" pack)
+
+      - name: Install canonical ores-cli through zed-pkg
+        shell: bash
+        run: |
+          set -euo pipefail
+          zed="$GITHUB_WORKSPACE/tmp/zed-cli/target/release/zed"
+          cd "$FIXTURE"
+          "$zed" install oresoftware/ores-cli@^0.1 --allow-build --adapter none
+          "$zed" run oresc -- doctor
+
+      - name: Run canonical ores-cli audits
+        shell: bash
+        run: |
+          set -euo pipefail
+          zed="$GITHUB_WORKSPACE/tmp/zed-cli/target/release/zed"
+          "$zed" run oresc -- --no-json audit repo --path "$FIXTURE" --profile baseline
+          "$zed" run oresc -- --no-json audit package --path "$FIXTURE"
