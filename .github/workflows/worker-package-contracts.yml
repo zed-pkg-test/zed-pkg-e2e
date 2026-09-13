@@ -1,0 +1,171 @@
+name: worker package contracts
+
+on:
+  push:
+    branches:
+      - alex-oresc-zed-interop
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  package-contracts:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Install released zed v0.3.0
+        shell: bash
+        run: |
+          set -euo pipefail
+          base="https://github.com/zed-pkg/zed-cli/releases/download/v0.3.0"
+          mkdir -p "$RUNNER_TEMP/zed-release" "$RUNNER_TEMP/bin"
+          cd "$RUNNER_TEMP/zed-release"
+          curl --fail --location --silent --show-error -O "$base/zed-x86_64-unknown-linux-gnu.tar.gz"
+          curl --fail --location --silent --show-error -O "$base/zed-x86_64-unknown-linux-gnu.tar.gz.sha256"
+          sha256sum -c zed-x86_64-unknown-linux-gnu.tar.gz.sha256
+          tar -xzf zed-x86_64-unknown-linux-gnu.tar.gz
+          zed_path="$(find . -type f -name zed -perm -u+x | head -n1)"
+          install -Dm755 "$zed_path" "$RUNNER_TEMP/bin/zed"
+          echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
+
+      - name: Materialize exact worker package contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          root="$RUNNER_TEMP/worker-contracts"
+          mkdir -p "$root/mobile" "$root/desktop" "$root/sw"
+
+          cat > "$root/mobile/.zpkg.toml" <<'EOF'
+          [package]
+          org = "oresoftware"
+          name = "ores-mobile-bg-procs"
+          version = "0.1.0"
+          description = "OS-scheduled bounded background work runtime for ORESoftware mobile applications"
+          license = "MIT"
+          language = "rust"
+
+          [package.repository]
+          vcs = "git"
+          url = "https://github.com/ORESoftware/ores-mobile-bg-procs"
+
+          [build]
+          command = "cargo build --release"
+          outputs = ["target/release/libores_mobile_bg_procs.rlib"]
+
+          [publish]
+          include_readme = true
+          tag_format = "v{version}"
+          exclude = ["target/**", ".git/**", ".github/**"]
+
+          [publish.native]
+          registry = "crates-io"
+          package = "ores-mobile-bg-procs"
+
+          [scripts]
+          test = "cargo test"
+          EOF
+          printf '# ores-mobile-bg-procs\n' > "$root/mobile/README.md"
+          cat > "$root/mobile/Cargo.toml" <<'EOF'
+          [package]
+          name = "ores-mobile-bg-procs"
+          version = "0.1.0"
+          edition = "2021"
+          license = "MIT"
+          repository = "https://github.com/ORESoftware/ores-mobile-bg-procs"
+          description = "OS-scheduled bounded background work runtime for ORESoftware mobile applications"
+          [lib]
+          path = "lib.rs"
+          EOF
+          echo 'pub fn smoke() {}' > "$root/mobile/lib.rs"
+
+          cat > "$root/desktop/.zpkg.toml" <<'EOF'
+          [package]
+          org = "oresoftware"
+          name = "ores-desktop-bg-procs"
+          version = "0.1.0"
+          description = "Native desktop background-process runtime for ORESoftware Flutter and Rust applications"
+          license = "MIT"
+          language = "rust"
+
+          [package.repository]
+          vcs = "git"
+          url = "https://github.com/ORESoftware/ores-desktop-bg-procs"
+
+          [build]
+          command = "cargo build --release"
+          outputs = ["target/release/libores_desktop_bg_procs.rlib"]
+
+          [publish]
+          include_readme = true
+          tag_format = "v{version}"
+          exclude = ["target/**", ".git/**", ".github/**"]
+
+          [publish.native]
+          registry = "crates-io"
+          package = "ores-desktop-bg-procs"
+
+          [scripts]
+          test = "cargo test"
+          EOF
+          printf '# ores-desktop-bg-procs\n' > "$root/desktop/README.md"
+          cat > "$root/desktop/Cargo.toml" <<'EOF'
+          [package]
+          name = "ores-desktop-bg-procs"
+          version = "0.1.0"
+          edition = "2021"
+          license = "MIT"
+          repository = "https://github.com/ORESoftware/ores-desktop-bg-procs"
+          description = "Native desktop background-process runtime for ORESoftware Flutter and Rust applications"
+          [lib]
+          path = "lib.rs"
+          EOF
+          echo 'pub fn smoke() {}' > "$root/desktop/lib.rs"
+
+          cat > "$root/sw/.zpkg.toml" <<'EOF'
+          [package]
+          org = "oresoftware"
+          name = "ores-sw"
+          version = "0.1.0"
+          description = "Browser Service Worker and SharedWorker runtime with TypeScript and Rust/WASM execution lanes"
+          license = "MIT"
+          language = "typescript"
+
+          [package.repository]
+          vcs = "git"
+          url = "https://github.com/ORESoftware/ores-sw.js"
+
+          [build]
+          command = "npm run build"
+          outputs = ["dist"]
+
+          [publish]
+          include_readme = true
+          tag_format = "v{version}"
+          exclude = ["node_modules/**", "wasm/target/**", ".git/**", ".github/**", "artifacts/**", ".tmp/**"]
+
+          [scripts]
+          test = "npm run check"
+          EOF
+          printf '# ores-sw.js\n' > "$root/sw/README.md"
+          cat > "$root/sw/package.json" <<'EOF'
+          {"name":"@oresoftware/ores-sw","version":"0.1.0","private":true,"license":"MIT","repository":{"type":"git","url":"https://github.com/ORESoftware/ores-sw.js"},"scripts":{"build":"mkdir -p dist && touch dist/client.js","check":"true"}}
+          EOF
+          echo "ROOT=$root" >> "$GITHUB_ENV"
+
+      - name: Validate and pack all three contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          for pkg in mobile desktop sw; do
+            echo "== $pkg =="
+            zed validate --manifest "$ROOT/$pkg/.zpkg.toml"
+            zed inspect --root "$ROOT/$pkg" --format json > "$RUNNER_TEMP/$pkg-inspect.json"
+            test -s "$RUNNER_TEMP/$pkg-inspect.json"
+            (cd "$ROOT/$pkg" && zed pack)
+          done
