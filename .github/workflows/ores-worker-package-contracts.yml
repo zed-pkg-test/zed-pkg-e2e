@@ -128,8 +128,6 @@ jobs:
           org = "oresoftware"
           name = "ores-sw"
           version = "0.1.0"
-          kind = "library"
-          language = "typescript"
           description = "Shared browser Service Worker and SharedWorker runtime for ORESoftware web applications"
           license = "MIT"
           keywords = ["service-worker", "shared-worker", "typescript", "wasm", "opto-sync"]
@@ -148,6 +146,7 @@ jobs:
           [publish]
           include_readme = true
           tag_format = "v{version}"
+          smoke_test = "test -f dist/service-worker.js && test -f dist/client.js && test -f rust/axum07.rs && test -f rust/axum08.rs"
           exclude = [".env", ".env.*", ".direnv/**", ".zed/**", ".zed-pack/**", ".tmp/**", "artifacts/**", "node_modules/**", "wasm/target/**", "**/*.log"]
 
           [scripts]
@@ -158,7 +157,9 @@ jobs:
           EOF
           echo 'export {}' > "$root/browser/src/index.ts"
           echo '# browser fixture' > "$root/browser/README.md"
-          echo fixture > "$root/browser/dist/bootstrap.js"
+          echo fixture > "$root/browser/dist/service-worker.js"
+          echo fixture > "$root/browser/dist/client.js"
+          echo fixture > "$root/browser/rust/axum07.rs"
           echo fixture > "$root/browser/rust/axum08.rs"
 
           echo "FIXTURE_ROOT=$root" >> "$GITHUB_ENV"
