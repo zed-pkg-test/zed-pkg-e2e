@@ -10,7 +10,7 @@ permissions:
   contents: read
 
 env:
-  ZED_CLI_SHA: a80dad717dbff82ef6fff237e13ccf3820f074c4
+  ZED_CLI_SHA: 46c5e263bfc2b5c8c483fd5d7ffc7c61e538adbe
 
 jobs:
   interop:
@@ -23,7 +23,7 @@ jobs:
           ref: ${{ github.sha }}
           persist-credentials: false
 
-      - name: Check out immutable zed-cli main
+      - name: Check out immutable repaired zed-cli
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           repository: zed-pkg/zed-cli
@@ -41,20 +41,14 @@ jobs:
           print(data['toolchain']['channel'])
           PY
           )"
-          rustup toolchain install "$toolchain" --profile minimal
+          rustup toolchain install "$toolchain" --profile minimal --component rustfmt --component clippy
           rustup default "$toolchain"
 
-      - name: Refresh stale zed-lock pin in runner only
+      - name: Certify exact zed-cli source reproducibly
         working-directory: tmp/zed-cli
-        shell: bash
         run: |
-          set -euo pipefail
-          cargo update -p zed-lock
-          git diff -- Cargo.lock
-
-      - name: Build exact zed-cli source with refreshed lock witness
-        working-directory: tmp/zed-cli
-        run: cargo build --locked --release --bin zed
+          cargo fmt --all -- --check
+          cargo build --locked --release --bin zed
 
       - name: Create package-audit fixture
         shell: bash
@@ -91,12 +85,16 @@ jobs:
           command = "cargo build --release"
           outputs = ["target/release/liboresc_zed_fixture.rlib"]
 
+          [publish.native]
+          registry = "crates-io"
+          package = "oresc-zed-fixture"
+
           [scripts]
           test = "cargo test"
           EOF
           echo "FIXTURE=$fixture" >> "$GITHUB_ENV"
 
-      - name: Validate fixture with zed-pkg
+      - name: Validate and pack fixture with repaired zed-cli
         shell: bash
         run: |
           set -euo pipefail
@@ -104,15 +102,27 @@ jobs:
           "$zed" validate --manifest "$FIXTURE/.zpkg.toml"
           "$zed" inspect --root "$FIXTURE" --format json > "$RUNNER_TEMP/zed-inspect.json"
           test -s "$RUNNER_TEMP/zed-inspect.json"
-          (cd "$FIXTURE" && "$zed" pack)
+          (cd "$FIXTURE" && cargo generate-lockfile && "$zed" pack)
 
-      - name: Install canonical ores-cli through zed-pkg
+      - name: Add and install canonical ores-cli through zed-pkg
         shell: bash
         run: |
           set -euo pipefail
           zed="$GITHUB_WORKSPACE/tmp/zed-cli/target/release/zed"
           cd "$FIXTURE"
-          "$zed" install oresoftware/ores-cli@^0.1 --allow-build --adapter none
+          ok=0
+          for attempt in 1 2 3; do
+            if "$zed" add oresoftware/ores-cli@^0.1; then
+              ok=1
+              break
+            fi
+            echo "zed registry add attempt $attempt failed" >&2
+            sleep $((attempt * 2))
+          done
+          test "$ok" -eq 1
+          "$zed" install --allow-build --adapter none
+          test -f .zpkg.lock
+          "$zed" validate --manifest .zpkg.toml --lock .zpkg.lock --require-lock
           "$zed" run oresc -- doctor
 
       - name: Run canonical ores-cli audits
@@ -120,5 +130,6 @@ jobs:
         run: |
           set -euo pipefail
           zed="$GITHUB_WORKSPACE/tmp/zed-cli/target/release/zed"
+          cd "$FIXTURE"
           "$zed" run oresc -- --no-json audit repo --path "$FIXTURE" --profile baseline
           "$zed" run oresc -- --no-json audit package --path "$FIXTURE"
