@@ -73,7 +73,7 @@ jobs:
           outputs = ["target/release/liboresc_zed_fixture.rlib"]
 
           [publish.native]
-          ecosystem = "cargo"
+          registry = "crates-io"
           package = "oresc-zed-fixture"
 
           [scripts]
