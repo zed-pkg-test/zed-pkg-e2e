@@ -90,17 +90,21 @@ jobs:
           test -s "$RUNNER_TEMP/zed-inspect.json"
           (cd "$FIXTURE" && cargo generate-lockfile && zed pack)
 
-      - name: Install ores-cli through zed-pkg registry
+      - name: Add and install ores-cli through zed-pkg registry
         shell: bash
         run: |
           set -euo pipefail
           cd "$FIXTURE"
-          zed install oresoftware/ores-cli@^0.1 --allow-build --adapter none
+          zed add oresoftware/ores-cli@^0.1
+          zed install --allow-build --adapter none
+          test -f .zpkg.lock
+          zed validate --manifest .zpkg.toml --lock .zpkg.lock --require-lock
           zed run oresc -- doctor
 
       - name: Audit fixture with canonical ores-cli
         shell: bash
         run: |
           set -euo pipefail
+          cd "$FIXTURE"
           zed run oresc -- --no-json audit repo --path "$FIXTURE" --profile baseline
           zed run oresc -- --no-json audit package --path "$FIXTURE"
