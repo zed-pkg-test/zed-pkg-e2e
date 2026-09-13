@@ -1,0 +1,177 @@
+name: ORE worker package contracts
+
+on:
+  push:
+    branches:
+      - alex-oresc-zed-interop
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  ZED_CLI_SHA: 344d432a6f94d4b1cfa02228ec36623c7484177a
+
+jobs:
+  package-contracts:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: zed-pkg/zed-cli
+          ref: ${{ env.ZED_CLI_SHA }}
+          path: tmp/zed-cli
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30
+        with:
+          toolchain: stable
+      - name: Build exact repaired zed CLI
+        working-directory: tmp/zed-cli
+        run: cargo build --release --locked --bin zed
+      - name: Create current worker package fixtures
+        shell: bash
+        run: |
+          set -euo pipefail
+          root="$RUNNER_TEMP/worker-packages"
+          mkdir -p "$root/desktop/src" "$root/mobile/src" "$root/browser/src" "$root/browser/dist" "$root/browser/rust"
+
+          cat > "$root/desktop/.zpkg.toml" <<'EOF'
+          [package]
+          org = "oresoftware"
+          name = "ores-desktop-bg-procs"
+          version = "0.1.0"
+          description = "Native desktop background-process runtime for ORESoftware Flutter and Rust applications"
+          license = "MIT"
+          language = "rust"
+
+          [package.repository]
+          vcs = "git"
+          url = "https://github.com/ORESoftware/ores-desktop-bg-procs"
+
+          [build]
+          command = "cargo build --release"
+          outputs = ["target/release/libores_desktop_bg_procs.rlib"]
+
+          [publish]
+          include_readme = true
+          tag_format = "v{version}"
+          exclude = ["target/**", ".git/**", ".github/**"]
+
+          [publish.native]
+          registry = "crates-io"
+          package = "ores-desktop-bg-procs"
+
+          [scripts]
+          test = "cargo test"
+          EOF
+          printf 'version = 1\n' > "$root/desktop/.zpkg.lock"
+          cat > "$root/desktop/Cargo.toml" <<'EOF'
+          [package]
+          name = "ores-desktop-bg-procs"
+          version = "0.1.0"
+          edition = "2021"
+          license = "MIT"
+          repository = "https://github.com/ORESoftware/ores-desktop-bg-procs"
+          description = "Native desktop background-process runtime for ORESoftware Flutter and Rust applications"
+          EOF
+          echo 'pub fn fixture() {}' > "$root/desktop/src/lib.rs"
+          echo '# desktop fixture' > "$root/desktop/README.md"
+
+          cat > "$root/mobile/.zpkg.toml" <<'EOF'
+          [package]
+          org = "oresoftware"
+          name = "ores-mobile-bg-procs"
+          version = "0.1.0"
+          description = "OS-scheduled bounded background work runtime for ORESoftware mobile applications"
+          license = "MIT"
+          language = "rust"
+
+          [package.repository]
+          vcs = "git"
+          url = "https://github.com/ORESoftware/ores-mobile-bg-procs"
+
+          [build]
+          command = "cargo build --release"
+          outputs = ["target/release/libores_mobile_bg_procs.rlib"]
+
+          [publish]
+          include_readme = true
+          tag_format = "v{version}"
+          exclude = ["target/**", ".git/**", ".github/**"]
+
+          [publish.native]
+          registry = "crates-io"
+          package = "ores-mobile-bg-procs"
+
+          [scripts]
+          test = "cargo test"
+          EOF
+          printf 'version = 1\n' > "$root/mobile/.zpkg.lock"
+          cat > "$root/mobile/Cargo.toml" <<'EOF'
+          [package]
+          name = "ores-mobile-bg-procs"
+          version = "0.1.0"
+          edition = "2021"
+          license = "MIT"
+          repository = "https://github.com/ORESoftware/ores-mobile-bg-procs"
+          description = "OS-scheduled bounded background work runtime for ORESoftware mobile applications"
+          EOF
+          echo 'pub fn fixture() {}' > "$root/mobile/src/lib.rs"
+          echo '# mobile fixture' > "$root/mobile/README.md"
+
+          cat > "$root/browser/.zpkg.toml" <<'EOF'
+          [package]
+          org = "oresoftware"
+          name = "ores-sw"
+          version = "0.1.0"
+          kind = "library"
+          language = "typescript"
+          description = "Shared browser Service Worker and SharedWorker runtime for ORESoftware web applications"
+          license = "MIT"
+          keywords = ["service-worker", "shared-worker", "typescript", "wasm", "opto-sync"]
+
+          [package.repository]
+          vcs = "git"
+          url = "https://github.com/ORESoftware/ores-sw.js"
+
+          [install]
+          dir = ".vendor/.zed"
+
+          [build]
+          command = "npm install --ignore-scripts --no-audit --no-fund && npm run build"
+          outputs = ["dist", "rust"]
+
+          [publish]
+          include_readme = true
+          tag_format = "v{version}"
+          exclude = [".env", ".env.*", ".direnv/**", ".zed/**", ".zed-pack/**", ".tmp/**", "artifacts/**", "node_modules/**", "wasm/target/**", "**/*.log"]
+
+          [scripts]
+          test = "npm run check"
+          EOF
+          cat > "$root/browser/package.json" <<'EOF'
+          {"name":"@oresoftware/ores-sw","version":"0.1.0","license":"MIT"}
+          EOF
+          echo 'export {}' > "$root/browser/src/index.ts"
+          echo '# browser fixture' > "$root/browser/README.md"
+          echo fixture > "$root/browser/dist/bootstrap.js"
+          echo fixture > "$root/browser/rust/axum08.rs"
+
+          echo "FIXTURE_ROOT=$root" >> "$GITHUB_ENV"
+      - name: Validate, inspect, and pack all current package shapes
+        shell: bash
+        run: |
+          set -euo pipefail
+          zed="$GITHUB_WORKSPACE/tmp/zed-cli/target/release/zed"
+          for package in desktop mobile browser; do
+            root="$FIXTURE_ROOT/$package"
+            echo "=== $package ==="
+            "$zed" validate --manifest "$root/.zpkg.toml"
+            "$zed" inspect --root "$root" --format json > "$RUNNER_TEMP/$package-inspect.json"
+            test -s "$RUNNER_TEMP/$package-inspect.json"
+            (cd "$root" && "$zed" pack)
+          done
