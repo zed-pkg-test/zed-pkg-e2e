@@ -1,0 +1,93 @@
+name: certify-zed-cli-gh470
+
+on:
+  pull_request:
+    paths:
+      - .github/workflows/certify-zed-cli-gh470.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: certify-zed-cli-gh470-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+env:
+  BASE_SHA: b9d30eac792ca6643b8e7398a6dbafbd8c932e32
+  HEAD_SHA: a41d039952040012b11d01912f2a3498aabf9be7
+  CARGO_TERM_COLOR: always
+
+jobs:
+  exact-sha-macos-certificate:
+    runs-on: macos-latest
+    timeout-minutes: 45
+    steps:
+      - name: Check out exact zed-cli base
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          repository: zed-pkg/zed-cli
+          ref: ${{ env.BASE_SHA }}
+          persist-credentials: false
+          path: base
+
+      - name: Check out exact zed-cli head
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          repository: zed-pkg/zed-cli
+          ref: ${{ env.HEAD_SHA }}
+          persist-credentials: false
+          path: head
+
+      - name: Verify immutable candidates
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git -C base rev-parse HEAD)" = "$BASE_SHA"
+          test "$(git -C head rev-parse HEAD)" = "$HEAD_SHA"
+
+      - name: Install the production Rust toolchain
+        uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30
+        with:
+          toolchain: 1.98.1
+          components: rustfmt, clippy
+
+      - name: Prove the macOS path failure is baseline, not GH-470
+        shell: bash
+        run: |
+          set -euo pipefail
+          test_name='cargo_adapter_configuration_is_root_anchored_in_the_development_home'
+
+          set +e
+          (cd base && cargo test --test develop_edge_cases "$test_name" -- --exact --nocapture) >"$RUNNER_TEMP/base.log" 2>&1
+          base_rc=$?
+          (cd head && cargo test --test develop_edge_cases "$test_name" -- --exact --nocapture) >"$RUNNER_TEMP/head.log" 2>&1
+          head_rc=$?
+          set -e
+
+          if [ "$base_rc" -eq 0 ] || [ "$head_rc" -eq 0 ]; then
+            echo "Expected the known macOS path-spelling regression to reproduce on both exact SHAs."
+            echo "base_rc=$base_rc head_rc=$head_rc"
+            echo '--- base ---'
+            cat "$RUNNER_TEMP/base.log"
+            echo '--- head ---'
+            cat "$RUNNER_TEMP/head.log"
+            exit 1
+          fi
+
+          for log in "$RUNNER_TEMP/base.log" "$RUNNER_TEMP/head.log"; do
+            grep -F "$test_name" "$log"
+            grep -F 'left: Some("/private/var/' "$log"
+            grep -F 'right: Some("/var/' "$log"
+          done
+
+          echo "BASELINE_FAIL confirmed: exact base and exact head fail the same macOS /private/var vs /var assertion class."
+
+      - name: Run the GH-470 staged-artifact boundary regressions on exact head
+        working-directory: head
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test target_pack_rejects_cargo_path_dependency_outside_staged_root -- --exact
+          cargo test target_pack_rejects_target_specific_escaping_path_dependency -- --exact
+          cargo test target_pack_accepts_contained_cargo_path_dependency -- --exact
+          cargo test target_pack_accepts_parent_segments_that_stay_inside_staged_root -- --exact
