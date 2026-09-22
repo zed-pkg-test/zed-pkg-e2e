@@ -1,0 +1,62 @@
+name: certify zed hex.pm PR 477
+
+on:
+  push:
+    branches:
+      - certify/zed-hex-pm-477
+  pull_request:
+    paths:
+      - .github/workflows/certify-zed-hex-pm-477.yml
+
+permissions:
+  contents: read
+
+jobs:
+  focused-contract:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out certification repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Check out exact zed-cli candidate
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          repository: zed-pkg/zed-cli
+          ref: 2c2cba15d70e04d98bf982ea089e207aecd9d59e
+          path: candidate
+          persist-credentials: false
+      - name: Prove exact candidate identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git -C candidate rev-parse HEAD)" = "2c2cba15d70e04d98bf982ea089e207aecd9d59e"
+      - name: Build root dispatcher and Hex.pm sibling binary
+        working-directory: candidate
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo build --locked --bin zed --bin zed-hex-pm
+      - name: Run focused dispatcher and Hex.pm tests
+        working-directory: candidate
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test --locked external_subcommands
+          cargo test --locked --bin zed-hex-pm
+      - name: Certify public hex.pm spelling and private executable mapping
+        working-directory: candidate
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -x target/debug/zed
+          test -x target/debug/zed-hex-pm
+          target/debug/zed hex.pm --help > /tmp/hex-pm-help.txt
+          grep -Fq 'Hex.pm' /tmp/hex-pm-help.txt
+          grep -Fq 'package' /tmp/hex-pm-help.txt
+          if target/debug/zed hex --help >/tmp/ambiguous-hex.txt 2>&1; then
+            echo 'plain `zed hex` unexpectedly resolved; public surface must remain `zed hex.pm`' >&2
+            exit 1
+          fi
+          if target/debug/zed foo.bar >/tmp/arbitrary-dotted.txt 2>&1; then
+            echo 'arbitrary dotted external command unexpectedly resolved' >&2
+            exit 1
+          fi
