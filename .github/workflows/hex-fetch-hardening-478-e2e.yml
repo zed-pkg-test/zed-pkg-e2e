@@ -1,0 +1,391 @@
+name: Hex fetch hardening #478 E2E
+
+on:
+  push:
+    branches:
+      - canary/hex-fetch-hardening-478
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: hex-fetch-hardening-478-e2e
+  cancel-in-progress: true
+
+jobs:
+  hostile-registry-e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      ZED_CLI_SHA: 2ab89a1565a2bd6252ac64b7f022187e1fafb50f
+    steps:
+      - name: Checkout exact zed-cli hardening head
+        uses: actions/checkout@v4
+        with:
+          repository: zed-pkg/zed-cli
+          ref: ${{ env.ZED_CLI_SHA }}
+          path: zed-cli
+          persist-credentials: false
+
+      - name: Record exact source identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          actual=$(git -C zed-cli rev-parse HEAD)
+          test "$actual" = "$ZED_CLI_SHA"
+          echo "zed-cli=$actual" | tee "$GITHUB_STEP_SUMMARY"
+
+      - name: Build zed-hex-pm from the exact head
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd zed-cli
+          rustup show active-toolchain
+          cargo build --locked --bin zed-hex-pm
+
+      - name: Build benign and hostile archive fixtures
+        id: fixtures
+        shell: bash
+        run: |
+          set -euo pipefail
+          FIX="$RUNNER_TEMP/hex-fetch-478"
+          mkdir -p "$FIX/payload" "$FIX/symlink-src" "$FIX/zip-src/sub"
+          printf 'zed hex.pm e2e payload\n' > "$FIX/payload/README.txt"
+
+          tar -czf "$FIX/ok.tar.gz" -C "$FIX/payload" README.txt
+
+          ln -s ../../outside-target "$FIX/symlink-src/link"
+          tar -czf "$FIX/symlink.tar.gz" -C "$FIX/symlink-src" link
+
+          tar -czf "$FIX/traversal.tar.gz" --transform='s|^|../|' -C "$FIX/payload" README.txt
+
+          command -v zip >/dev/null
+          (cd "$FIX/payload" && zip -q "$FIX/ok.zip" README.txt)
+          printf 'zip traversal payload\n' > "$FIX/zip-src/evil.txt"
+          (cd "$FIX/zip-src/sub" && zip -q "$FIX/traversal.zip" ../evil.txt)
+
+          for f in ok.tar.gz symlink.tar.gz traversal.tar.gz ok.zip traversal.zip; do
+            key=$(printf '%s' "$f" | tr '.-' '__' | tr '[:lower:]' '[:upper:]')
+            sha=$(sha256sum "$FIX/$f" | awk '{print $1}')
+            size=$(stat -c '%s' "$FIX/$f")
+            echo "${key}_SHA=$sha" >> "$GITHUB_ENV"
+            echo "${key}_SIZE=$size" >> "$GITHUB_ENV"
+          done
+          echo "FIX=$FIX" >> "$GITHUB_ENV"
+
+      - name: Start disposable registry fixture
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > "$FIX/registry.mjs" <<'NODE'
+          import http from 'node:http';
+          import fs from 'node:fs';
+          import path from 'node:path';
+
+          const fix = process.env.FIX;
+          const logFile = path.join(fix, 'server-requests.log');
+          const port = Number(process.env.PORT);
+
+          const cases = {
+            ok: {
+              file: 'ok.tar.gz', format: 'tar.gz',
+              sha: process.env.OK_TAR_GZ_SHA, size: Number(process.env.OK_TAR_GZ_SIZE),
+            },
+            zipok: {
+              file: 'ok.zip', format: 'zip',
+              sha: process.env.OK_ZIP_SHA, size: Number(process.env.OK_ZIP_SIZE),
+            },
+            symlink: {
+              file: 'symlink.tar.gz', format: 'tar.gz',
+              sha: process.env.SYMLINK_TAR_GZ_SHA, size: Number(process.env.SYMLINK_TAR_GZ_SIZE),
+            },
+            traversal: {
+              file: 'traversal.tar.gz', format: 'tar.gz',
+              sha: process.env.TRAVERSAL_TAR_GZ_SHA, size: Number(process.env.TRAVERSAL_TAR_GZ_SIZE),
+            },
+            ziptraversal: {
+              file: 'traversal.zip', format: 'zip',
+              sha: process.env.TRAVERSAL_ZIP_SHA, size: Number(process.env.TRAVERSAL_ZIP_SIZE),
+            },
+            badsha: {
+              file: 'ok.tar.gz', format: 'tar.gz',
+              sha: '0'.repeat(64), size: Number(process.env.OK_TAR_GZ_SIZE),
+            },
+            oversized: {
+              file: 'ok.tar.gz', format: 'tar.gz',
+              sha: process.env.OK_TAR_GZ_SHA, size: 536870913,
+            },
+            shortbody: {
+              file: 'ok.tar.gz', format: 'tar.gz',
+              sha: process.env.OK_TAR_GZ_SHA, size: Number(process.env.OK_TAR_GZ_SIZE) + 17,
+              shortBody: true,
+            },
+          };
+
+          function json(res, status, value) {
+            const body = Buffer.from(JSON.stringify(value));
+            res.writeHead(status, {
+              'content-type': 'application/json',
+              'content-length': String(body.length),
+            });
+            res.end(body);
+          }
+
+          const server = http.createServer((req, res) => {
+            fs.appendFileSync(logFile, `${req.method} ${req.url}\n`);
+            const url = new URL(req.url, `http://127.0.0.1:${port}`);
+
+            if (url.pathname === '/healthz') {
+              return json(res, 200, { status: 'ok', fixture: 'hex-fetch-478' });
+            }
+
+            if (url.pathname === '/v1/search') {
+              return json(res, 200, {
+                query: url.searchParams.get('q') ?? '',
+                items: [
+                  { org: 'acme', name: 'ok', description: 'fixture', latest: '1.0.0', tags: ['http'] },
+                  { org: 'other', name: 'noise', description: 'filter me', latest: '9.9.9', tags: ['http'] },
+                ],
+              });
+            }
+
+            if (url.pathname === '/v1/packages/acme/ok') {
+              return json(res, 200, {
+                org: 'acme',
+                name: 'ok',
+                description: 'hostile-registry e2e fixture',
+                vcs: 'git',
+                repo_url: 'https://example.invalid/acme/ok',
+                latest: '1.0.0',
+                tags: ['http'],
+                versions: ['1.0.0'],
+              });
+            }
+
+            const match = url.pathname.match(/^\/v1\/packages\/acme\/([^/]+)\/versions\/1\.0\.0$/);
+            if (match) {
+              const name = match[1];
+              const c = cases[name];
+              if (!c) return json(res, 404, { error: 'unknown fixture' });
+              return json(res, 200, {
+                org: 'acme',
+                name,
+                version: '1.0.0',
+                sha256: c.sha,
+                size: c.size,
+                format: c.format,
+                vcs_tag: 'v1.0.0',
+                download_url: `/artifact/${name}`,
+                published_at: '2026-09-23T20:00:00Z',
+                yanked: false,
+              });
+            }
+
+            const artifact = url.pathname.match(/^\/artifact\/([^/]+)$/);
+            if (artifact) {
+              const name = artifact[1];
+              const c = cases[name];
+              if (!c) return json(res, 404, { error: 'unknown artifact' });
+              const bytes = fs.readFileSync(path.join(fix, c.file));
+              if (c.shortBody) {
+                res.writeHead(200, {
+                  'content-type': 'application/octet-stream',
+                  'content-length': String(c.size),
+                });
+                return res.end(bytes);
+              }
+              res.writeHead(200, {
+                'content-type': 'application/octet-stream',
+                'content-length': String(bytes.length),
+              });
+              return res.end(bytes);
+            }
+
+            return json(res, 404, { error: 'not found', path: url.pathname });
+          });
+
+          server.listen(port, '127.0.0.1', () => {
+            console.log(`fixture registry listening on ${port}`);
+          });
+          NODE
+
+          PORT=$((31000 + RANDOM % 5000))
+          echo "PORT=$PORT" >> "$GITHUB_ENV"
+          export PORT
+          node "$FIX/registry.mjs" > "$FIX/server.log" 2>&1 &
+          echo $! > "$FIX/server.pid"
+          for _ in $(seq 1 50); do
+            if curl --fail --silent "http://127.0.0.1:$PORT/healthz" >/dev/null; then
+              exit 0
+            fi
+            sleep 0.2
+          done
+          cat "$FIX/server.log"
+          exit 1
+
+      - name: E2E read surface against disposable registry
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN="$GITHUB_WORKSPACE/zed-cli/target/debug/zed-hex-pm"
+          REG="http://127.0.0.1:$PORT"
+          OUT="$RUNNER_TEMP/hex-e2e-output"
+          mkdir -p "$OUT"
+
+          "$BIN" --registry "$REG" --json info > "$OUT/health.json"
+          jq -e '.health.status == "ok"' "$OUT/health.json"
+
+          "$BIN" --registry "$REG" --json info acme/ok > "$OUT/package.json"
+          jq -e '.org == "acme" and .name == "ok" and .latest == "1.0.0"' "$OUT/package.json"
+
+          "$BIN" --registry "$REG" --json info acme/ok 1.0.0 > "$OUT/version.json"
+          jq -e '.org == "acme" and .name == "ok" and .version == "1.0.0"' "$OUT/version.json"
+
+          "$BIN" --registry "$REG" --json search http --organization acme > "$OUT/search.json"
+          jq -e '.query == "http" and (.items | length) == 1 and .items[0].org == "acme"' "$OUT/search.json"
+
+      - name: E2E verified fetch and unpack for tar.gz and zip
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN="$GITHUB_WORKSPACE/zed-cli/target/debug/zed-hex-pm"
+          REG="http://127.0.0.1:$PORT"
+          OUT="$RUNNER_TEMP/hex-e2e-output"
+
+          "$BIN" --registry "$REG" --json package fetch acme/ok 1.0.0 --output "$OUT/ok.tar.gz" > "$OUT/fetch-tar.json"
+          cmp "$FIX/ok.tar.gz" "$OUT/ok.tar.gz"
+          jq -e '.sha256 == env.OK_TAR_GZ_SHA and .unpacked == false' "$OUT/fetch-tar.json"
+
+          "$BIN" --registry "$REG" --json package fetch acme/ok 1.0.0 --unpack --output "$OUT/tar-unpacked" > "$OUT/unpack-tar.json"
+          grep -Fx 'zed hex.pm e2e payload' "$OUT/tar-unpacked/README.txt"
+          jq -e '.unpacked == true' "$OUT/unpack-tar.json"
+
+          "$BIN" --registry "$REG" --json package fetch acme/zipok 1.0.0 --unpack --output "$OUT/zip-unpacked" > "$OUT/unpack-zip.json"
+          grep -Fx 'zed hex.pm e2e payload' "$OUT/zip-unpacked/README.txt"
+          jq -e '.format == "zip" and .unpacked == true' "$OUT/unpack-zip.json"
+
+      - name: E2E fail closed on checksum, declared size, and short body
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN="$GITHUB_WORKSPACE/zed-cli/target/debug/zed-hex-pm"
+          REG="http://127.0.0.1:$PORT"
+          OUT="$RUNNER_TEMP/hex-e2e-output"
+
+          if "$BIN" --registry "$REG" package fetch acme/badsha 1.0.0 --output "$OUT/badsha.tar.gz" >"$OUT/badsha.log" 2>&1; then
+            echo 'checksum mismatch unexpectedly succeeded' >&2; exit 1
+          fi
+          grep -F 'checksum mismatch' "$OUT/badsha.log"
+          test ! -e "$OUT/badsha.tar.gz"
+
+          before=$(grep -c 'GET /artifact/oversized' "$FIX/server-requests.log" || true)
+          if "$BIN" --registry "$REG" package fetch acme/oversized 1.0.0 --output "$OUT/oversized.tar.gz" >"$OUT/oversized.log" 2>&1; then
+            echo 'oversized metadata unexpectedly succeeded' >&2; exit 1
+          fi
+          grep -F 'artifact is too large' "$OUT/oversized.log"
+          after=$(grep -c 'GET /artifact/oversized' "$FIX/server-requests.log" || true)
+          test "$before" = "$after"
+          test ! -e "$OUT/oversized.tar.gz"
+
+          if "$BIN" --registry "$REG" package fetch acme/shortbody 1.0.0 --output "$OUT/shortbody.tar.gz" >"$OUT/shortbody.log" 2>&1; then
+            echo 'short body unexpectedly succeeded' >&2; exit 1
+          fi
+          test ! -e "$OUT/shortbody.tar.gz"
+
+      - name: E2E reject clobber and pre-existing extraction destinations
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN="$GITHUB_WORKSPACE/zed-cli/target/debug/zed-hex-pm"
+          REG="http://127.0.0.1:$PORT"
+          OUT="$RUNNER_TEMP/hex-e2e-output"
+
+          printf 'sentinel\n' > "$OUT/existing.tar.gz"
+          if "$BIN" --registry "$REG" package fetch acme/ok 1.0.0 --output "$OUT/existing.tar.gz" >"$OUT/clobber.log" 2>&1; then
+            echo 'archive clobber unexpectedly succeeded' >&2; exit 1
+          fi
+          grep -F 'refusing to overwrite' "$OUT/clobber.log"
+          grep -Fx 'sentinel' "$OUT/existing.tar.gz"
+
+          mkdir "$OUT/existing-dir"
+          if "$BIN" --registry "$REG" package fetch acme/ok 1.0.0 --unpack --output "$OUT/existing-dir" >"$OUT/existing-dir.log" 2>&1; then
+            echo 'existing unpack directory unexpectedly succeeded' >&2; exit 1
+          fi
+          grep -F 'existing path' "$OUT/existing-dir.log"
+          test -d "$OUT/existing-dir"
+
+          ln -s "$OUT/does-not-exist" "$OUT/broken-link-destination"
+          if "$BIN" --registry "$REG" package fetch acme/ok 1.0.0 --unpack --output "$OUT/broken-link-destination" >"$OUT/broken-link.log" 2>&1; then
+            echo 'broken symlink destination unexpectedly succeeded' >&2; exit 1
+          fi
+          grep -F 'existing path' "$OUT/broken-link.log"
+          test -L "$OUT/broken-link-destination"
+
+      - name: E2E reject hostile tar and zip members and clean partial trees
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN="$GITHUB_WORKSPACE/zed-cli/target/debug/zed-hex-pm"
+          REG="http://127.0.0.1:$PORT"
+          OUT="$RUNNER_TEMP/hex-e2e-output"
+
+          if "$BIN" --registry "$REG" package fetch acme/symlink 1.0.0 --unpack --output "$OUT/symlink-out" >"$OUT/symlink.log" 2>&1; then
+            echo 'tar symlink unexpectedly succeeded' >&2; exit 1
+          fi
+          grep -F 'link or unsupported special entry' "$OUT/symlink.log"
+          test ! -e "$OUT/symlink-out"
+
+          if "$BIN" --registry "$REG" package fetch acme/traversal 1.0.0 --unpack --output "$OUT/traversal-out" >"$OUT/traversal.log" 2>&1; then
+            echo 'tar traversal unexpectedly succeeded' >&2; exit 1
+          fi
+          grep -F 'escape extraction directory' "$OUT/traversal.log"
+          test ! -e "$OUT/traversal-out"
+          test ! -e "$OUT/README.txt"
+
+          if "$BIN" --registry "$REG" package fetch acme/ziptraversal 1.0.0 --unpack --output "$OUT/zip-traversal-out" >"$OUT/zip-traversal.log" 2>&1; then
+            echo 'zip traversal unexpectedly succeeded' >&2; exit 1
+          fi
+          grep -F 'escape extraction directory' "$OUT/zip-traversal.log"
+          test ! -e "$OUT/zip-traversal-out"
+          test ! -e "$OUT/evil.txt"
+
+      - name: E2E reject URL and coordinate injection before unsafe requests
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN="$GITHUB_WORKSPACE/zed-cli/target/debug/zed-hex-pm"
+          REG="http://127.0.0.1:$PORT"
+          OUT="$RUNNER_TEMP/hex-e2e-output"
+
+          if "$BIN" --registry 'file:///tmp/not-http' info >"$OUT/file-registry.log" 2>&1; then
+            echo 'file registry unexpectedly accepted' >&2; exit 1
+          fi
+          grep -F 'registry URL must use http or https' "$OUT/file-registry.log"
+
+          before=$(wc -l < "$FIX/server-requests.log")
+          if "$BIN" --registry "$REG" info 'acme/%2e%2e' 1.0.0 >"$OUT/path-injection.log" 2>&1; then
+            echo 'path injection unexpectedly accepted' >&2; exit 1
+          fi
+          grep -F 'not safe in a registry path segment' "$OUT/path-injection.log"
+          after=$(wc -l < "$FIX/server-requests.log")
+          test "$before" = "$after"
+
+      - name: Stop fixture and publish certificate summary
+        if: always()
+        shell: bash
+        run: |
+          set +e
+          if [[ -n "${FIX:-}" && -f "$FIX/server.pid" ]]; then
+            kill "$(cat "$FIX/server.pid")" 2>/dev/null
+          fi
+          {
+            echo '## zed hex.pm fetch hardening E2E'
+            echo
+            echo "- source SHA: \`${ZED_CLI_SHA}\`"
+            echo '- runner/org: `zed-pkg-test/zed-pkg-e2e` / GitHub-hosted Ubuntu'
+            echo '- exercised: info, search, tar/zip fetch+unpack, SHA verification, declared-size cap, truncated body, no-clobber, existing/broken-symlink destination refusal, tar link/traversal rejection, zip traversal rejection, cleanup, URL/path injection rejection'
+            if [[ -f "$FIX/server-requests.log" ]]; then
+              echo "- fixture HTTP requests: $(wc -l < "$FIX/server-requests.log")"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
