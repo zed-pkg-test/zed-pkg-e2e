@@ -62,7 +62,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: ORESoftware/live-mutex
-          ref: e3999e4cafa1bcf3020aa4ffbf4d9be345dacfda
+          ref: 81b23fd086f3c9d5614627270927a0d4987d3624
           persist-credentials: false
       - name: Set up Node.js
         uses: actions/setup-node@v4
@@ -77,6 +77,13 @@ jobs:
         run: npx -y ts-node@10.9.2 test/formal-fencing-model-test.ts
       - name: Client fencing surface
         run: npx -y ts-node@10.9.2 test/formal-client-fencing-surface-test.ts
+      - name: Set up F# client runtime
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - name: F# fencing-token client tests
+        working-directory: clients/fsharp
+        run: dotnet fsi fencing-token-tests.fsx
       - name: Broker1 fencing authority hardening
         run: npx -y ts-node@10.9.2 test/fencing-authority-hardening-test.ts
       - name: Real Broker1 external-effect fencing
@@ -95,7 +102,7 @@ jobs:
             sha: 53ef1896d6b9b37ca6d220cc5830180fe06892cf
           - name: live-mutex
             repository: ORESoftware/live-mutex
-            sha: e3999e4cafa1bcf3020aa4ffbf4d9be345dacfda
+            sha: 81b23fd086f3c9d5614627270927a0d4987d3624
     steps:
       - name: Checkout exact source PR head
         uses: actions/checkout@v4
