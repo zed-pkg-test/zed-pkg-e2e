@@ -1,0 +1,102 @@
+name: live-mutex cross-org e2e
+
+on:
+  pull_request:
+    branches:
+      - main
+  push:
+    branches:
+      - test/live-mutex-cross-e2e-20260925
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: live-mutex-cross-org-e2e-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  rust-e2e:
+    name: live-mutex-rs / full locked test suite
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout exact live-mutex-rs PR head
+        uses: actions/checkout@v4
+        with:
+          repository: ORESoftware/live-mutex-rs
+          ref: 05ec4769c19511b9be420d060901859d5b65fd92
+      - name: Select stable Rust
+        run: |
+          rustup update stable
+          rustup default stable
+          rustc --version
+          cargo --version
+      - name: Run server, integration, formal, and client-conformance tests
+        run: cargo test --all-targets --locked -- --nocapture
+
+  node-e2e:
+    name: live-mutex / full Broker1 test suite
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      LMX_TEST_TIMEOUT_MS: '900000'
+      LMX_TEST_INACTIVITY_TIMEOUT_MS: '300000'
+    steps:
+      - name: Checkout exact live-mutex PR head
+        uses: actions/checkout@v4
+        with:
+          repository: ORESoftware/live-mutex
+          ref: b85a72203be7e0a1a1fd10a1d5fe6441689f254b
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - name: Install locked dependencies
+        run: npm ci
+      - name: Run Broker1, integration, formal, and client-conformance tests
+        run: npm test
+
+  zed-roundtrip:
+    name: zed roundtrip / ${{ matrix.name }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: live-mutex-rs
+            repository: ORESoftware/live-mutex-rs
+            sha: 05ec4769c19511b9be420d060901859d5b65fd92
+          - name: live-mutex
+            repository: ORESoftware/live-mutex
+            sha: b85a72203be7e0a1a1fd10a1d5fe6441689f254b
+    steps:
+      - name: Checkout exact source PR head
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ matrix.repository }}
+          ref: ${{ matrix.sha }}
+          path: source
+      - name: Checkout zed-pkg CLI
+        uses: actions/checkout@v4
+        with:
+          repository: zed-pkg/zed-cli
+          ref: main
+          path: zed-cli
+      - name: Build zed CLI
+        run: |
+          rustup update stable
+          rustup default stable
+          cargo build --manifest-path zed-cli/Cargo.toml --release --locked --bin zed
+      - name: Validate, pack, and locally consume through zed
+        shell: bash
+        run: |
+          set -euo pipefail
+          ZED="$GITHUB_WORKSPACE/zed-cli/target/release/zed"
+          cd source
+          "$ZED" validate
+          "$ZED" pack
+          "$ZED" r2g
