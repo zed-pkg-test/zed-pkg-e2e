@@ -22,7 +22,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: ORESoftware/live-mutex-rs
-          ref: cb894f23cb64cc6f52de7c9bfbe9e1997b8248ec
+          ref: 53ef1896d6b9b37ca6d220cc5830180fe06892cf
           persist-credentials: false
       - name: Select stable Rust
         run: |
@@ -38,11 +38,14 @@ jobs:
         run: cargo test --locked --test fencing_external_effects -- --nocapture
       - name: Polyglot protocol parity
         run: bash clients/check-protocol-parity.sh
-      - name: Set up Elixir client runtime
+      - name: Set up BEAM client runtimes
         uses: erlef/setup-beam@v1
         with:
           otp-version: '28'
           elixir-version: '1.18'
+      - name: Erlang fencing-token client tests
+        working-directory: clients/erlang
+        run: make test
       - name: Elixir fencing-token client tests
         working-directory: clients/elixir
         run: mix test
@@ -89,7 +92,7 @@ jobs:
         include:
           - name: live-mutex-rs
             repository: ORESoftware/live-mutex-rs
-            sha: cb894f23cb64cc6f52de7c9bfbe9e1997b8248ec
+            sha: 53ef1896d6b9b37ca6d220cc5830180fe06892cf
           - name: live-mutex
             repository: ORESoftware/live-mutex
             sha: e3999e4cafa1bcf3020aa4ffbf4d9be345dacfda
