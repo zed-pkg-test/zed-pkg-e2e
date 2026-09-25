@@ -16,30 +16,42 @@ concurrency:
   group: live-mutex-cross-org-e2e-${{ github.ref }}
   cancel-in-progress: false
 
+env:
+  RUST_HEAD: 04a1242bfbcbbc37ef9cd8b9b4941a0693cf6d7c
+  NODE_HEAD: e3999e4cafa1bcf3020aa4ffbf4d9be345dacfda
+  ZED_CLI_HEAD: 17412050a0f4c4f963008f0de9abf3651d42af08
+
 jobs:
-  rust-e2e:
-    name: live-mutex-rs / full locked test suite
+  rust-fencing-e2e:
+    name: live-mutex-rs / fencing + formal + clients
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 35
     steps:
       - name: Checkout exact live-mutex-rs PR head
         uses: actions/checkout@v4
         with:
           repository: ORESoftware/live-mutex-rs
-          ref: 05ec4769c19511b9be420d060901859d5b65fd92
+          ref: ${{ env.RUST_HEAD }}
+          persist-credentials: false
       - name: Select stable Rust
         run: |
           rustup update stable
           rustup default stable
           rustc --version
           cargo --version
-      - name: Run server, integration, formal, and client-conformance tests
-        run: cargo test --all-targets --locked -- --nocapture
+      - name: Formal fencing model
+        run: cargo test --locked --test formal_fencing_model -- --nocapture
+      - name: Client fencing surface
+        run: cargo test --locked --test formal_client_fencing_surface -- --nocapture
+      - name: Real broker external-effect fencing
+        run: cargo test --locked --test fencing_external_effects -- --nocapture
+      - name: Polyglot protocol parity
+        run: bash clients/check-protocol-parity.sh
 
-  node-e2e:
-    name: live-mutex / full Broker1 test suite
+  node-fencing-e2e:
+    name: live-mutex / Broker1 fencing + formal + clients
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 35
     env:
       LMX_TEST_TIMEOUT_MS: '900000'
       LMX_TEST_INACTIVITY_TIMEOUT_MS: '300000'
@@ -48,19 +60,28 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: ORESoftware/live-mutex
-          ref: b85a72203be7e0a1a1fd10a1d5fe6441689f254b
+          ref: ${{ env.NODE_HEAD }}
+          persist-credentials: false
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
           node-version: '22'
           cache: npm
-      - name: Install locked dependencies
-        run: npm ci
-      - name: Run Broker1, integration, formal, and client-conformance tests
-        run: npm test
+      - name: Install locked dependencies without lifecycle scripts
+        run: npm ci --ignore-scripts
+      - name: Build Broker1 artifacts
+        run: npm run build
+      - name: Formal fencing model
+        run: npx --no-install ts-node test/formal-fencing-model-test.ts
+      - name: Client fencing surface
+        run: npx --no-install ts-node test/formal-client-fencing-surface-test.ts
+      - name: Broker1 fencing authority hardening
+        run: npx --no-install ts-node test/fencing-authority-hardening-test.ts
+      - name: Real Broker1 external-effect fencing
+        run: npx --no-install ts-node test/fencing-external-effects-test.ts
 
   zed-roundtrip:
-    name: zed roundtrip / ${{ matrix.name }}
+    name: zed validate + pack + r2g / ${{ matrix.name }}
     runs-on: ubuntu-latest
     timeout-minutes: 60
     strategy:
@@ -69,10 +90,10 @@ jobs:
         include:
           - name: live-mutex-rs
             repository: ORESoftware/live-mutex-rs
-            sha: 05ec4769c19511b9be420d060901859d5b65fd92
+            sha: 04a1242bfbcbbc37ef9cd8b9b4941a0693cf6d7c
           - name: live-mutex
             repository: ORESoftware/live-mutex
-            sha: b85a72203be7e0a1a1fd10a1d5fe6441689f254b
+            sha: e3999e4cafa1bcf3020aa4ffbf4d9be345dacfda
     steps:
       - name: Checkout exact source PR head
         uses: actions/checkout@v4
@@ -80,23 +101,24 @@ jobs:
           repository: ${{ matrix.repository }}
           ref: ${{ matrix.sha }}
           path: source
-      - name: Checkout zed-pkg CLI
+          persist-credentials: false
+      - name: Checkout exact zed-pkg CLI revision
         uses: actions/checkout@v4
         with:
           repository: zed-pkg/zed-cli
-          ref: main
+          ref: ${{ env.ZED_CLI_HEAD }}
           path: zed-cli
-      - name: Build zed CLI
+          persist-credentials: false
+      - name: Build pinned zed CLI
         run: |
           rustup update stable
           rustup default stable
           cargo build --manifest-path zed-cli/Cargo.toml --release --locked --bin zed
-      - name: Validate, pack, and locally consume through zed
-        shell: bash
-        run: |
-          set -euo pipefail
-          ZED="$GITHUB_WORKSPACE/zed-cli/target/release/zed"
-          cd source
-          "$ZED" validate
-          "$ZED" pack
-          "$ZED" r2g
+      - name: Validate source manifest
+        run: "$GITHUB_WORKSPACE/zed-cli/target/release/zed" validate --manifest source/.zpkg.toml
+      - name: Pack deterministic source artifact
+        working-directory: source
+        run: "$GITHUB_WORKSPACE/zed-cli/target/release/zed" pack
+      - name: Install and smoke-test packed artifact through isolated Zed registry
+        working-directory: source
+        run: "$GITHUB_WORKSPACE/zed-cli/target/release/zed" r2g
