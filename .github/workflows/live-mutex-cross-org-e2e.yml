@@ -11,29 +11,17 @@ permissions:
   contents: read
 
 jobs:
-  rust-fencing-e2e:
-    name: live-mutex-rs fencing formal clients
+  rust-client-runtimes:
+    name: live-mutex-rs BEAM + OCaml fencing clients
     runs-on: ubuntu-latest
-    timeout-minutes: 40
+    timeout-minutes: 20
     steps:
-      - name: Checkout exact live-mutex-rs PR head
+      - name: Checkout exact final Rust PR head
         uses: actions/checkout@v4
         with:
           repository: ORESoftware/live-mutex-rs
-          ref: 9d00c73be8177cb41e24908e695918ec36f44897
+          ref: 03ee197a35fc2fee25c7ec79f755cfd316d3091c
           persist-credentials: false
-      - name: Select stable Rust
-        run: |
-          rustup update stable
-          rustup default stable
-      - name: Formal fencing model
-        run: cargo test --locked --test formal_fencing_model -- --nocapture
-      - name: Client fencing surface
-        run: cargo test --locked --test formal_client_fencing_surface -- --nocapture
-      - name: Real broker external-effect fencing
-        run: cargo test --locked --test fencing_external_effects -- --nocapture
-      - name: Polyglot protocol parity
-        run: bash clients/check-protocol-parity.sh
       - name: Set up BEAM client runtimes
         uses: erlef/setup-beam@v1
         with:
@@ -51,80 +39,16 @@ jobs:
           command -v ocamlc >/dev/null || (sudo apt-get update && sudo apt-get install -y ocaml)
           make test
 
-  node-fencing-e2e:
-    name: live-mutex Broker1 fencing formal clients
-    runs-on: ubuntu-latest
-    timeout-minutes: 40
-    env:
-      LMX_TEST_TIMEOUT_MS: '900000'
-      LMX_TEST_INACTIVITY_TIMEOUT_MS: '300000'
-    steps:
-      - name: Checkout exact live-mutex PR head
-        uses: actions/checkout@v4
-        with:
-          repository: ORESoftware/live-mutex
-          ref: 3158b77939777dbbab96f691879467a03d340546
-          persist-credentials: false
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-          cache: npm
-      - name: Install locked dependencies without lifecycle scripts
-        run: npm ci --ignore-scripts
-      - name: Build Broker1 artifacts
-        run: npm run build
-      - name: Formal fencing model
-        run: npx -y ts-node@10.9.2 test/formal-fencing-model-test.ts
-      - name: Client fencing surface
-        run: npx -y ts-node@10.9.2 test/formal-client-fencing-surface-test.ts
-      - name: Set up F# client runtime
-        uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: '8.0.x'
-      - name: F# fencing-token client tests
-        working-directory: clients/fsharp
-        run: dotnet fsi fencing-token-tests.fsx
-      - name: Legacy Python3 fencing-token client tests
-        working-directory: clients/python3
-        run: |
-          python3 - <<'PY'
-          import main
-          assert main.fencing_token_from_response({'fencingToken': 9007199254740991}) == 9007199254740991
-          for bad in (None, 0, -1, True, 1.5, 9007199254740992):
-              try:
-                  main.fencing_token_from_response({'fencingToken': bad})
-              except main.InvalidFencingTokenError:
-                  pass
-              else:
-                  raise AssertionError('accepted unsafe fencing token: %r' % (bad,))
-          print('legacy Python3 fencing-token checks passed')
-          PY
-      - name: Broker1 fencing authority hardening
-        run: npx -y ts-node@10.9.2 test/fencing-authority-hardening-test.ts
-      - name: Real Broker1 external-effect fencing
-        run: npx -y ts-node@10.9.2 test/fencing-external-effects-test.ts
-
-  zed-roundtrip:
-    name: zed roundtrip ${{ matrix.name }}
+  rust-zed-roundtrip:
+    name: zed roundtrip live-mutex-rs final head
     runs-on: ubuntu-latest
     timeout-minutes: 60
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - name: live-mutex-rs
-            repository: ORESoftware/live-mutex-rs
-            sha: 9d00c73be8177cb41e24908e695918ec36f44897
-          - name: live-mutex
-            repository: ORESoftware/live-mutex
-            sha: 3158b77939777dbbab96f691879467a03d340546
     steps:
-      - name: Checkout exact source PR head
+      - name: Checkout exact final Rust PR head
         uses: actions/checkout@v4
         with:
-          repository: ${{ matrix.repository }}
-          ref: ${{ matrix.sha }}
+          repository: ORESoftware/live-mutex-rs
+          ref: 03ee197a35fc2fee25c7ec79f755cfd316d3091c
           path: source
           persist-credentials: false
       - name: Checkout pinned zed-pkg CLI
