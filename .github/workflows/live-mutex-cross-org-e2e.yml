@@ -20,7 +20,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: ORESoftware/live-mutex-rs
-          ref: 03ee197a35fc2fee25c7ec79f755cfd316d3091c
+          ref: 1da05bc6f3fa9f1f345c63e873b0afb76b8dc0ce
           persist-credentials: false
       - name: Set up BEAM client runtimes
         uses: erlef/setup-beam@v1
@@ -48,7 +48,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: ORESoftware/live-mutex-rs
-          ref: 03ee197a35fc2fee25c7ec79f755cfd316d3091c
+          ref: 1da05bc6f3fa9f1f345c63e873b0afb76b8dc0ce
           path: source
           persist-credentials: false
       - name: Checkout pinned zed-pkg CLI
