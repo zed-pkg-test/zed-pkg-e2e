@@ -1,0 +1,74 @@
+name: live-mutex cross-org e2e
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [test/live-mutex-cross-e2e-20260925]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  rust-client-runtimes:
+    name: live-mutex-rs BEAM + OCaml fencing clients
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout exact final Rust PR head
+        uses: actions/checkout@v4
+        with:
+          repository: ORESoftware/live-mutex-rs
+          ref: 1da05bc6f3fa9f1f345c63e873b0afb76b8dc0ce
+          persist-credentials: false
+      - name: Set up BEAM client runtimes
+        uses: erlef/setup-beam@v1
+        with:
+          otp-version: '28'
+          elixir-version: '1.18'
+      - name: Erlang fencing-token client tests
+        working-directory: clients/erlang
+        run: make test
+      - name: Elixir fencing-token client tests
+        working-directory: clients/elixir
+        run: mix test
+      - name: OCaml fencing-token client tests
+        working-directory: clients/ocaml
+        run: |
+          command -v ocamlc >/dev/null || (sudo apt-get update && sudo apt-get install -y ocaml)
+          make test
+
+  rust-zed-roundtrip:
+    name: zed roundtrip live-mutex-rs final head
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Checkout exact final Rust PR head
+        uses: actions/checkout@v4
+        with:
+          repository: ORESoftware/live-mutex-rs
+          ref: 1da05bc6f3fa9f1f345c63e873b0afb76b8dc0ce
+          path: source
+          persist-credentials: false
+      - name: Checkout pinned zed-pkg CLI
+        uses: actions/checkout@v4
+        with:
+          repository: zed-pkg/zed-cli
+          ref: 17412050a0f4c4f963008f0de9abf3651d42af08
+          path: zed-cli
+          persist-credentials: false
+      - name: Build pinned zed CLI
+        run: |
+          rustup update stable
+          rustup default stable
+          cargo build --manifest-path zed-cli/Cargo.toml --release --locked --bin zed
+      - name: Validate source manifest
+        working-directory: source
+        run: ../zed-cli/target/release/zed validate
+      - name: Pack deterministic source artifact
+        working-directory: source
+        run: ../zed-cli/target/release/zed pack
+      - name: Install and smoke-test through isolated Zed registry
+        working-directory: source
+        run: ../zed-cli/target/release/zed r2g
