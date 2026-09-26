@@ -1,0 +1,31 @@
+# Cargo manifest for scintilla-cli: builds the `scintilla` binary and its library half.
+[package]
+name = "scintilla-cli"
+version = "0.1.0"
+edition = "2021"
+description = "Command-line client for the Scintilla lambda and workflow control plane"
+license = "MIT"
+repository = "https://github.com/scintilla-run/scintilla-cli"
+
+[lib]
+name = "scintilla_cli"
+path = "src/lib.rs"
+
+[[bin]]
+name = "scintilla"
+path = "src/main.rs"
+
+[lints.rust]
+unsafe_code = "deny"
+
+[dependencies]
+flags2env = { git = "https://github.com/flags-2-env/flags-2-env.git", rev = "8c8465561075a8d7ebb58074b3a8087138e97d8f" }
+ores-clis-core = { path = ".vendor/.zed/oresoftware/ores-clis-core", version = "0.1.0" }
+ores-api-docs = { path = ".vendor/.zed/oresoftware/api-docs/rust", version = "0.1.0", default-features = false }
+scintilla-interfaces = { path = ".vendor/.zed/scintilla-run/scintilla-interfaces/langs/rust", version = "0.1.0" }
+scintilla-client = { path = ".vendor/.zed/scintilla-run/scintilla-clients/clients/rust", version = "0.1.0" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+toml = "0.8"
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }

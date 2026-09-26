@@ -1,0 +1,106 @@
+name: scintilla-cli 19 Zed dependency proof
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/scintilla-cli-19-zed-proof.yml"
+      - "proof/scintilla-cli-19/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  resolve-lock-and-test:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      SOURCE_SHA: 791701e292fa4a8171c37e42b68846d54e23667d
+      ZED_CLI_SHA: 17412050a0f4c4f963008f0de9abf3651d42af08
+      ZED_PKG_INSTALL_MODE: copy
+    steps:
+      - name: Checkout evidence repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+          show-progress: false
+
+      - name: Install Rust
+        shell: bash
+        run: |
+          set -euo pipefail
+          rustup toolchain install stable --profile minimal --no-self-update
+          rustup default stable
+
+      - name: Build immutable Zed CLI
+        shell: bash
+        run: |
+          set -euo pipefail
+          git clone --no-checkout https://github.com/zed-pkg/zed-cli.git zed-cli
+          git -C zed-cli checkout --detach "$ZED_CLI_SHA"
+          test "$(git -C zed-cli rev-parse HEAD)" = "$ZED_CLI_SHA"
+          cargo build --manifest-path zed-cli/Cargo.toml --release --locked --bin zed
+          ./zed-cli/target/release/zed --version
+
+      - name: Verify pinned source manifests
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(sha256sum proof/scintilla-cli-19/Cargo.toml | awk '{print $1}')" = "0bcc0114984ddd8fc46abf86b712e3c7b7b34d3d589c04cd8826f4361aec9ca1"
+          test "$(sha256sum proof/scintilla-cli-19/.zpkg.toml | awk '{print $1}')" = "0227ad09f8459adfa67e089458682a81305b5f0efa33ab024081c5439456590a"
+          printf '%s\n' "$SOURCE_SHA"
+
+      - name: Resolve exact Zed package graph
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd proof/scintilla-cli-19
+          ../../zed-cli/target/release/zed install
+          test -f .zpkg.lock
+          test -f .vendor/.zed/oresoftware/api-docs/rust/Cargo.toml
+          test -f .vendor/.zed/scintilla-run/scintilla-interfaces/langs/rust/Cargo.toml
+          test -f .vendor/.zed/scintilla-run/scintilla-clients/clients/rust/Cargo.toml
+          grep -F 'name = "ores-api-docs"' .vendor/.zed/oresoftware/api-docs/rust/Cargo.toml
+          grep -F 'version = "0.1.0"' .vendor/.zed/oresoftware/api-docs/rust/Cargo.toml
+          grep -F 'oresoftware/api-docs' .zpkg.lock
+          ../../zed-cli/target/release/zed install --frozen
+
+      - name: Refresh Cargo lock against installed Zed packages
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd proof/scintilla-cli-19
+          cargo generate-lockfile
+          cargo metadata --locked --format-version 1 >/tmp/scintilla-cli-19-metadata.json
+          grep -F 'name = "ores-api-docs"' Cargo.lock
+          grep -F 'name = "ores-clis-core"' Cargo.lock
+          grep -F 'name = "scintilla-interfaces"' Cargo.lock
+          grep -F 'name = "scintilla-client"' Cargo.lock
+
+      - name: Compile the exact dependency graph with refreshed locks
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo check --manifest-path proof/scintilla-cli-19/Cargo.toml --all-targets --locked
+
+      - name: Record immutable evidence digests
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd proof/scintilla-cli-19
+          sha256sum .zpkg.lock Cargo.lock
+          printf '%s\n' "$SOURCE_SHA" > /tmp/source-sha.txt
+          printf '%s\n' "$ZED_CLI_SHA" > /tmp/zed-cli-sha.txt
+
+      - name: Upload generated lock evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: scintilla-cli-19-generated-locks
+          if-no-files-found: error
+          retention-days: 7
+          path: |
+            proof/scintilla-cli-19/.zpkg.lock
+            proof/scintilla-cli-19/Cargo.lock
+            /tmp/source-sha.txt
+            /tmp/zed-cli-sha.txt
+            /tmp/scintilla-cli-19-metadata.json
