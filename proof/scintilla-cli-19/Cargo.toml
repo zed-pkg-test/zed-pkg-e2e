@@ -1,12 +1,14 @@
-# Exact dependency manifest from scintilla-run/scintilla-cli#19 after the Zed-only internal dependency hardening.
+# Cargo manifest for scintilla-cli: builds the `scintilla` binary and its library half.
 [package]
-name = "scintilla-cli-lock-proof"
+name = "scintilla-cli"
 version = "0.1.0"
 edition = "2021"
-publish = false
+description = "Command-line client for the Scintilla lambda and workflow control plane"
+license = "MIT"
+repository = "https://github.com/scintilla-run/scintilla-cli"
 
 [lib]
-name = "scintilla_cli_lock_proof"
+name = "scintilla_cli"
 path = "src/lib.rs"
 
 [[bin]]
