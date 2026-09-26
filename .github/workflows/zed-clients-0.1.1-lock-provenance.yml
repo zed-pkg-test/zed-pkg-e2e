@@ -1,0 +1,138 @@
+name: zed-clients 0.1.1 lock provenance
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/zed-clients-0.1.1-lock-provenance.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: zed-clients-011-lock-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  ZED_CLIENTS_REF: 90b04cc4d98bf882c54009a0eecbe2ea617880b5
+  ZED_CLI_REF: f003a7421b4b293750e0d9086e5290535b1eeb89
+  CARGO_TERM_COLOR: always
+  GIT_TERMINAL_PROMPT: "0"
+
+jobs:
+  resolve-and-replay:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - name: Require immutable candidate pins
+        run: |
+          set -euo pipefail
+          [[ "$ZED_CLIENTS_REF" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$ZED_CLI_REF" =~ ^[0-9a-f]{40}$ ]]
+
+      - name: Check out exact zed-clients candidate
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: zed-pkg/zed-clients
+          ref: ${{ env.ZED_CLIENTS_REF }}
+          path: zed-clients
+          fetch-depth: 1
+          persist-credentials: false
+          show-progress: false
+
+      - name: Check out exact Zed CLI
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: zed-pkg/zed-cli
+          ref: ${{ env.ZED_CLI_REF }}
+          path: zed-cli
+          fetch-depth: 1
+          persist-credentials: false
+          show-progress: false
+
+      - name: Install candidate-declared Rust toolchain
+        run: |
+          set -euo pipefail
+          toolchain="$(python3 - <<'PY'
+          import pathlib
+          import tomllib
+
+          data = tomllib.loads(pathlib.Path("zed-cli/rust-toolchain.toml").read_text(encoding="utf-8"))
+          channel = data.get("toolchain", {}).get("channel")
+          if not isinstance(channel, str) or not channel.strip():
+              raise SystemExit("zed-cli/rust-toolchain.toml must declare toolchain.channel")
+          print(channel.strip())
+          PY
+          )"
+          rustup toolchain install "$toolchain" --profile minimal
+          rustup default "$toolchain"
+          rustc --version --verbose
+          cargo --version --verbose
+
+      - name: Build exact Zed resolver
+        run: |
+          set -euo pipefail
+          test "$(git -C zed-cli rev-parse HEAD)" = "$ZED_CLI_REF"
+          cargo build --locked --release --manifest-path zed-cli/Cargo.toml --bin zed
+          install -Dm755 zed-cli/target/release/zed "$RUNNER_TEMP/bin/zed"
+          "$RUNNER_TEMP/bin/zed" --version
+
+      - name: Verify exact release candidate boundary
+        run: |
+          set -euo pipefail
+          test "$(git -C zed-clients rev-parse HEAD)" = "$ZED_CLIENTS_REF"
+          grep -F 'version = "0.1.1"' zed-clients/.zpkg.toml
+          python3 zed-clients/scripts/check-published-target-boundaries.py
+          python3 -m unittest -v zed-clients/tests/test_published_target_boundaries.py
+          ! grep -R --line-number --fixed-strings '../../../zed-interfaces'             zed-clients/clients/rust/Cargo.toml zed-clients/clients/wasm/Cargo.toml
+
+      - name: Resolve canonical lock from scratch
+        env:
+          ZED_PKG_HOME: ${{ runner.temp }}/zed-home
+        run: |
+          set -euo pipefail
+          cd zed-clients
+          rm -f .zpkg.lock
+          rm -rf .vendor/.zed zed_modules
+          "$RUNNER_TEMP/bin/zed" install
+          test -s .zpkg.lock
+          grep -F '[[package]]' .zpkg.lock
+          cp .zpkg.lock "$RUNNER_TEMP/zed-clients-0.1.1.zpkg.lock"
+          "$RUNNER_TEMP/bin/zed" validate --manifest .zpkg.toml --lock .zpkg.lock --json > "$RUNNER_TEMP/validate.json"
+
+      - name: Replay exact generated lock frozen
+        env:
+          ZED_PKG_HOME: ${{ runner.temp }}/zed-home-frozen
+        run: |
+          set -euo pipefail
+          cd zed-clients
+          rm -rf .vendor/.zed zed_modules
+          "$RUNNER_TEMP/bin/zed" install --frozen
+          cmp .zpkg.lock "$RUNNER_TEMP/zed-clients-0.1.1.zpkg.lock"
+          git diff --check
+
+      - name: Capture exact provenance
+        if: always()
+        run: |
+          set +e
+          evidence="$RUNNER_TEMP/zed-clients-011-evidence"
+          mkdir -p "$evidence"
+          cp "$RUNNER_TEMP/zed-clients-0.1.1.zpkg.lock" "$evidence/.zpkg.lock" 2>/dev/null
+          cp "$RUNNER_TEMP/validate.json" "$evidence/validate.json" 2>/dev/null
+          printf '%s\n' "$ZED_CLIENTS_REF" > "$evidence/zed-clients-commit.txt"
+          printf '%s\n' "$ZED_CLI_REF" > "$evidence/zed-cli-commit.txt"
+          git -C zed-clients status --porcelain=v1 --untracked-files=all > "$evidence/candidate-status.txt" 2>&1
+
+      - name: Upload resolver evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: zed-clients-011-lock-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/zed-clients-011-evidence
+          if-no-files-found: error
+          retention-days: 14
+          include-hidden-files: true
