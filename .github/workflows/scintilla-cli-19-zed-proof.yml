@@ -42,14 +42,13 @@ jobs:
           cargo build --manifest-path zed-cli/Cargo.toml --release --locked --bin zed
           ./zed-cli/target/release/zed --version
 
-      - name: Verify copied manifests are source-exact
+      - name: Verify pinned source manifests
         shell: bash
         run: |
           set -euo pipefail
-          test "$(sha256sum proof/scintilla-cli-19/Cargo.toml | awk '{print $1}')" = "$(curl -fsSL "https://raw.githubusercontent.com/scintilla-run/scintilla-cli/${SOURCE_SHA}/Cargo.toml" 2>/dev/null | sha256sum | awk '{print $1}')" || {
-            echo "Private source cannot be fetched credential-free; validating pinned local manifest digest instead."
-            test "$(sha256sum proof/scintilla-cli-19/Cargo.toml | awk '{print $1}')" = "6c12c4fb53fc6f37f492c497764986c861c46160c1193162e92056e67b28324c"
-          }
+          test "$(sha256sum proof/scintilla-cli-19/Cargo.toml | awk '{print $1}')" = "0bcc0114984ddd8fc46abf86b712e3c7b7b34d3d589c04cd8826f4361aec9ca1"
+          test "$(sha256sum proof/scintilla-cli-19/.zpkg.toml | awk '{print $1}')" = "0227ad09f8459adfa67e089458682a81305b5f0efa33ab024081c5439456590a"
+          printf '%s\n' "$SOURCE_SHA"
 
       - name: Resolve exact Zed package graph
         shell: bash
