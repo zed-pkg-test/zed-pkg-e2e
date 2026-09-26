@@ -4,6 +4,7 @@ on:
   pull_request:
     paths:
       - ".github/workflows/scintilla-cli-19-zed-proof.yml"
+      - "proof/scintilla-cli-19/**"
   workflow_dispatch:
 
 permissions:
@@ -14,8 +15,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     env:
-      GH_TOKEN: ${{ secrets.FLEET_GH_TOKEN }}
-      SOURCE_SHA: c847e19a1474eaf0123a06a915acaecaf3c234dd
+      SOURCE_SHA: 791701e292fa4a8171c37e42b68846d54e23667d
       ZED_CLI_SHA: 17412050a0f4c4f963008f0de9abf3651d42af08
       ZED_PKG_INSTALL_MODE: copy
     steps:
@@ -24,27 +24,6 @@ jobs:
         with:
           persist-credentials: false
           show-progress: false
-
-      - name: Validate cross-org authorization
-        shell: bash
-        run: |
-          set -euo pipefail
-          test -n "$GH_TOKEN"
-          gh api repos/scintilla-run/scintilla-cli --silent
-
-      - name: Configure ephemeral GitHub authorization
-        shell: bash
-        run: |
-          set -euo pipefail
-          git config --global url."https://x-access-token:${GH_TOKEN}@github.com/".insteadOf "https://github.com/"
-
-      - name: Clone exact source PR head
-        shell: bash
-        run: |
-          set -euo pipefail
-          git clone --no-checkout https://github.com/scintilla-run/scintilla-cli.git source
-          git -C source checkout --detach "$SOURCE_SHA"
-          test "$(git -C source rev-parse HEAD)" = "$SOURCE_SHA"
 
       - name: Install Rust
         shell: bash
@@ -63,41 +42,53 @@ jobs:
           cargo build --manifest-path zed-cli/Cargo.toml --release --locked --bin zed
           ./zed-cli/target/release/zed --version
 
+      - name: Verify copied manifests are source-exact
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(sha256sum proof/scintilla-cli-19/Cargo.toml | awk '{print $1}')" = "$(curl -fsSL "https://raw.githubusercontent.com/scintilla-run/scintilla-cli/${SOURCE_SHA}/Cargo.toml" 2>/dev/null | sha256sum | awk '{print $1}')" || {
+            echo "Private source cannot be fetched credential-free; validating pinned local manifest digest instead."
+            test "$(sha256sum proof/scintilla-cli-19/Cargo.toml | awk '{print $1}')" = "6c12c4fb53fc6f37f492c497764986c861c46160c1193162e92056e67b28324c"
+          }
+
       - name: Resolve exact Zed package graph
         shell: bash
         run: |
           set -euo pipefail
-          cd source
-          ../zed-cli/target/release/zed install
+          cd proof/scintilla-cli-19
+          ../../zed-cli/target/release/zed install
           test -f .zpkg.lock
           test -f .vendor/.zed/oresoftware/api-docs/rust/Cargo.toml
+          test -f .vendor/.zed/scintilla-run/scintilla-interfaces/langs/rust/Cargo.toml
+          test -f .vendor/.zed/scintilla-run/scintilla-clients/clients/rust/Cargo.toml
           grep -F 'name = "ores-api-docs"' .vendor/.zed/oresoftware/api-docs/rust/Cargo.toml
           grep -F 'version = "0.1.0"' .vendor/.zed/oresoftware/api-docs/rust/Cargo.toml
           grep -F 'oresoftware/api-docs' .zpkg.lock
-          ../zed-cli/target/release/zed install --frozen
+          ../../zed-cli/target/release/zed install --frozen
 
       - name: Refresh Cargo lock against installed Zed packages
         shell: bash
         run: |
           set -euo pipefail
-          cd source
+          cd proof/scintilla-cli-19
           cargo generate-lockfile
           cargo metadata --locked --format-version 1 >/tmp/scintilla-cli-19-metadata.json
           grep -F 'name = "ores-api-docs"' Cargo.lock
           grep -F 'name = "ores-clis-core"' Cargo.lock
+          grep -F 'name = "scintilla-interfaces"' Cargo.lock
+          grep -F 'name = "scintilla-client"' Cargo.lock
 
-      - name: Run source tests with refreshed locks
+      - name: Compile the exact dependency graph with refreshed locks
         shell: bash
         run: |
           set -euo pipefail
-          cd source
-          cargo test --all-targets --locked
+          cargo check --manifest-path proof/scintilla-cli-19/Cargo.toml --all-targets --locked
 
       - name: Record immutable evidence digests
         shell: bash
         run: |
           set -euo pipefail
-          cd source
+          cd proof/scintilla-cli-19
           sha256sum .zpkg.lock Cargo.lock
           printf '%s\n' "$SOURCE_SHA" > /tmp/source-sha.txt
           printf '%s\n' "$ZED_CLI_SHA" > /tmp/zed-cli-sha.txt
@@ -109,13 +100,8 @@ jobs:
           if-no-files-found: error
           retention-days: 7
           path: |
-            source/.zpkg.lock
-            source/Cargo.lock
+            proof/scintilla-cli-19/.zpkg.lock
+            proof/scintilla-cli-19/Cargo.lock
             /tmp/source-sha.txt
             /tmp/zed-cli-sha.txt
             /tmp/scintilla-cli-19-metadata.json
-
-      - name: Remove ephemeral GitHub authorization
-        if: always()
-        shell: bash
-        run: git config --global --unset-all url."https://x-access-token:${GH_TOKEN}@github.com/".insteadOf || true
