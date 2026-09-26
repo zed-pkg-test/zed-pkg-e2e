@@ -1,3 +1,3 @@
 fn main() {
-    println!("{}", scintilla_cli_lock_proof::dependency_graph_probe());
+    println!("{}", scintilla_cli::dependency_graph_probe());
 }
