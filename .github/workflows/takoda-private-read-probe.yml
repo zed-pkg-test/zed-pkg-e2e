@@ -1,0 +1,26 @@
+name: Takoda private-read credential probe
+
+on:
+  push:
+    branches:
+      - cert/takoda-private-read-probe-20260930
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Require approved fleet read credential
+        shell: bash
+        env:
+          FLEET_GITHUB_READ_TOKEN: ${{ secrets.FLEET_GITHUB_READ_TOKEN }}
+        run: |
+          set -euo pipefail
+          test -n "${FLEET_GITHUB_READ_TOKEN:-}" || {
+            echo "::error::approved FLEET_GITHUB_READ_TOKEN is not configured"
+            exit 78
+          }
+          echo "approved fleet read credential is configured"
