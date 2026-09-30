@@ -18,8 +18,9 @@ defaults:
     shell: bash
 
 env:
-  ZED_CLIENTS_REF: 90b04cc4d98bf882c54009a0eecbe2ea617880b5
-  ZED_CLI_REF: f003a7421b4b293750e0d9086e5290535b1eeb89
+  ZED_CLIENTS_REF: 07877602963db9f4cf340d4a662a43d13edd2a81
+  ZED_CLI_REF: b38a1edd2ca7852bc81ad2e01e2989f44009e93e
+  EXPECTED_ZED_CLI_VERSION: 0.3.0
   CARGO_TERM_COLOR: always
   GIT_TERMINAL_PROMPT: "0"
 
@@ -33,6 +34,7 @@ jobs:
           set -euo pipefail
           [[ "$ZED_CLIENTS_REF" =~ ^[0-9a-f]{40}$ ]]
           [[ "$ZED_CLI_REF" =~ ^[0-9a-f]{40}$ ]]
+          test "$ZED_CLI_REF" = "b38a1edd2ca7852bc81ad2e01e2989f44009e93e"
 
       - name: Check out exact zed-clients candidate
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -73,22 +75,27 @@ jobs:
           rustc --version --verbose
           cargo --version --verbose
 
-      - name: Build exact Zed resolver
+      - name: Build exact released Zed resolver
         run: |
           set -euo pipefail
           test "$(git -C zed-cli rev-parse HEAD)" = "$ZED_CLI_REF"
           cargo build --locked --release --manifest-path zed-cli/Cargo.toml --bin zed
           install -Dm755 zed-cli/target/release/zed "$RUNNER_TEMP/bin/zed"
-          "$RUNNER_TEMP/bin/zed" --version
+          version_output="$("$RUNNER_TEMP/bin/zed" --version)"
+          printf '%s\n' "$version_output"
+          grep -Fq "$EXPECTED_ZED_CLI_VERSION" <<<"$version_output"
 
       - name: Verify exact release candidate boundary
         run: |
           set -euo pipefail
           test "$(git -C zed-clients rev-parse HEAD)" = "$ZED_CLIENTS_REF"
           grep -F 'version = "0.1.1"' zed-clients/.zpkg.toml
+          grep -F '"zed-pkg/zed-interfaces" = "^0.1.0"' zed-clients/.zpkg.toml
+          test "$(cat zed-clients/.zpkg.lock)" = "version = 1"
           python3 zed-clients/scripts/check-published-target-boundaries.py
           python3 -m unittest -v zed-clients/tests/test_published_target_boundaries.py
-          ! grep -R --line-number --fixed-strings '../../../zed-interfaces'             zed-clients/clients/rust/Cargo.toml zed-clients/clients/wasm/Cargo.toml
+          ! grep -R --line-number --fixed-strings '../../../zed-interfaces' \
+            zed-clients/clients/rust/Cargo.toml zed-clients/clients/wasm/Cargo.toml
 
       - name: Resolve canonical lock from scratch
         env:
@@ -101,6 +108,8 @@ jobs:
           "$RUNNER_TEMP/bin/zed" install
           test -s .zpkg.lock
           grep -F '[[package]]' .zpkg.lock
+          grep -F 'org = "zed-pkg"' .zpkg.lock
+          grep -F 'name = "zed-interfaces"' .zpkg.lock
           cp .zpkg.lock "$RUNNER_TEMP/zed-clients-0.1.1.zpkg.lock"
           "$RUNNER_TEMP/bin/zed" validate --manifest .zpkg.toml --lock .zpkg.lock --json > "$RUNNER_TEMP/validate.json"
 
@@ -125,6 +134,7 @@ jobs:
           cp "$RUNNER_TEMP/validate.json" "$evidence/validate.json" 2>/dev/null
           printf '%s\n' "$ZED_CLIENTS_REF" > "$evidence/zed-clients-commit.txt"
           printf '%s\n' "$ZED_CLI_REF" > "$evidence/zed-cli-commit.txt"
+          printf '%s\n' "$EXPECTED_ZED_CLI_VERSION" > "$evidence/zed-cli-version.txt"
           git -C zed-clients status --porcelain=v1 --untracked-files=all > "$evidence/candidate-status.txt" 2>&1
 
       - name: Upload resolver evidence
