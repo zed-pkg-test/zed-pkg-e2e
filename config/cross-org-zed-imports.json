@@ -1,0 +1,124 @@
+{
+  "schema": "zed.cross-org-import-audit/v1",
+  "zedStack": {
+    "interfaces": "3c54298fc7a8c1b2f9c1d74f588c6118b38f197e",
+    "libCore": "eac0878750332b031bc12f6040b6a795a17e7417",
+    "clients": "b32e089caea772f166204fb1c7bcaad6f56942fe"
+  },
+  "checks": [
+    {
+      "name": "zed-cli candidate imports the shared stack and delegates production operations",
+      "repository": "zed-pkg/zed-cli",
+      "ref": "den-3214/zed-cli-use-shared-clients",
+      "files": [
+        {
+          "path": "Cargo.toml",
+          "contains": [
+            "zed-client = { git = \"https://github.com/zed-pkg/zed-clients.git\"",
+            "b32e089caea772f166204fb1c7bcaad6f56942fe",
+            "zed-lib = { git = \"https://github.com/zed-pkg/zed-lib-core.git\"",
+            "eac0878750332b031bc12f6040b6a795a17e7417",
+            "3c54298fc7a8c1b2f9c1d74f588c6118b38f197e"
+          ]
+        },
+        {
+          "path": "src/registry.rs",
+          "contains": [
+            "shared: zed_client::Client",
+            ".get_package(org, name)",
+            ".get_version(org, name, version)",
+            ".search(query)",
+            ".claim_org(slug)",
+            ".set_yanked(org, name, version, yanked)"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "FileTunnel production CLI imports its interfaces, client, and sync packages",
+      "repository": "file-tunnel/ftnl-cli",
+      "ref": "cababacf32fb3ad02c9819c1e5435e1e725c0907",
+      "files": [
+        {
+          "path": "Cargo.toml",
+          "contains": ["ftnl-interfaces", "ftnl-client", "ftnl-sync"]
+        },
+        {
+          "path": ".zpkg.toml",
+          "contains": ["file-tunnel/ftnl-interfaces", "file-tunnel/ftnl-clients"]
+        }
+      ]
+    },
+    {
+      "name": "FileTunnel test organization declares the production SDK through Zed",
+      "repository": "file-tunnel-test/clients-rust-consumer",
+      "ref": "83582ac6c74628fb7b22c56a65fae280f4338553",
+      "testOrganization": true,
+      "files": [
+        {
+          "path": ".zpkg.toml",
+          "contains": ["file-tunnel/ftnl-clients", "dir = \".vendor/.zed\""]
+        }
+      ]
+    },
+    {
+      "name": "HypeSiege production SDK imports canonical interfaces and lib-core",
+      "repository": "hypesiege/hypesiege-clients",
+      "ref": "6292fc55aa58b0ed98f99960bd9ecd52e11038ed",
+      "files": [
+        {
+          "path": "clients/rust/Cargo.toml",
+          "contains": [
+            "hypesiege-interfaces",
+            "d9cdac3f57d8cb91a3331085fa12e5449f50ba18",
+            "hypesiege-lib-core",
+            "794151a5313142c26d5522310d4c229d27244eef"
+          ]
+        },
+        {
+          "path": "clients/rust/src/lib.rs",
+          "contains": [
+            "pub use hypesiege_interfaces::*",
+            "pub use hypesiege_lib_core",
+            "fn interface_status_has_one_type_identity_across_the_stack"
+          ],
+          "excludes": ["mod generated;"]
+        },
+        {
+          "path": ".zpkg.toml",
+          "contains": ["hypesiege/hypesiege-interfaces", "hypesiege/hypesiege-lib-core"]
+        }
+      ]
+    },
+    {
+      "name": "HypeSiege test organization declares and executes the production SDK consumer",
+      "repository": "hypesiege-test/clients-rust-consumer",
+      "ref": "ed6ab87893a94f004e64cfc3909bf621120206c6",
+      "testOrganization": true,
+      "files": [
+        {
+          "path": ".zpkg.toml",
+          "contains": ["hypesiege/hypesiege-clients", "dir = \".vendor/.zed\""]
+        },
+        {
+          "path": "Cargo.toml",
+          "contains": [
+            "hypesiege-client",
+            "6292fc55aa58b0ed98f99960bd9ecd52e11038ed",
+            "hypesiege-interfaces",
+            "hypesiege-lib-core"
+          ]
+        },
+        {
+          "path": "src/main.rs",
+          "contains": [
+            "accepts_interfaces(PostStatus::Draft)",
+            "accepts_lib_core(PostStatus::Draft)",
+            "HypesiegeClient::new",
+            "list_posts(\"workspace-test\""
+          ]
+        }
+      ]
+    }
+  ]
+}

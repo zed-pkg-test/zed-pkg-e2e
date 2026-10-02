@@ -11,6 +11,19 @@ from pathlib import Path
 
 import lifecycle
 
+# Some repositories exist only as pinned support payloads for package fixtures.
+# They deliberately have no .zpkg.toml and must still remain in the exact-ref
+# map so consumers can reproduce their vendored/submodule/subtree inputs.
+# Candidate validation exercises them through the existing fail-closed
+# non-package contract instead of pretending they are publishable packages.
+SUPPORT_ONLY_FIXTURE_REPOS = frozenset({"shared-schema"})
+CANDIDATE_NON_PACKAGE_REPOS = frozenset(lifecycle.NON_PACKAGE_REPOS) | SUPPORT_ONLY_FIXTURE_REPOS
+
+
+def is_non_package_fixture(repo: str) -> bool:
+    """Return whether a candidate fixture intentionally has no Zed manifest."""
+    return repo in CANDIDATE_NON_PACKAGE_REPOS
+
 
 def parse_fixture_refs(raw: str) -> dict[str, str]:
     try:
@@ -147,7 +160,7 @@ def main() -> int:
     args = parse_args()
     harness = PinnedHarness(args)
     try:
-        if args.repo in lifecycle.NON_PACKAGE_REPOS:
+        if is_non_package_fixture(args.repo):
             harness.run_non_package_contract()
         else:
             harness.run_package_contract()
