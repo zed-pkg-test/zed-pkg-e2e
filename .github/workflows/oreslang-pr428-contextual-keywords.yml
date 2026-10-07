@@ -1,0 +1,43 @@
+name: oreslang-pr428-contextual-case-when-verified
+
+on:
+  push:
+    branches:
+      - ci/oreslang-pr417-b1b33e-verified-20261006
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - name: Clone exact public mirror
+        run: |
+          git clone --depth=1 --branch ci/oreslang-pr428-contextual-case-when-20261007 \
+            https://github.com/gha-indie-worker/gha-indie-worker-monorepo.git oreslang
+          echo "HEAD=$(git -C oreslang rev-parse HEAD)"
+          echo "TREE=$(git -C oreslang rev-parse HEAD^{tree})"
+          test "$(git -C oreslang rev-parse HEAD)" = "b84c891fa3544eaf9e955958b50222bce25fe13b"
+          test "$(git -C oreslang rev-parse HEAD^{tree})" = "29df0210e67fd52cc3b387364bdef3d2c800c28f"
+
+      - name: Set up GraalVM
+        uses: graalvm/setup-graalvm@v1
+        with:
+          version: '25.3'
+          java-version: '25'
+          distribution: 'graalvm'
+          github-token: ${{ github.token }}
+          cache: maven
+
+      - name: Focused contextual keyword tests
+        working-directory: oreslang
+        run: >
+          mvn -B -ntp -Dores.runtime.carriers=native
+          -Dtest=ContextualCaseWhenIdentifierTest,ChannelSelectSyntaxTest test
+
+      - name: Full JVM verification
+        working-directory: oreslang
+        run: mvn -B -ntp -Dores.runtime.carriers=native verify
