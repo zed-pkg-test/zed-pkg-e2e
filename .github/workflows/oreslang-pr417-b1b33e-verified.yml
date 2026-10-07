@@ -1,0 +1,49 @@
+name: oreslang-pr417-b1b33e-verified
+
+on:
+  push:
+    branches:
+      - ci/oreslang-pr417-b1b33e-verified-20261006
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - name: Clone exact public mirror
+        run: |
+          git clone --depth=1 --branch ci/oreslang-pr417-b1b33e-20261006 \
+            https://github.com/gha-indie-worker/gha-indie-worker-monorepo.git oreslang
+          echo "HEAD=$(git -C oreslang rev-parse HEAD)"
+          echo "TREE=$(git -C oreslang rev-parse HEAD^{tree})"
+          test "$(git -C oreslang rev-parse HEAD)" = "e152b330b8960eb616388e2d7b074d165f668367"
+          test "$(git -C oreslang rev-parse HEAD^{tree})" = "2af8398a83253f859b42ae161ee4a681328f2e1d"
+
+      - name: Set up GraalVM
+        uses: graalvm/setup-graalvm@v1
+        with:
+          version: '25.3'
+          java-version: '25'
+          distribution: 'graalvm'
+          github-token: ${{ github.token }}
+          cache: maven
+
+      - name: Focused RHS callable effects
+        working-directory: oreslang
+        run: >
+          mvn -B -ntp -Dores.runtime.carriers=native
+          -Dtest=RhsLambdaScopeTest,TrapOptionSemanticsTest,CallableSemanticsTest,PrivateVisibilityTest test
+
+      - name: Full JVM verification
+        working-directory: oreslang
+        run: mvn -B -ntp -Dores.runtime.carriers=native verify
+
+      - name: Run callable demo
+        working-directory: oreslang
+        run: |
+          mvn -B -ntp -DskipTests exec:java -Dexec.args="examples/callables.ores" | tee /tmp/callables.out
+          grep -F "120:9:13" /tmp/callables.out
