@@ -16,12 +16,12 @@ jobs:
     steps:
       - name: Clone exact public mirror
         run: |
-          git clone --depth=1 --branch ci/oreslang-pr417-b1b33e-20261006 \
+          git clone --depth=1 --branch ci/oreslang-pr417-adcd0d-20261006 \
             https://github.com/gha-indie-worker/gha-indie-worker-monorepo.git oreslang
           echo "HEAD=$(git -C oreslang rev-parse HEAD)"
           echo "TREE=$(git -C oreslang rev-parse HEAD^{tree})"
-          test "$(git -C oreslang rev-parse HEAD)" = "e152b330b8960eb616388e2d7b074d165f668367"
-          test "$(git -C oreslang rev-parse HEAD^{tree})" = "2af8398a83253f859b42ae161ee4a681328f2e1d"
+          test "$(git -C oreslang rev-parse HEAD)" = "798e48247e16bfc344e6e84c0f1e851d49b53658"
+          test "$(git -C oreslang rev-parse HEAD^{tree})" = "e5f52b80b38e814b8f6ebe652a6b3e95a00f2afe"
 
       - name: Set up GraalVM
         uses: graalvm/setup-graalvm@v1
