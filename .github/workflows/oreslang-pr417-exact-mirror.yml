@@ -18,7 +18,7 @@ jobs:
         run: |
           git clone --depth=1 --branch ci/oreslang-pr417-rhs-20261006 \
             https://github.com/gha-indie-worker/gha-indie-worker-monorepo.git oreslang
-          test "$(git -C oreslang rev-parse HEAD^{tree})" = "bf6f2a9782023a572ed1a512b1b7c6b62353af80"
+          test "$(git -C oreslang rev-parse HEAD^{tree})" = "4d28294950c7ebc49c2b91d5d1c05b731525ea1a"
 
       - name: Set up GraalVM
         uses: graalvm/setup-graalvm@v1
