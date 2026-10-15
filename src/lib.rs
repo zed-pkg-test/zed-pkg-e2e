@@ -117,7 +117,7 @@ struct LexState {
 /// - inline keyword conditionals expanded into indented then/else/fi lines;
 /// - safe single-line return expressions receive explicit semicolon terminators;
 /// - LF line endings and exactly one final newline;
-/// - trailing whitespace removed;
+/// - trailing whitespace removed outside comment payloads;
 /// - at most one ordinary blank line;
 /// - exactly two blank lines between sibling executable callable bodies;
 /// - executable callable return separators are canonicalized to `->`;
@@ -157,7 +157,32 @@ pub fn format_source(source: &str) -> Result<String, FormatError> {
 
     for (line_index, raw_line) in normalized.lines().enumerate() {
         let line_no = line_index + 1;
-        let trimmed_end = raw_line.trim_end();
+
+        // Interior lines of a block comment are opaque source text. Their
+        // leading whitespace belongs to the comment, not Oreslang indentation.
+        // Keep the bytes intact while still advancing the lexical state.
+        if lex.block_comment {
+            let mut comment_lex = lex;
+            let visible = scan_visible(raw_line, &mut comment_lex);
+            if visible.iter().all(|ch| ch.is_whitespace()) {
+                out.push(raw_line.to_string());
+                lex = comment_lex;
+                pending_blank = false;
+                continue;
+            }
+        }
+
+        // Ordinary trailing whitespace is canonicalized, but whitespace
+        // *inside* a line comment or a continuing block comment is payload.
+        let mut trailing_lex = lex;
+        scan_visible(raw_line, &mut trailing_lex);
+        let preserve_comment_tail =
+            trailing_lex.block_comment || has_line_comment(raw_line, lex);
+        let trimmed_end = if preserve_comment_tail {
+            raw_line
+        } else {
+            raw_line.trim_end()
+        };
         if trimmed_end.trim().is_empty() {
             pending_blank = true;
             continue;
@@ -1939,6 +1964,44 @@ fn first_visible_char_index(line: &str, needle: char, initial: LexState) -> Opti
     }
 
     None
+}
+
+// Detect genuine line comments without matching text in strings or blocks.
+fn has_line_comment(line: &str, initial: LexState) -> bool {
+    let mut state = initial;
+    let mut chars = line.chars().peekable();
+    while let Some(ch) = chars.next() {
+        let next = chars.peek().copied();
+        if state.block_comment {
+            if ch == '*' && next == Some('/') {
+                state.block_comment = false;
+                chars.next();
+            }
+            continue;
+        }
+        if let Some(quote) = state.quote {
+            if state.escape {
+                state.escape = false;
+            } else if ch == '\\' {
+                state.escape = true;
+            } else if ch == quote {
+                state.quote = None;
+            }
+            continue;
+        }
+        if ch == '/' && next == Some('/') {
+            return true;
+        }
+        if ch == '/' && next == Some('*') {
+            state.block_comment = true;
+            chars.next();
+            continue;
+        }
+        if ch == '"' || ch == '\'' || ch == '\u{60}' {
+            state.quote = Some(ch);
+        }
+    }
+    false
 }
 
 fn scan_visible(line: &str, state: &mut LexState) -> Vec<char> {
