@@ -139,6 +139,7 @@ pub fn format_source(source: &str) -> Result<String, FormatError> {
     let normalized = keyword_blocks::normalize(&normalized);
     let mut out: Vec<String> = Vec::new();
     let mut indent = 0usize;
+    let mut block_comment_indent_shift = 0isize;
     let mut pending_blank = false;
     let mut prev_event = PrevEvent::Other;
     let mut define_stack: Vec<DefineFrame> = Vec::new();
@@ -165,7 +166,19 @@ pub fn format_source(source: &str) -> Result<String, FormatError> {
             let mut comment_lex = lex;
             let visible = scan_visible(raw_line, &mut comment_lex);
             if visible.iter().all(|ch| ch.is_whitespace()) {
-                out.push(raw_line.to_string());
+                // Reindent the whole comment uniformly relative to its opener,
+                // preserving indentation *within* the comment and all text.
+                let content = if raw_line.is_empty() {
+                    String::new()
+                } else if block_comment_indent_shift >= 0 {
+                    format!("{}{}", " ".repeat(block_comment_indent_shift as usize), raw_line)
+                } else {
+                    let leading = raw_line.len()
+                        - raw_line.trim_start_matches([' ', '\t']).len();
+                    let removed = leading.min((-block_comment_indent_shift) as usize);
+                    raw_line[removed..].to_owned()
+                };
+                out.push(content);
                 lex = comment_lex;
                 pending_blank = false;
                 continue;
@@ -176,8 +189,7 @@ pub fn format_source(source: &str) -> Result<String, FormatError> {
         // *inside* a line comment or a continuing block comment is payload.
         let mut trailing_lex = lex;
         scan_visible(raw_line, &mut trailing_lex);
-        let preserve_comment_tail =
-            trailing_lex.block_comment || has_line_comment(raw_line, lex);
+        let preserve_comment_tail = trailing_lex.block_comment || has_line_comment(raw_line, lex);
         let trimmed_end = if preserve_comment_tail {
             raw_line
         } else {
@@ -354,6 +366,11 @@ pub fn format_source(source: &str) -> Result<String, FormatError> {
         push_blank_lines(&mut out, desired_blanks);
         pending_blank = false;
 
+        if !lex.block_comment && structural_lex.block_comment {
+            let leading = raw_line.len() - raw_line.trim_start_matches([' ', '\t']).len();
+            block_comment_indent_shift =
+                (current_indent * INDENT.len()) as isize - leading as isize;
+        }
         out.push(format!("{}{}", INDENT.repeat(current_indent), content));
 
         let brace_events: Vec<char> = structural
