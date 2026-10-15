@@ -1,0 +1,7 @@
+// Shared scalar subset: independent LLVM fixture forward-call-main.ores.
+pub fnc main(): int {
+  return add(40, 2);
+}
+fnc add(int a, int b): int {
+  return a + b;
+}
