@@ -1,0 +1,4 @@
+// Shared scalar subset: independent LLVM fixture constant-main.ores.
+pub fnc main(): int {
+  return 42;
+}
