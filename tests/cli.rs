@@ -364,7 +364,6 @@ fn non_utf8_paths_are_preserved_as_os_strings() {
     }
 }
 
-
 #[test]
 fn write_replaces_only_requested_hardlink_path() {
     let repo = TempRepo::new("hardlink-isolation");
