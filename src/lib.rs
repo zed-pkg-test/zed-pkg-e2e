@@ -371,7 +371,8 @@ pub fn format_source(source: &str) -> Result<String, FormatError> {
 
         if !lex.block_comment && structural_lex.block_comment {
             let leading = raw_line.len() - raw_line.trim_start_matches([' ', '\t']).len();
-            block_comment_indent_shift = (current_indent * INDENT.len()) as isize - leading as isize;
+            block_comment_indent_shift =
+                (current_indent * INDENT.len()) as isize - leading as isize;
         }
         out.push(format!("{}{}", INDENT.repeat(current_indent), content));
 
