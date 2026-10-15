@@ -43,16 +43,30 @@ fn both_cli_names_match_the_library_and_reach_a_fixed_point() {
                 "{binary}: {}",
                 String::from_utf8_lossy(&formatted.stderr)
             );
-            assert_eq!(formatted.stdout, expected.as_bytes(), "{binary} differs from SDK");
+            assert_eq!(
+                formatted.stdout,
+                expected.as_bytes(),
+                "{binary} differs from SDK"
+            );
 
             let check_clean = run_stdin(binary, &["--check", "-"], &expected);
-            assert_eq!(check_clean.status.code(), Some(0), "{binary}: canonical check");
-            assert!(check_clean.stdout.is_empty(), "{binary}: check printed source");
+            assert_eq!(
+                check_clean.status.code(),
+                Some(0),
+                "{binary}: canonical check"
+            );
+            assert!(
+                check_clean.stdout.is_empty(),
+                "{binary}: check printed source"
+            );
 
             if source != expected {
                 let check_dirty = run_stdin(binary, &["--check", "-"], source);
                 assert_eq!(check_dirty.status.code(), Some(1), "{binary}: dirty check");
-                assert!(check_dirty.stdout.is_empty(), "{binary}: check printed source");
+                assert!(
+                    check_dirty.stdout.is_empty(),
+                    "{binary}: check printed source"
+                );
             }
         }
     }
@@ -65,7 +79,10 @@ fn both_cli_names_reject_unbalanced_source_without_partial_output() {
     for binary in BINARIES {
         let output = run_stdin(binary, &["-"], invalid);
         assert_eq!(output.status.code(), Some(2), "{binary}");
-        assert!(output.stdout.is_empty(), "{binary}: emitted partial formatted text");
+        assert!(
+            output.stdout.is_empty(),
+            "{binary}: emitted partial formatted text"
+        );
         assert!(!output.stderr.is_empty(), "{binary}: missing diagnostic");
     }
 }
