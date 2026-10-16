@@ -550,7 +550,13 @@ fn atomic_write_preflights_xattrs_across_multiple_files() {
     let name = CString::new("user.oresfmt.security-check").unwrap();
     let attr = b"preserve-me";
     let status = unsafe {
-        setxattr(path.as_ptr(), name.as_ptr(), attr.as_ptr().cast(), attr.len(), 0)
+        setxattr(
+            path.as_ptr(),
+            name.as_ptr(),
+            attr.as_ptr().cast(),
+            attr.len(),
+            0,
+        )
     };
     assert_eq!(status, 0, "test filesystem lacks user xattr support");
     repo.commit_all("baseline");
