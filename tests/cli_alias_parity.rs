@@ -98,8 +98,11 @@ fn cli_usage_errors_remain_distinct_from_source_rejection() {
         assert!(invalid_switch.stdout.is_empty());
         assert!(!invalid_switch.stderr.is_empty());
 
-        let invalid_source = run_stdin(binary, &["--check", "-"],
-            "fnc broken() -> int {\nreturn 1;\n");
+        let invalid_source = run_stdin(
+            binary,
+            &["--check", "-"],
+            "fnc broken() -> int {\nreturn 1;\n",
+        );
         assert_eq!(invalid_source.status.code(), Some(1), "{binary}");
         assert!(invalid_source.stdout.is_empty());
         assert!(!invalid_source.stderr.is_empty());
