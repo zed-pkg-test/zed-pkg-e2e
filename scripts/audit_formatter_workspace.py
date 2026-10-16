@@ -40,26 +40,31 @@ def discover(root: Path) -> list[Path]:
 
 
 
-def read_regular_bounded(path: Path, limit: int) -> bytes:
-    """Refuse swapped symlinks/FIFOs/devices and read no more than limit+1.
+def snapshot_source(path: Path, max_bytes: int) -> tuple[bytes, bool]:
+    """Read an admitted regular file once, without following a leaf symlink.
 
-    O_NONBLOCK avoids blocking on a FIFO substituted after discovery.
-    O_NOFOLLOW prevents a leaf symlink from being followed during open on
-    systems that support it. Parent-directory confinement is separate.
+    A swapped-in FIFO/device must fail rather than block the audit. This
+    protects the individual open, not an adversarially mutable directory tree.
     """
+    if max_bytes < 0:
+        raise ValueError("negative input byte bound")
     if path.is_symlink():
-        raise ValueError("source path is a symlink")
+        raise ValueError("source is a symbolic link")
     flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
     flags |= getattr(os, "O_NONBLOCK", 0)
-    descriptor = os.open(path, flags)
-    with os.fdopen(descriptor, "rb") as source:
-        if not stat.S_ISREG(os.fstat(source.fileno()).st_mode):
-            raise ValueError("source path is not a regular file")
-        return source.read(limit + 1)
+    fd = os.open(path, flags)
+    with os.fdopen(fd, "rb") as source:
+        metadata = os.fstat(source.fileno())
+        if not stat.S_ISREG(metadata.st_mode):
+            raise ValueError("source is not a regular file")
+        if metadata.st_size > max_bytes:
+            return b"", True
+        original = source.read(max_bytes + 1)
+        return original, len(original) > max_bytes
 
 
 def sha256_file(path: Path) -> str:
-    """Compute the executable's digest without loading it all into RAM."""
+    """Hash reviewed binaries in bounded chunks instead of loading them into RAM."""
     digest = hashlib.sha256()
     with path.open("rb") as source:
         while chunk := source.read(1024 * 1024):
@@ -141,9 +146,13 @@ def formatter_pass(binary: Path, source: bytes, timeout: float,
                     if stream is not None:
                         stream.close()
 
-        if path.read_bytes() != source:
-            return {"status": "unsafe_temp_write",
-                    "detail": "formatter changed temporary input"}
+        try:
+            after, oversized = snapshot_source(path, len(source))
+            if oversized or after != source:
+                return {"status": "unsafe_temp_write",
+                        "detail": "formatter changed temporary input"}
+        except (OSError, ValueError) as exc:
+            return {"status": "unsafe_temp_write", "detail": str(exc)[:200]}
         if status != "finished":
             return {"status": status, "detail": errors.decode("utf-8", "replace")}
         if process.returncode != 0:
@@ -154,14 +163,12 @@ def formatter_pass(binary: Path, source: bytes, timeout: float,
                     "detail": errors.decode("utf-8", "replace"),
                     "exit_code": process.returncode}
         if source.strip() and not output.strip():
-            return {"status": "invalid_output",
-                    "detail": "formatter erased nonblank source"}
+            return {"status": "invalid_output", "detail": "formatter erased nonblank source"}
         formatted = bytes(output)
         try:
             formatted.decode("utf-8")
         except UnicodeDecodeError:
-            return {"status": "invalid_utf8",
-                    "detail": "formatter returned non-UTF-8 output"}
+            return {"status": "invalid_utf8", "detail": "formatter returned non-UTF-8 output"}
         return {"status": "formatted", "output": formatted}
 
 
@@ -181,21 +188,21 @@ def audit(roots: dict[str, Path], formatter: Path, timeout: float = 15,
             item = {"repository": repo, "path": path.relative_to(root).as_posix(),
                     "input_sha256": None}
             try:
-                original = read_regular_bounded(path, max_bytes)
+                original, oversized = snapshot_source(path, max_bytes)
             except (OSError, ValueError) as exc:
-                item.update(status="unsafe_source", detail=str(exc)[:200])
+                item.update(status="invalid_source", detail=str(exc)[:200])
                 results.append(item)
                 continue
-            oversized = len(original) > max_bytes
+            # Never advertise a truncated-prefix digest as the source SHA.
+            if not oversized:
+                item["input_sha256"] = hashlib.sha256(original).hexdigest()
             if oversized:
                 item.update(status="oversize", detail="file exceeds audit size limit")
             else:
-                item["input_sha256"] = hashlib.sha256(original).hexdigest()
                 try:
                     original.decode("utf-8")
                 except UnicodeDecodeError:
-                    item.update(status="invalid_source",
-                                detail="source is not valid UTF-8")
+                    item.update(status="invalid_source", detail="source is not valid UTF-8")
                 else:
                     first = formatter_pass(formatter, original, timeout, max_bytes * 2)
                     item["status"] = first["status"]
@@ -205,7 +212,7 @@ def audit(roots: dict[str, Path], formatter: Path, timeout: float = 15,
                         second = formatter_pass(formatter, output, timeout, max_bytes * 2)
                         item["would_change"] = output != original
                         item["idempotent"] = (second["status"] == "formatted"
-                                              and second["output"] == output)
+                                               and second["output"] == output)
                         if not item["idempotent"]:
                             item["status"] = "unstable"
                             item["detail"] = second.get("detail", "second pass changed output")
@@ -213,19 +220,20 @@ def audit(roots: dict[str, Path], formatter: Path, timeout: float = 15,
                         item["detail"] = first.get("detail", "")
                         if "exit_code" in first:
                             item["exit_code"] = first["exit_code"]
-            # Re-open with the same no-follow and regular-file requirements.
-            # A source swapped during audit is a blocking observation.
+            # Source remains outside the formatter's temporary working directory.
+            # A bounded post-read also detects a concurrent oversized rewrite.
             if not oversized:
                 try:
-                    if read_regular_bounded(path, max_bytes) != original:
+                    current, replaced_or_grown = snapshot_source(path, max_bytes)
+                    if replaced_or_grown or current != original:
                         item["status"] = "source_changed"
-                except (OSError, ValueError):
-                    item["status"] = "source_changed"
+                except (OSError, ValueError) as exc:
+                    item.update(status="source_changed", detail=str(exc)[:200])
             results.append(item)
     counts = {kind: sum(item["status"] == kind for item in results) for kind in
               ("formatted", "rejected", "unstable", "tool_error", "unsafe_temp_write",
-               "source_changed", "oversize", "oversize_output", "timeout",
-               "unsafe_source", "invalid_source", "invalid_output", "invalid_utf8")}
+               "source_changed", "invalid_source", "oversize", "oversize_output", "timeout",
+               "invalid_output", "invalid_utf8")}
     return {"repositories": list(REPOSITORIES), "total": len(results), "counts": counts,
             "would_change": sum(bool(x.get("would_change")) for x in results),
             "formatter_sha256": sha256_file(formatter),
@@ -261,8 +269,8 @@ def main(argv: list[str] | None = None) -> int:
     report["formatter_pinned"] = bool(args.formatter_sha256)
     print(json.dumps(report, indent=2))
     unsafe = any(report["counts"][name] for name in
-                 ("unstable", "tool_error", "unsafe_temp_write", "source_changed", "oversize", "oversize_output", "timeout",
-                  "unsafe_source", "invalid_source", "invalid_output", "invalid_utf8"))
+                 ("unstable", "tool_error", "unsafe_temp_write", "source_changed", "invalid_source", "oversize", "oversize_output", "timeout",
+                  "invalid_output", "invalid_utf8"))
     if args.strict:
         unsafe |= bool(report["counts"]["rejected"] or report["would_change"])
     return int(unsafe)
