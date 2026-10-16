@@ -283,3 +283,19 @@ same bytes.
 Oreslang should have one mechanically enforceable source style. This avoids
 project-specific formatter drift and gives compiler diagnostics, generated
 code, examples, editor integrations, and code review the same layout contract.
+
+## Exception effect annotations (staged grammar)
+
+Proposed optional postfix annotations for named functions and methods
+are `throws(ErrorType)`, `raises(ErrorType)`, and `panics(ErrorType)`.
+The formatter has round-trip preservation tests for these signatures;
+preservation does **not** mean that either production compiler accepts
+or executes the grammar. These three effects remain semantically distinct:
+ordinary catch/trap may handle throw; raise bypasses them and may reach
+a direct deferred recover; actor panic bypasses all local handlers and
+goes to supervisor CONTROL.
+
+A separate initial advisory checker is provided by
+`oreslang-test.cli --effects`. Integration with formatter diagnostics,
+complete callable-effect inference and LSP quick fixes remains pending.
+See the proposed shared contract in oreslang-common-source.
