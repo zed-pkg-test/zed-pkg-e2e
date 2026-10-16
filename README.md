@@ -245,9 +245,14 @@ Additional write hardening:
 
 On Unix, atomic replacement also refuses files with setuid, setgid or sticky
 permission bits or those whose owner/group cannot be preserved by staging.
-Extended attributes and ACLs are **not** preserved by this stdlib-only
-replacement and are still a release blocker; directory-handle confinement and
-crash durability are not established. Atomicity applies to one file only, not
+On Linux, atomic `--write` now **refuses** a target when it has extended
+attributes (including POSIX ACL xattrs) or when attribute inspection fails;
+this is a fail-closed safeguard, **not** metadata preservation. On other
+platforms, `--write` fails closed until metadata handling is validated.
+Files are checked before any write and rechecked just before their rename.
+Concurrent hostile directory replacement can still race these checks:
+directory-handle confinement, filesystem metadata race resistance and crash
+durability remain release blockers. Atomicity applies to one file only, not
 an entire input set. A crash may leave a temporary file. This is not a hostile
 filesystem sandbox; only use `--write` on reviewed trusted local worktrees.
 CI/source repository integration must use `--stdout` or `--check`.

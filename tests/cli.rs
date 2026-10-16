@@ -459,3 +459,104 @@ fn atomic_write_rejects_special_unix_permission_bits() {
     assert!(String::from_utf8_lossy(&output.stderr).contains("special Unix permission bits"));
     assert_eq!(fs::read_to_string(&target).unwrap(), UNFORMATTED);
 }
+
+#[cfg(target_os = "linux")]
+#[test]
+fn atomic_write_refuses_extended_attributes_without_changing_source() {
+    use std::ffi::{CString, c_void};
+    use std::os::raw::{c_char, c_int};
+    use std::os::unix::ffi::OsStrExt;
+
+    unsafe extern "C" {
+        fn setxattr(
+            path: *const c_char,
+            name: *const c_char,
+            value: *const c_void,
+            size: usize,
+            flags: c_int,
+        ) -> c_int;
+        fn getxattr(
+            path: *const c_char,
+            name: *const c_char,
+            value: *mut c_void,
+            size: usize,
+        ) -> isize;
+    }
+
+    let repo = TempRepo::new("linux-xattr");
+    let path = repo.write("sample.ores", UNFORMATTED);
+    let c_path = CString::new(path.as_os_str().as_bytes()).unwrap();
+    let name = CString::new("user.oresfmt.security-check").unwrap();
+    let original_attr = b"preserve-me";
+    let set_result = unsafe {
+        setxattr(
+            c_path.as_ptr(),
+            name.as_ptr(),
+            original_attr.as_ptr().cast(),
+            original_attr.len(),
+            0,
+        )
+    };
+    assert_eq!(
+        set_result,
+        0,
+        "test filesystem needs user xattr support: {}",
+        std::io::Error::last_os_error()
+    );
+    repo.commit_all("baseline with xattr");
+
+    let output = repo.run(&["--write", "sample.ores"]);
+    assert_eq!(output.status.code(), Some(2));
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("extended attributes or ACLs"),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(fs::read_to_string(&path).unwrap(), UNFORMATTED);
+    let mut retrieved = [0u8; 32];
+    let len = unsafe {
+        getxattr(
+            c_path.as_ptr(),
+            name.as_ptr(),
+            retrieved.as_mut_ptr().cast(),
+            retrieved.len(),
+        )
+    };
+    assert_eq!(len, original_attr.len() as isize);
+    assert_eq!(&retrieved[..len as usize], original_attr);
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn atomic_write_preflights_xattrs_across_multiple_files() {
+    use std::ffi::{CString, c_void};
+    use std::os::raw::{c_char, c_int};
+    use std::os::unix::ffi::OsStrExt;
+
+    unsafe extern "C" {
+        fn setxattr(
+            path: *const c_char,
+            name: *const c_char,
+            value: *const c_void,
+            size: usize,
+            flags: c_int,
+        ) -> c_int;
+    }
+
+    let repo = TempRepo::new("linux-xattr-multifile");
+    let first = repo.write("a.ores", UNFORMATTED);
+    let second = repo.write("z.ores", UNFORMATTED);
+    let path = CString::new(second.as_os_str().as_bytes()).unwrap();
+    let name = CString::new("user.oresfmt.security-check").unwrap();
+    let attr = b"preserve-me";
+    let status = unsafe {
+        setxattr(path.as_ptr(), name.as_ptr(), attr.as_ptr().cast(), attr.len(), 0)
+    };
+    assert_eq!(status, 0, "test filesystem lacks user xattr support");
+    repo.commit_all("baseline");
+
+    let output = repo.run(&["--write", "."]);
+    assert_eq!(output.status.code(), Some(2));
+    assert_eq!(fs::read_to_string(first).unwrap(), UNFORMATTED);
+    assert_eq!(fs::read_to_string(second).unwrap(), UNFORMATTED);
+}

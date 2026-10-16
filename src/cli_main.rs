@@ -256,6 +256,12 @@ fn write_files(
         enforce_write_policy(path, policy)?;
     }
 
+    // Preflight metadata for every changed file before writing any file.
+    // In particular, refuse ACL/xattr-bearing files to prevent lossy renames.
+    for (path, _, _) in &changes {
+        reject_unsupported_file_metadata(path)?;
+    }
+
     // Re-read the whole write set after Git preflight. This catches editors,
     // generators, hooks, or path substitutions that changed a target while
     // formatting was being prepared, before any write begins.
@@ -275,6 +281,90 @@ fn write_files(
     Ok(ExitCode::SUCCESS)
 }
 
+
+#[cfg(unix)]
+fn check_source_identity(
+    path: &Path,
+    original: &fs::Metadata,
+) -> Result<(), Box<dyn std::error::Error>> {
+    use std::os::unix::fs::MetadataExt;
+
+    let current = fs::symlink_metadata(path)?;
+    if !current.is_file()
+        || current.dev() != original.dev()
+        || current.ino() != original.ino()
+        || current.uid() != original.uid()
+        || current.gid() != original.gid()
+        || current.mode() != original.mode()
+        || current.size() != original.size()
+        || current.mtime() != original.mtime()
+        || current.mtime_nsec() != original.mtime_nsec()
+        || current.ctime() != original.ctime()
+        || current.ctime_nsec() != original.ctime_nsec()
+    {
+        return Err(format!(
+            "refusing source inode or metadata changed during preflight: {}",
+            path.display()
+        )
+        .into());
+    }
+    Ok(())
+}
+
+#[cfg(target_os = "linux")]
+fn reject_unsupported_file_metadata(path: &Path) -> Result<(), Box<dyn std::error::Error>> {
+    use std::os::fd::AsRawFd;
+    use std::os::raw::{c_char, c_int};
+    use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
+
+    unsafe extern "C" {
+        fn flistxattr(fd: c_int, list: *mut c_char, size: usize) -> isize;
+    }
+
+    // Linux O_NOFOLLOW: never inspect an unintended symlink destination.
+    const O_NOFOLLOW: i32 = 0o400000;
+    let file = OpenOptions::new()
+        .read(true)
+        .custom_flags(O_NOFOLLOW)
+        .open(path)?;
+    let fd_metadata = file.metadata()?;
+    let path_metadata = fs::symlink_metadata(path)?;
+    if !path_metadata.is_file()
+        || fd_metadata.dev() != path_metadata.dev()
+        || fd_metadata.ino() != path_metadata.ino()
+    {
+        return Err(format!("refusing source path replaced while inspecting metadata: {}", path.display()).into());
+    }
+
+    // A null buffer with zero capacity asks only for the required byte count.
+    // This inspects all Linux namespaces, including ACL and security xattrs.
+    let bytes = unsafe { flistxattr(file.as_raw_fd(), std::ptr::null_mut(), 0) };
+    if bytes < 0 {
+        return Err(format!(
+            "cannot verify source extended attributes for {}: {}",
+            path.display(),
+            io::Error::last_os_error()
+        ).into());
+    }
+    if bytes > 0 {
+        return Err(format!(
+            "refusing atomic replacement of file with extended attributes or ACLs: {}",
+            path.display()
+        ).into());
+    }
+    Ok(())
+}
+
+// Platforms without a verified metadata-preserving replacement implementation
+// must fail closed rather than silently strip ACLs or extended attributes.
+#[cfg(not(target_os = "linux"))]
+fn reject_unsupported_file_metadata(path: &Path) -> Result<(), Box<dyn std::error::Error>> {
+    Err(format!(
+        "atomic --write is not yet validated for metadata preservation on this platform: {}",
+        path.display()
+    ).into())
+}
+
 // Avoid truncating the destination on short writes, disk exhaustion or other
 // write errors. Replacing the directory entry also avoids mutating an
 // unexpected hard-linked file outside the caller's requested path.
@@ -290,6 +380,7 @@ fn replace_atomically(
     use std::time::{SystemTime, UNIX_EPOCH};
 
     revalidate_write_target(path, original)?;
+    reject_unsupported_file_metadata(path)?;
     let original_metadata = fs::symlink_metadata(path)?;
     let permissions = original_metadata.permissions();
     #[cfg(unix)]
@@ -349,6 +440,9 @@ fn replace_atomically(
             drop(file);
             // Recheck immediately before replacing the directory entry.
             revalidate_write_target(path, original)?;
+            #[cfg(unix)]
+            check_source_identity(path, &original_metadata)?;
+            reject_unsupported_file_metadata(path)?;
             fs::rename(&temp_path, path)?;
             Ok(())
         })();
