@@ -238,6 +238,12 @@ Additional write hardening:
   contents, leaf symlink substitutions, and symlinked-parent substitutions fail closed;
 - write-safety override flags are rejected unless `--write` is active.
 
+CLI exit codes are explicit: `0` means success, `1` means either a
+noncanonical `--check` input or rejected Oreslang source (with an error
+diagnostic), and `2` means CLI usage, filesystem, Git-policy or other tool
+failure. Both `oresfmt` and `oreslang-format` use the same codes. Audit
+scripts must not confuse a syntax rejection with a tool/runner failure.
+
 ## Rust SDK
 
 ```rust

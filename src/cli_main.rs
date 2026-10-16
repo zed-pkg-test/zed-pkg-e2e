@@ -1,4 +1,4 @@
-use oreslang_format::{format_source, is_formatted};
+use oreslang_format::{FormatError, format_source, is_formatted};
 use std::env;
 use std::ffi::OsStr;
 use std::fs;
@@ -67,7 +67,9 @@ fn main() -> ExitCode {
         Ok(code) => code,
         Err(err) => {
             eprintln!("oresfmt: {err}");
-            ExitCode::from(2)
+            // Syntax/formatting rejection is an ordinary input failure.
+            // Keep usage, Git-policy, filesystem and process failures distinct.
+            ExitCode::from(if err.is::<FormatError>() { 1 } else { 2 })
         }
     }
 }
