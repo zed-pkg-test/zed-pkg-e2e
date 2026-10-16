@@ -1,7 +1,7 @@
 use oreslang_format::{FormatError, format_source, is_formatted};
 use std::env;
 use std::ffi::OsStr;
-use std::fs;
+use std::fs::{self, OpenOptions};
 use std::io::{self, Read, Write};
 use std::path::{Component, Path, PathBuf};
 use std::process::{Command, ExitCode};
@@ -67,8 +67,7 @@ fn main() -> ExitCode {
         Ok(code) => code,
         Err(err) => {
             eprintln!("oresfmt: {err}");
-            // Syntax/formatting rejection is an ordinary input failure.
-            // Keep usage, Git-policy, filesystem and process failures distinct.
+            // Source syntax/formatting rejections are distinct from tool errors.
             ExitCode::from(if err.is::<FormatError>() { 1 } else { 2 })
         }
     }
@@ -171,7 +170,15 @@ fn run() -> Result<ExitCode, Box<dyn std::error::Error>> {
     }
 
     if mode == Mode::Stdout {
-        if paths.len() != 1 || !paths[0].is_file() {
+        if paths.len() != 1 {
+            return Err("--stdout requires exactly one filesystem file".into());
+        }
+        let metadata = fs::symlink_metadata(&paths[0])?;
+        if metadata.file_type().is_symlink() {
+            return Err(format!("refusing explicit symlink input: {}", paths[0].display()).into());
+        }
+        reject_symlinked_ancestors(&paths[0])?;
+        if !metadata.is_file() {
             return Err("--stdout requires exactly one filesystem file".into());
         }
         let input = fs::read_to_string(&paths[0])?;
@@ -261,11 +268,96 @@ fn write_files(
         // immediately before its write. In particular, refuse if a path or one
         // of its parent directories was replaced by a symlink after preflight.
         revalidate_write_target(&path, &original)?;
-        fs::write(&path, formatted)?;
+        replace_atomically(&path, &original, &formatted)?;
         println!("formatted {}", path.display());
     }
 
     Ok(ExitCode::SUCCESS)
+}
+
+// Avoid truncating the destination on short writes, disk exhaustion or other
+// write errors. Replacing the directory entry also avoids mutating an
+// unexpected hard-linked file outside the caller's requested path.
+//
+// This is a per-file atomic replacement, NOT a multi-file transaction.
+// Symlinked parent paths are preflighted, but fully hostile concurrent
+// directory replacement requires dirfd/openat-style confinement.
+fn replace_atomically(
+    path: &Path,
+    original: &str,
+    formatted: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    revalidate_write_target(path, original)?;
+    let original_metadata = fs::symlink_metadata(path)?;
+    let permissions = original_metadata.permissions();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        if permissions.mode() & 0o7000 != 0 {
+            return Err(format!(
+                "refusing atomic replacement of file with special Unix permission bits: {}",
+                path.display()
+            )
+            .into());
+        }
+    }
+    let parent = path.parent().unwrap_or_else(|| Path::new("."));
+    let name = path.file_name().ok_or("write target has no filename")?;
+    let nonce = SystemTime::now().duration_since(UNIX_EPOCH)?.as_nanos();
+
+    for attempt in 0..128u32 {
+        let temp_path = parent.join(format!(
+            ".{}.oresfmt-{}-{nonce}-{attempt}.tmp",
+            name.to_string_lossy(),
+            std::process::id()
+        ));
+        let mut options = OpenOptions::new();
+        options.write(true).create_new(true);
+        // Newly created source files must not become world-readable even
+        // briefly before the destination's original mode is restored.
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            options.mode(0o600);
+        }
+        let file = options.open(&temp_path);
+        let mut file = match file {
+            Ok(file) => file,
+            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => continue,
+            Err(error) => return Err(error.into()),
+        };
+        let result = (|| -> Result<(), Box<dyn std::error::Error>> {
+            file.write_all(formatted.as_bytes())?;
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::MetadataExt;
+                let staged = file.metadata()?;
+                if original_metadata.uid() != staged.uid()
+                    || original_metadata.gid() != staged.gid()
+                {
+                    return Err(format!(
+                        "refusing atomic replacement that changes owner/group: {}",
+                        path.display()
+                    )
+                    .into());
+                }
+            }
+            file.set_permissions(permissions.clone())?;
+            file.sync_all()?;
+            drop(file);
+            // Recheck immediately before replacing the directory entry.
+            revalidate_write_target(path, original)?;
+            fs::rename(&temp_path, path)?;
+            Ok(())
+        })();
+        if result.is_err() {
+            let _ = fs::remove_file(&temp_path);
+        }
+        return result;
+    }
+    Err(format!("unable to allocate unique temporary file for {}", path.display()).into())
 }
 
 fn revalidate_write_target(
@@ -455,6 +547,17 @@ fn collect_files(inputs: &[PathBuf]) -> Result<Vec<PathBuf>, Box<dyn std::error:
     }
     files.sort();
     files.dedup();
+    // Paths such as "a.ores" and "./a.ores" are lexically different but
+    // designate the same target. Do not rewrite them twice: a second rewrite
+    // would otherwise fail the expected-content revalidation after the first.
+    let mut canonical = std::collections::HashSet::new();
+    let mut unique = Vec::with_capacity(files.len());
+    for path in files {
+        if canonical.insert(fs::canonicalize(&path)?) {
+            unique.push(path);
+        }
+    }
+    let files = unique;
     if files.is_empty() {
         return Err("no .ores files found".into());
     }

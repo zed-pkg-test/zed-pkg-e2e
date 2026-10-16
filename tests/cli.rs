@@ -363,3 +363,100 @@ fn non_utf8_paths_are_preserved_as_os_strings() {
         assert_eq!(fs::read_to_string(path).unwrap(), UNFORMATTED);
     }
 }
+
+#[test]
+fn write_replaces_only_requested_hardlink_path() {
+    let repo = TempRepo::new("hardlink-isolation");
+    let target = repo.write("sample.ores", UNFORMATTED);
+    let other = repo.root.join("hardlinked-copy.ores");
+    fs::hard_link(&target, &other).unwrap();
+    repo.commit_all("hardlink baseline");
+
+    let output = repo.run(&["--write", "sample.ores"]);
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(fs::read_to_string(target).unwrap(), FORMATTED);
+    assert_eq!(
+        fs::read_to_string(other).unwrap(),
+        UNFORMATTED,
+        "formatting one hard-linked path must not mutate its sibling"
+    );
+}
+
+#[test]
+fn equivalent_input_paths_are_processed_once() {
+    let repo = TempRepo::new("path-alias");
+    let target = repo.write("sample.ores", UNFORMATTED);
+    repo.commit_all("baseline");
+
+    let output = repo.run(&["--write", "sample.ores", "./sample.ores"]);
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(fs::read_to_string(target).unwrap(), FORMATTED);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(stdout.matches("formatted ").count(), 1);
+}
+
+#[cfg(unix)]
+#[test]
+fn stdout_rejects_symlinks_and_symlinked_parents() {
+    use std::os::unix::fs::symlink;
+
+    let repo = TempRepo::new("stdout-symlinks");
+    repo.write("src/example.ores", UNFORMATTED);
+    let leaf = repo.root.join("link.ores");
+    symlink(repo.root.join("src/example.ores"), &leaf).unwrap();
+
+    let leaf_result = repo.run(&["--stdout", "link.ores"]);
+    assert_eq!(leaf_result.status.code(), Some(2));
+    assert!(leaf_result.stdout.is_empty());
+
+    let linked_directory = repo.root.join("dirlink");
+    symlink(repo.root.join("src"), &linked_directory).unwrap();
+    let parent_result = repo.run(&["--stdout", "dirlink/example.ores"]);
+    assert_eq!(parent_result.status.code(), Some(2));
+    assert!(parent_result.stdout.is_empty());
+}
+
+#[cfg(unix)]
+#[test]
+fn atomic_write_preserves_existing_file_mode() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let repo = TempRepo::new("file-permissions");
+    let target = repo.write("sample.ores", UNFORMATTED);
+    fs::set_permissions(&target, fs::Permissions::from_mode(0o640)).unwrap();
+    repo.commit_all("baseline");
+
+    let output = repo.run(&["--write", "sample.ores"]);
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let mode = fs::metadata(&target).unwrap().permissions().mode() & 0o777;
+    assert_eq!(mode, 0o640);
+}
+
+#[cfg(unix)]
+#[test]
+fn atomic_write_rejects_special_unix_permission_bits() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let repo = TempRepo::new("special-permissions");
+    let target = repo.write("sample.ores", UNFORMATTED);
+    fs::set_permissions(&target, fs::Permissions::from_mode(0o1644)).unwrap();
+    repo.commit_all("baseline");
+
+    let output = repo.run(&["--write", "sample.ores"]);
+    assert_eq!(output.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&output.stderr)
+        .contains("special Unix permission bits"));
+    assert_eq!(fs::read_to_string(&target).unwrap(), UNFORMATTED);
+}

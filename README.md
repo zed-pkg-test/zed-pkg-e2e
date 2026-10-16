@@ -236,7 +236,21 @@ Additional write hardening:
 - after the full Git preflight, every file is re-read before the first write, and
   each target is revalidated again immediately before its own write; changed
   contents, leaf symlink substitutions, and symlinked-parent substitutions fail closed;
-- write-safety override flags are rejected unless `--write` is active.
+- write-safety override flags are rejected unless `--write` is active;
+- writes stage bytes in a private exclusive same-directory temporary file, copy
+  ordinary mode bits, then revalidate and rename into place; this avoids
+  truncated sources on short writes and prevents changing hard-linked siblings;
+- equivalent path spellings are processed once, and `--stdout` refuses
+  explicit leaf or ancestor symlinks.
+
+On Unix, atomic replacement also refuses files with setuid, setgid or sticky
+permission bits or those whose owner/group cannot be preserved by staging.
+Extended attributes and ACLs are **not** preserved by this stdlib-only
+replacement and are still a release blocker; directory-handle confinement and
+crash durability are not established. Atomicity applies to one file only, not
+an entire input set. A crash may leave a temporary file. This is not a hostile
+filesystem sandbox; only use `--write` on reviewed trusted local worktrees.
+CI/source repository integration must use `--stdout` or `--check`.
 
 CLI exit codes are explicit: `0` means success, `1` means either a
 noncanonical `--check` input or rejected Oreslang source (with an error
