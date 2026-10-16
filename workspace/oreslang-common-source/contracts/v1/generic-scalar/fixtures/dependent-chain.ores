@@ -1,0 +1,2 @@
+fnc choose<A, B=A, C=B, D=C>(A x, B y): A { return x; }
+pub fnc main(): int { return choose<A=int, D=int>(42, 23); }

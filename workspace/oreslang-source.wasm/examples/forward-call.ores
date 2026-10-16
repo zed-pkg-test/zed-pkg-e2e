@@ -1,0 +1,7 @@
+// Exercising real same-module forward calls using the LLVM-supported scalar subset.
+pub fnc main(): int {
+  return add(40, 7);
+}
+fnc add(int a, int b): int {
+  return a + b;
+}

@@ -1,0 +1,178 @@
+{
+  "description": "Read-only pinned source fixtures, not an exhaustive audit of 414-file corpus",
+  "source_formatter_tree_sha": "e14b3158786bd5b9b713416be22691c6b9266b78",
+  "auditor_source_head": "66b94ae3af930487d533cd173db722a3b49f7fc9",
+  "heads": {
+    "oreslang-source.java": "25b0ece8df20a71566b6c2cae24c1a4c7c867a76",
+    "oreslang-source.llvm": "c8eb669ef92a7b691a94b6574e4507772362e388",
+    "oreslang-source.wasm": "37894556844440c094203fd03f63e9c5dfa8472f",
+    "oreslang-source.forge": "7db3649ac86a70c6b6065152f7a64abdfd74f523",
+    "oreslang-source.net": "2d557fe6e96290ff52b280c7e3d12fd927fd2ed7",
+    "oreslang-common-source": "0e9ee65a3877fa92bcef238234d8380fc5de0967",
+    "oreslang-format": "a579bb24910da957c992146e5ed57abc315c8012"
+  },
+  "fixtures": [
+    {
+      "repo": "oreslang-common-source",
+      "path": "contracts/v1/generic-scalar/fixtures/dependent-chain.ores",
+      "head": "0e9ee65a3877fa92bcef238234d8380fc5de0967",
+      "blob_sha": "590e34d535b1427634a1ee7563ebf774a9c290d0"
+    },
+    {
+      "repo": "oreslang-common-source",
+      "path": "contracts/v1/generic-scalar/fixtures/duplicate-named.ores",
+      "head": "0e9ee65a3877fa92bcef238234d8380fc5de0967",
+      "blob_sha": "38b8a6a40dcccccf11b77fd3932c42318ef09b56"
+    },
+    {
+      "repo": "oreslang-common-source",
+      "path": "contracts/v1/generic-scalar/fixtures/explicit.ores",
+      "head": "0e9ee65a3877fa92bcef238234d8380fc5de0967",
+      "blob_sha": "679215c88cb3c3382aa38fe191007e318950d547"
+    },
+    {
+      "repo": "oreslang-format",
+      "path": "tests/compiler_parity_cases/constant-main.ores",
+      "head": "a579bb24910da957c992146e5ed57abc315c8012",
+      "blob_sha": "37aaaf95f7fa526dea661dccb28de7fdeb5e1a50"
+    },
+    {
+      "repo": "oreslang-format",
+      "path": "tests/compiler_parity_cases/forward-call-main.ores",
+      "head": "a579bb24910da957c992146e5ed57abc315c8012",
+      "blob_sha": "af84161114d100f7e7c4c678217343ba51a9cca9"
+    },
+    {
+      "repo": "oreslang-source.forge",
+      "path": "examples/hello.ores",
+      "head": "7db3649ac86a70c6b6065152f7a64abdfd74f523",
+      "blob_sha": "a1eb450ecc6bbe16f2a39005cb363ce4e7d0081d"
+    },
+    {
+      "repo": "oreslang-source.forge",
+      "path": "verification/fuzz-corpus/invalid.ores",
+      "head": "7db3649ac86a70c6b6065152f7a64abdfd74f523",
+      "blob_sha": "a7f4e27a29ccb39503b05302a2365e417da733fb"
+    },
+    {
+      "repo": "oreslang-source.forge",
+      "path": "verification/fuzz-corpus/valid.ores",
+      "head": "7db3649ac86a70c6b6065152f7a64abdfd74f523",
+      "blob_sha": "2646e1e8d86279acb30777435a6d4c8fddc0c72a"
+    },
+    {
+      "repo": "oreslang-source.java",
+      "path": "contracts/v1/fixtures/actor-unary.ores",
+      "head": "25b0ece8df20a71566b6c2cae24c1a4c7c867a76",
+      "blob_sha": "66347a09f5f3f4272b81ade99f6b2bf48fa7e9f9"
+    },
+    {
+      "repo": "oreslang-source.java",
+      "path": "contracts/v1/fixtures/forward-call.ores",
+      "head": "25b0ece8df20a71566b6c2cae24c1a4c7c867a76",
+      "blob_sha": "16c3bf63092b1399755bb4852ef883edffbbfc5f"
+    },
+    {
+      "repo": "oreslang-source.java",
+      "path": "contracts/v1/fixtures/nested-comments.ores",
+      "head": "25b0ece8df20a71566b6c2cae24c1a4c7c867a76",
+      "blob_sha": "e12e2fab3481aae01d02534df6e17adb97db3c82"
+    },
+    {
+      "repo": "oreslang-source.java",
+      "path": "contracts/v1/fixtures/reject-unclosed.ores",
+      "head": "25b0ece8df20a71566b6c2cae24c1a4c7c867a76",
+      "blob_sha": "e144dcbda7c5333cba38549ff754f697b3676bc2"
+    },
+    {
+      "repo": "oreslang-source.llvm",
+      "path": "tests/fixtures/critical-handle-state-using.ores",
+      "head": "c8eb669ef92a7b691a94b6574e4507772362e388",
+      "blob_sha": "9ce83f058c610c1e9ff0fdb299be03391fc3adc2"
+    },
+    {
+      "repo": "oreslang-source.llvm",
+      "path": "tests/fixtures/critical-state-counter-runtime.ores",
+      "head": "c8eb669ef92a7b691a94b6574e4507772362e388",
+      "blob_sha": "5934c91965a866e5caf72a361b697e118934e130"
+    },
+    {
+      "repo": "oreslang-source.llvm",
+      "path": "tests/fixtures/forward-call-main.ores",
+      "head": "c8eb669ef92a7b691a94b6574e4507772362e388",
+      "blob_sha": "2f7102e0c18876ca71650ae9efab25cc163f29c5"
+    },
+    {
+      "repo": "oreslang-source.llvm",
+      "path": "tests/fixtures/named-call-arity-overload-main.ores",
+      "head": "c8eb669ef92a7b691a94b6574e4507772362e388",
+      "blob_sha": "41a3616b2f6bad3c7ae55637f9d6ddd41e3653a9"
+    },
+    {
+      "repo": "oreslang-source.llvm",
+      "path": "tests/fixtures/native-borrow-exclusive.ores",
+      "head": "c8eb669ef92a7b691a94b6574e4507772362e388",
+      "blob_sha": "e7b2cb178c266262a94df18dd88c46ae9d32632b"
+    },
+    {
+      "repo": "oreslang-source.llvm",
+      "path": "tests/fixtures/native-name-arity-borrow-mode-mismatch.ores",
+      "head": "c8eb669ef92a7b691a94b6574e4507772362e388",
+      "blob_sha": "5ee12fd4562af040a13811be2e21b1374f2b35ea"
+    },
+    {
+      "repo": "oreslang-source.llvm",
+      "path": "tests/fixtures/native-name-arity-overloaded-main.ores",
+      "head": "c8eb669ef92a7b691a94b6574e4507772362e388",
+      "blob_sha": "14949d359b63276637936c1bca44c248538f6a22"
+    },
+    {
+      "repo": "oreslang-source.llvm",
+      "path": "tests/fixtures/source-actor-five-workers.ores",
+      "head": "c8eb669ef92a7b691a94b6574e4507772362e388",
+      "blob_sha": "de80dfce2ddcc6fd8c073097508c89225398257a"
+    },
+    {
+      "repo": "oreslang-source.net",
+      "path": "examples/division-by-zero.ores",
+      "head": "2d557fe6e96290ff52b280c7e3d12fd927fd2ed7",
+      "blob_sha": "75b50969cad9f954aa103b530c095832d3b1b97d"
+    },
+    {
+      "repo": "oreslang-source.net",
+      "path": "examples/hello.ores",
+      "head": "2d557fe6e96290ff52b280c7e3d12fd927fd2ed7",
+      "blob_sha": "40da2a01167bb4723c457697376951670a2743ef"
+    },
+    {
+      "repo": "oreslang-source.net",
+      "path": "examples/overflow.ores",
+      "head": "2d557fe6e96290ff52b280c7e3d12fd927fd2ed7",
+      "blob_sha": "b5ebfd6d354182ce9f9da568ebb2ab787db9366e"
+    },
+    {
+      "repo": "oreslang-source.wasm",
+      "path": "examples/forward-call.ores",
+      "head": "37894556844440c094203fd03f63e9c5dfa8472f",
+      "blob_sha": "7e37487b93cfaadd6497cde4c50330a70e802778"
+    },
+    {
+      "repo": "oreslang-source.wasm",
+      "path": "examples/native-int.ores",
+      "head": "37894556844440c094203fd03f63e9c5dfa8472f",
+      "blob_sha": "8da5552e4e58686cef50475b9504216b075c60f7"
+    },
+    {
+      "repo": "oreslang-source.wasm",
+      "path": "examples/negative-result.ores",
+      "head": "37894556844440c094203fd03f63e9c5dfa8472f",
+      "blob_sha": "d4b0963ed4f4204a8088fb249ed8b896e2f98183"
+    },
+    {
+      "repo": "oreslang-source.wasm",
+      "path": "examples/return-arithmetic.ores",
+      "head": "37894556844440c094203fd03f63e9c5dfa8472f",
+      "blob_sha": "3c73fb299280c54898fe88560dd5510f7a0c74b1"
+    }
+  ]
+}

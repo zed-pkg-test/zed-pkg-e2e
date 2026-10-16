@@ -1,0 +1,4 @@
+// Verified Oreslang LLVM fixture: arithmetic precedence and parentheses.
+pub fnc main(): int {
+  return 4 + 6 * (5 - 1);
+}

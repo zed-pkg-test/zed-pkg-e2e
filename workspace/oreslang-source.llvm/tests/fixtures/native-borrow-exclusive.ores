@@ -1,0 +1,3 @@
+fnc inspect_mut(borrow mut int x): int { return x + 2; }
+fnc wrapper(int x): int { return inspect_mut(rt borrow mut x) + rt take x; }
+pub fnc main(): int { return wrapper(19); }

@@ -1,0 +1,4 @@
+// Name+arity chooses overload, then named labels bind inside the selected slot.
+fnc pick(int value): int { return value; }
+fnc pick(int left, int right): int { return left * 10 + right; }
+pub fnc main(): int { return pick(right: 2, left: 4) + pick(value: 1); }

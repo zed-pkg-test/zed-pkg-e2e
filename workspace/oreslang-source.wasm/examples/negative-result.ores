@@ -1,0 +1,4 @@
+// Verified Oreslang LLVM fixture: signed scalar i64 result.
+pub fnc main(): int {
+  return -5;
+}

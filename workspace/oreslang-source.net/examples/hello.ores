@@ -1,0 +1,4 @@
+// Bootstrap subset: single entry, checked signed i64 integer arithmetic.
+define pub fnc main() : int {
+    return 2 + 3 * 4;
+}

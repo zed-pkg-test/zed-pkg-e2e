@@ -1,0 +1,31 @@
+// Five compiler-generated, independent actor heaps and native mailboxes.
+define actor Worker as {
+  let total: int = 0;
+  pub fnc on_message(int n): int {
+    total = total + n;
+    return total;
+  }
+}
+pub fnc main(): int {
+  const a = spawn Worker();
+  const b = spawn Worker();
+  const c = spawn Worker();
+  const d = spawn Worker();
+  const e = spawn Worker();
+  a.send(1);
+  b.send(1);
+  c.send(1);
+  d.send(1);
+  e.send(1);
+  a.send(2);
+  b.send(2);
+  c.send(2);
+  d.send(2);
+  e.send(2);
+  stop a;
+  stop b;
+  stop c;
+  stop d;
+  stop e;
+  return 43;
+}

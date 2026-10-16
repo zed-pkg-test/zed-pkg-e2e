@@ -1,0 +1,3 @@
+// The native main entrypoint cannot be a name+arity overload family.
+pub fnc main(): int { return 42; }
+fnc main(int x): int { return x; }

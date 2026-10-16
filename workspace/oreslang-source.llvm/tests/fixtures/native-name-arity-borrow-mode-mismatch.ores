@@ -1,0 +1,5 @@
+// Wrong borrowed argument mode must be rejected for the selected arity.
+fnc inspect(int x): int { return x; }
+fnc inspect(borrow mut int x, int y): int { return x + y; }
+fnc wrapper(int x): int { return inspect(rt borrow x, 1); }
+pub fnc main(): int { return wrapper(40); }

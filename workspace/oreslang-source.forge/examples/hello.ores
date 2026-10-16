@@ -1,0 +1,4 @@
+// Experimental Forge-only supported syntax subset.
+define pub fnc main() : int {
+    return 2 + 3 * 4;
+}

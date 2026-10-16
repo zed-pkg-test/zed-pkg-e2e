@@ -1,0 +1,2 @@
+fnc identity<T>(T value): T { return value; }
+pub fnc main(): int { return identity<int>(42); }

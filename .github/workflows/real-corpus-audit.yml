@@ -1,0 +1,48 @@
+name: Pinned Oreslang cross-backend formatter inventory
+on:
+  push:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  real-corpus-audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Verify pinned source blobs
+        run: |
+          python3 - <<'PY'
+          import json,subprocess
+          from pathlib import Path
+          m=json.loads(Path("workspace/manifest.json").read_text())
+          for f in m["fixtures"]:
+              p=Path("workspace")/f["repo"]/f["path"]
+              got=subprocess.check_output(["git","hash-object",str(p)],text=True).strip()
+              assert got==f["blob_sha"], (p,got,f["blob_sha"])
+          print("verified pinned source Git blob SHAs:",len(m["fixtures"]))
+          PY
+      - name: Run merged auditor self-tests
+        run: python3 -m unittest discover -s tests -p 'test_audit_formatter_workspace.py' -v
+      - name: Compile current-main Rust formatter
+        run: cargo build --locked --release --bin oresfmt
+      - name: Run read-only seven-repository formatter fixture inventory
+        run: |
+          set +e
+          python3 scripts/audit_formatter_workspace.py --workspace "$GITHUB_WORKSPACE/workspace" --formatter "$GITHUB_WORKSPACE/target/release/oresfmt" > fixture-audit.json
+          status=$?
+          set -e
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          m=json.loads(Path("workspace/manifest.json").read_text())
+          a=json.loads(Path("fixture-audit.json").read_text())
+          assert a["total"]==len(m["fixtures"]), (a["total"],len(m["fixtures"]))
+          assert sum(a["counts"].values())==a["total"]
+          print("ACTUAL SEVEN-REPO FORMATTER INVENTORY:",json.dumps({"total":a["total"],"counts":a["counts"],"would_change":a["would_change"]},sort_keys=True))
+          for x in a["results"]:
+              print(x["repository"],x["path"],x["status"],"would_change="+str(x.get("would_change")))
+          PY
+          exit "$status"
