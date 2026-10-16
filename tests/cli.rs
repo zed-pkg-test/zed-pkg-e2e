@@ -456,7 +456,6 @@ fn atomic_write_rejects_special_unix_permission_bits() {
 
     let output = repo.run(&["--write", "sample.ores"]);
     assert_eq!(output.status.code(), Some(2));
-    assert!(String::from_utf8_lossy(&output.stderr)
-        .contains("special Unix permission bits"));
+    assert!(String::from_utf8_lossy(&output.stderr).contains("special Unix permission bits"));
     assert_eq!(fs::read_to_string(&target).unwrap(), UNFORMATTED);
 }
