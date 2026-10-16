@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import importlib.util
 import hashlib
+import os
 import tempfile
 import unittest
 from pathlib import Path
