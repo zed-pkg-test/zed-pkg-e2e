@@ -1,6 +1,6 @@
 {
-  "description": "Read-only pinned source fixtures, not an exhaustive audit of 414-file corpus",
-  "source_formatter_tree_sha": "e14b3158786bd5b9b713416be22691c6b9266b78",
+  "description": "Read-only corpus of 27 pinned Oreslang sources with patched PR69 formatter, not full 414-file audit",
+  "source_formatter_tree_sha": "75ae505bc058eaf285255d3ad174c5121d6cd769",
   "auditor_source_head": "66b94ae3af930487d533cd173db722a3b49f7fc9",
   "heads": {
     "oreslang-source.java": "25b0ece8df20a71566b6c2cae24c1a4c7c867a76",

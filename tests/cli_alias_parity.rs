@@ -78,11 +78,33 @@ fn both_cli_names_reject_unbalanced_source_without_partial_output() {
     assert!(format_source(invalid).is_err());
     for binary in BINARIES {
         let output = run_stdin(binary, &["-"], invalid);
-        assert_eq!(output.status.code(), Some(2), "{binary}");
+        assert_eq!(output.status.code(), Some(1), "{binary}");
         assert!(
             output.stdout.is_empty(),
             "{binary}: emitted partial formatted text"
         );
         assert!(!output.stderr.is_empty(), "{binary}: missing diagnostic");
+    }
+}
+
+#[test]
+fn cli_usage_errors_remain_distinct_from_source_rejection() {
+    for binary in BINARIES {
+        let invalid_switch = Command::new(binary)
+            .arg("--not-a-formatter-option")
+            .output()
+            .expect("run formatter with invalid switch");
+        assert_eq!(invalid_switch.status.code(), Some(2), "{binary}");
+        assert!(invalid_switch.stdout.is_empty());
+        assert!(!invalid_switch.stderr.is_empty());
+
+        let invalid_source = run_stdin(
+            binary,
+            &["--check", "-"],
+            "fnc broken() -> int {\nreturn 1;\n",
+        );
+        assert_eq!(invalid_source.status.code(), Some(1), "{binary}");
+        assert!(invalid_source.stdout.is_empty());
+        assert!(!invalid_source.stderr.is_empty());
     }
 }
