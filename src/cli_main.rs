@@ -422,7 +422,10 @@ fn replace_atomically(
             .into());
         }
     }
-    let parent = path.parent().unwrap_or_else(|| Path::new("."));
+    let parent = path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."));
     #[cfg(unix)]
     let parent_handle = fs::File::open(parent)?;
     #[cfg(unix)]
