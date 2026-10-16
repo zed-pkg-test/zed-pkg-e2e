@@ -243,38 +243,47 @@ fn write_files(
     let mut changes = Vec::new();
 
     for path in files {
+        let original_metadata = fs::symlink_metadata(&path)?;
         let input = fs::read_to_string(&path)?;
+        #[cfg(unix)]
+        check_source_identity(&path, &original_metadata)?;
         let formatted = format_source(&input)?;
         if formatted != input {
-            changes.push((path, input, formatted));
+            changes.push((path, input, formatted, original_metadata));
         }
     }
 
     // Validate the entire write set first. A refusal on the last file must not
     // leave the workspace half-formatted.
-    for (path, _, _) in &changes {
+    for (path, _, _, _) in &changes {
         enforce_write_policy(path, policy)?;
     }
 
     // Preflight metadata for every changed file before writing any file.
     // In particular, refuse ACL/xattr-bearing files to prevent lossy renames.
-    for (path, _, _) in &changes {
+    for (path, _, _, metadata) in &changes {
         reject_unsupported_file_metadata(path)?;
+        #[cfg(unix)]
+        check_source_identity(path, metadata)?;
     }
 
     // Re-read the whole write set after Git preflight. This catches editors,
     // generators, hooks, or path substitutions that changed a target while
     // formatting was being prepared, before any write begins.
-    for (path, original, _) in &changes {
+    for (path, original, _, metadata) in &changes {
         revalidate_write_target(path, original)?;
+        #[cfg(unix)]
+        check_source_identity(path, metadata)?;
     }
 
-    for (path, original, formatted) in changes {
+    for (path, original, formatted, metadata) in changes {
         // Narrow the remaining TOCTOU window by validating each target again
         // immediately before its write. In particular, refuse if a path or one
         // of its parent directories was replaced by a symlink after preflight.
         revalidate_write_target(&path, &original)?;
-        replace_atomically(&path, &original, &formatted)?;
+        #[cfg(unix)]
+        check_source_identity(&path, &metadata)?;
+        replace_atomically(&path, &original, &formatted, &metadata)?;
         println!("formatted {}", path.display());
     }
 
@@ -376,11 +385,14 @@ fn replace_atomically(
     path: &Path,
     original: &str,
     formatted: &str,
+    initial_metadata: &fs::Metadata,
 ) -> Result<(), Box<dyn std::error::Error>> {
     use std::time::{SystemTime, UNIX_EPOCH};
 
     revalidate_write_target(path, original)?;
     reject_unsupported_file_metadata(path)?;
+    #[cfg(unix)]
+    check_source_identity(path, initial_metadata)?;
     let original_metadata = fs::symlink_metadata(path)?;
     let permissions = original_metadata.permissions();
     #[cfg(unix)]
@@ -441,7 +453,7 @@ fn replace_atomically(
             // Recheck immediately before replacing the directory entry.
             revalidate_write_target(path, original)?;
             #[cfg(unix)]
-            check_source_identity(path, &original_metadata)?;
+            check_source_identity(path, initial_metadata)?;
             reject_unsupported_file_metadata(path)?;
             fs::rename(&temp_path, path)?;
             Ok(())
@@ -757,4 +769,22 @@ mod write_safety_tests {
 
         let _ = fs::remove_dir_all(root);
     }
+    #[cfg(unix)]
+    #[test]
+    fn inode_guard_rejects_replacement_with_identical_bytes() {
+        let root = scratch("same-bytes-different-inode");
+        let path = root.join("sample.ores");
+        let moved = root.join("original.ores");
+        fs::write(&path, "before").unwrap();
+        let original = fs::symlink_metadata(&path).unwrap();
+
+        fs::rename(&path, &moved).unwrap();
+        fs::write(&path, "before").unwrap();
+
+        let err = check_source_identity(&path, &original).unwrap_err();
+        assert!(err.to_string().contains("inode or metadata changed"));
+
+        let _ = fs::remove_dir_all(root);
+    }
+
 }
