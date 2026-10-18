@@ -1,0 +1,14 @@
+name: dependency graph local fault herd
+on:
+  pull_request:
+    paths: ['scripts/fallback_graph_fault_harness.py','tests/test_fallback_graph_fault_harness.py','.github/workflows/fallback-graph-fault-harness.yml']
+  workflow_dispatch:
+permissions: {contents: read}
+jobs:
+  local-herd:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with: {persist-credentials: false}
+      - run: python3 -m unittest discover -s tests -p test_fallback_graph_fault_harness.py -v
