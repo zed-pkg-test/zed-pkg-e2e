@@ -1,0 +1,19 @@
+name: Partial GitHub source outage policy
+on:
+  pull_request:
+    paths:
+      - 'scripts/partial_github_outage_matrix.py'
+      - 'tests/test_partial_github_outage_matrix.py'
+      - '.github/workflows/partial-github-outage-matrix.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  offline-policy:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - run: python3 -m unittest discover -s tests -p 'test_partial_github_outage_matrix.py' -v
