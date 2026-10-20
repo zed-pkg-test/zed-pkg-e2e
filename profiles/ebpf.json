@@ -1,0 +1,11 @@
+{
+  "schemaVersion": 1,
+  "name": "ebpf",
+  "backends": [
+    "llvm"
+  ],
+  "capabilities": [
+    "bpf.packet.read"
+  ],
+  "notes": "LLVM BPF target upper bound only; no verifier-load or attachment certification. Constant-only programs need zero grants; packet access must be explicit, bounded and verifier-proved. No OS, map, helper, GC or thread capabilities."
+}

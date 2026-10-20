@@ -1,0 +1,77 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Oreslang Target Profile v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "name",
+    "backends",
+    "capabilities"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "const": 1
+    },
+    "name": {
+      "enum": [
+        "server",
+        "desktop",
+        "browser",
+        "edge-js",
+        "edge-wasi",
+        "ios",
+        "android",
+        "embedded",
+        "fpga",
+        "asic",
+        "litegraph",
+        "ebpf",
+        "carrier-linux"
+      ]
+    },
+    "backends": {
+      "type": "array",
+      "uniqueItems": true,
+      "minItems": 1,
+      "items": {
+        "enum": [
+          "llvm",
+          "graal",
+          "wasm",
+          "javascript",
+          "dex",
+          "c",
+          "bytecode",
+          "hdl"
+        ]
+      }
+    },
+    "capabilities": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "enum": [
+          "clock",
+          "random",
+          "net.client",
+          "net.server",
+          "fs.read",
+          "fs.write",
+          "threads",
+          "interop.java",
+          "interop.native",
+          "device.camera",
+          "device.gpio",
+          "dynamic.code",
+          "heap",
+          "gc",
+          "bpf.packet.read"
+        ]
+      }
+    },
+    "notes": {
+      "type": "string"
+    }
+  }
+}

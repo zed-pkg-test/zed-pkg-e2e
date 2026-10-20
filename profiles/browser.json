@@ -1,0 +1,18 @@
+{
+  "schemaVersion": 1,
+  "name": "browser",
+  "backends": [
+    "wasm",
+    "javascript"
+  ],
+  "capabilities": [
+    "clock",
+    "random",
+    "net.client",
+    "heap",
+    "gc",
+    "threads",
+    "dynamic.code"
+  ],
+  "notes": "Potential host upper bounds only; never grants; host-conditional features require explicit verification"
+}

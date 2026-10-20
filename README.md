@@ -1,297 +1,95 @@
-# zed-pkg-e2e
+# Oreslang target profiles
 
-End-to-end verification for the **zed-pkg-test** fixture organization. This
-repository owns three complementary suites:
+Versioned declarative **upper bounds** for Oreslang targets and capabilities.
 
-1. browser automation against a running zed registry stack;
-2. a stateless GitHub Actions matrix that exercises package author and consumer
-   lifecycles across every repository in `zed-pkg-test`; and
-3. pinned cross-repository acceptance canaries for CLI behavior that must be
-   proven with real package-author and consumer repositories before release.
+**Status:** Implemented standalone registry validator and resolved-graph admission checker. This is *not* a language compiler or a security sandbox. Compiler effect inference and real import resolution belong in oreslang-common-source and the Java/LLVM compiler implementations.
 
-## GitHub API fallback (registry down, GitHub up)
+## Quick start
 
-`.github/workflows/github-api-fallback.yml` calls `api.github.com` for real.
-`scripts/github_api_fallback.py` publishes a packed tarball to
-[`zed-pkg-test/github-api-fallback-canary`](https://github.com/zed-pkg-test/github-api-fallback-canary)
-Releases, then downloads the same sha256 from the public
-`/releases/download/` URL with no `registry.zpkg.net` hop. Optional `--zed`
-proves `zed install --frozen` against a closed loopback registry still
-materializes that payload (needs zed-cli#294). Pull requests only compile the
-script; `workflow_dispatch` runs the live GitHub APIs. See
-`docs/github-api-fallback-canary.md`.
+~~~sh
+npm test
+npm run validate
+node bin/oreslang-target.mjs list
+node bin/oreslang-target.mjs check-closure examples/portable-closure.json --target=browser --backend=wasm --grants=clock,net.client
+~~~
 
-`scripts/ghcr_fallback.py` is the complementary Packages proof: it publishes
-the packed tarball only to
-[`ghcr.io/zed-pkg-test/ghcr-fallback-canary`](https://github.com/zed-pkg-test/ghcr-fallback-canary)
-(no Release) so `zed install --frozen` must take the GHCR fallback branch.
-See `docs/ghcr-fallback-canary.md`.
+Thirteen JSON profiles: server, desktop, browser, edge-js, edge-wasi, ios, android, embedded, fpga, asic, litegraph, ebpf, carrier-linux. Hardware profiles use an explicit `hdl` backend and zero host capabilities; they are metadata admission only, not evidence of the Oreslang hardware compiler.
 
-Cloudflare Workers in [`zed-pkg/zed-infra`](https://github.com/zed-pkg/zed-infra)
-(`workers/registry-proxy`, `workers/cdn-proxy`) reconstruct the same GitHub
-URLs at `registry.zpkg.net` / `cdn.zpkg.net` when the k8s origin is 502.
+The declared backend and capabilities are *possible* host features, not proof of backend readiness or permission grants. Browser threads and dynamic code, embedded GPIO and most host APIs require additional host-specific checks.
 
-## How this differs from `zed-pkg/zed-e2e`
+The admission checker consumes a **versioned, already resolved, pinned import graph** in JSON (`schemaVersion: 1`, `entry`, `nodes`). Every validated invocation must also supply an explicit backend. It checks every unconditional edge A -> B with targets(A) subset-of targets(B) and requires(B) subset-of requires(A), enforces requested-target access and a separate, explicitly granted build capability budget. Rejects unknown targets/capabilities, bad imports, duplicates and unreachable units. Input is bounded to 4,096 source units, 256 imports per unit, and 65,536 examined edges; the traversal is iterative for cyclic or deep graphs.
 
-[`zed-pkg/zed-e2e`](https://github.com/zed-pkg/zed-e2e) owns registry-stack
-orchestration: it boots Postgres and both Rust servers, seeds synthetic
-packages, and drives the system with Playwright, Puppeteer, and Selenium. That
-is the right boundary for registry semantics and browser-stack integration.
+## Integration
+1. Pin this repository's immutable commit or eventual contract release; do not build against floating main.
+2. Have the language compiler emit the exact resolved closure and inferred effects; do not reimplement source parsing here.
+3. Expand file and package declarations into source-unit metadata before checking.
+4. Enforce approved capabilities again at runtime; the policy metadata is not a sandbox.
+5. Keep the schema vocabulary consistent with Java admission PR #586; LLVM admission PR #74 closed unmerged.
 
-This repository uses the real fixture trees. It does not duplicate the server
-boot sequence; browser tests attach to the stack that `zed-pkg/zed-e2e` owns,
-while the lifecycle matrix uses a fresh directory-backed `file://` registry in
-each job. The latter needs no server, account, token, or persistent runner
-state.
+See https://ores-truffle-oreslang.github.io/logs/2/
 
-## Full lifecycle matrix
+### LiteGraph
 
-`.github/workflows/lifecycle.yml` covers all 22 repositories in the organization:
-20 package fixtures plus the deliberately non-package `shared-schema` repository
-and this orchestration repository as fail-closed negative cases. Workspace
-members and polyglot target packages are expanded and tested independently.
+`litegraph` is a Wasm-only policy upper bound for LiteGraph deployments. It permits explicit clock, randomness, network and heap capabilities; it does not grant them. Filesystem, GC, threads, dynamic code and native/Java interop remain denied. Deployment must supply explicit grants and enforce them at runtime. This registry entry is not runtime execution certification.
 
-Each matrix job starts with an empty runner directory and owns its own registry,
-zed home, dependency clones, R2G workspace, consumers, lockfiles, and diagnostic
-artifacts. The harness never publishes to the public service and never relies on
-an artifact from a previous job or workflow run.
+## eBPF and Carrier-Grade Linux pilot admission
 
-For every publishable fixture, `scripts/lifecycle.py` verifies:
+- `ebpf`: LLVM BPF compilation target **metadata only**, not a verifier-loaded program. The only potential external effect is `bpf.packet.read` for verifier-bounded packet reads. The stage-0 constant-action programs require **no grants**. No heap, GC, OS threads, blocking I/O, dynamic code, arbitrary native interop, map access, helpers or kfuncs are granted. A requested packet read MUST have an explicitly inferred effect and an independent program-type/attachment verifier gate. The current resolved-closure format cannot establish valid eBPF attach ABI, packet pointer provenance, bytecode budgets or kernel verifier admission.
+- `carrier-linux`: LLVM/Graal Linux host compatibility metadata (soft-real-time/availability **candidate only**). It allows an explicitly granted subset of OS capabilities but cannot prove PREEMPT_RT behavior, deterministic latency, safety certification, redundancy or vendor carrier-grade qualification. `gc` and `dynamic.code` remain *possible* to accommodate Graal; they are **not** permissible evidence for a strict no-GC/no-JIT profile. Enforce the latter in a distinct, stronger admission/qualification gate.
 
-- credential-free `zed release plan --json` output;
-- byte-for-byte deterministic packing in two independent output directories;
-- `zed r2g` round-trip installation against a private dependency-registry
-  snapshot, without mutating the input registry;
-- no-write `zed publish --dry-run` behavior;
-- actual `file://` publication followed by byte-stable idempotent republishing;
-- registry metadata and artifact SHA-256 integrity;
-- discovery through `zed find`;
-- cold copy-mode installation with no symlinks;
-- lockfile-identical `zed install --frozen` from a fresh home;
-- yank semantics: new resolution fails, locked frozen installation still works,
-  and `--undo` restores fresh installation; and
-- a clean fixture Git worktree after every phase.
+The bounded LLVM XDP follow-on compiler slice supplies a source-derived
+`--emit-target-closure` (see LLVM stacked PR based on #544). For constant
+XDP action, its `requires` list is empty; for `packet_u8` guards, the
+compiler infers `bpf.packet.read`. It must emit `grants: []` in both cases:
+a build policy is responsible for explicit grants, and an ungranted packet
+program must fail `check-closure`. The source-shaped regression fixtures
+in `examples/bpf-xdp-{constant,packet}-closure.json` exercise the real
+policy CLI without importing private compiler source or claiming matching
+compiler/ELF provenance.
 
-Dependency edges are explicit and recursively seeded in the same job. For
-example, an app fixture first publishes its library fixture to the job-local
-registry; `workspace-monorepo` is exercised as the root plus `ws-core`,
-`ws-utils`, and `ws-cli`; and one polyglot source publication is checked through
-each derived target package.
+Input admission: the `check-closure` CLI rejects final-component symlinks,
+special files, malformed UTF-8, UTF-8 BOMs, JSON nesting above 128, and
+duplicate object member names at any depth (including escaped Unicode-equivalent
+names). Its scan precedes `JSON.parse` so a last-wins duplicate cannot
+silently replace an earlier authority declaration. Parser validation is not a
+digital signature or source-provenance guarantee. The 16 MiB read bound and
+4096-node graph budgets remain independent.
 
-The workflow uses read-only repository permissions, disables persisted checkout
-credentials, pins third-party actions and zed components to immutable commit
-SHAs, builds the zed binary once, verifies its checksum in every matrix job,
-uses bounded parallelism, and uploads diagnostics only on failure. It runs for
-pull requests and `main`, supports an explicit dispatch with a SHA-pinned CLI,
-and performs a weekly cross-repository drift check.
+### Bounded eBPF build admission sequence
 
-Run one repository locally:
+Compiler-produced XDP closure manifests are declarations, **not authority**.
+A trusted build controller should pin both the LLVM compiler commit and
+this registry's commit. The experimental sequence is:
 
-```bash
-cargo build --release --manifest-path ../zed-cli/Cargo.toml --bin zed
-python3 scripts/lifecycle.py \
-  --repo node-app \
-  --fixture-dir ../node-app \
-  --zed ../zed-cli/target/release/zed \
-  --work-root /tmp/zed-lifecycle-node-app
+```sh
+# Source fixture belongs to the pinned LLVM compiler repository.
+SOURCE=/path/to/oreslang-source.llvm/examples/xdp_packet_u8.ores
+oreslang-llvmc --target=bpfel --bpf-program=xdp \
+  --emit-target-closure "$SOURCE" > xdp.closure.json
+node bin/oreslang-target.mjs check-closure xdp.closure.json \
+  --target=ebpf --backend=llvm --grants=bpf.packet.read
+oreslang-llvmc --target=bpfel --bpf-program=xdp \
+  --bpf-grants=bpf.packet.read "$SOURCE" > xdp.ll
 ```
 
-The work root is disposable. Reusing the same path is safe because the harness
-requires a fresh root and GitHub-hosted jobs receive a new runner filesystem.
+The compiler deliberately emits `grants: []` in its closure; the
+`--grants=bpf.packet.read` argument comes from an independently approved
+build policy. A compiler closure declaring the wrong target/backend or
+pre-populated grants is rejected before approval. The LLVM
+`--bpf-grants=bpf.packet.read` argument is **only** a local emission
+acknowledgement, not authorization: a caller can pass it without running
+the checker. Production build orchestration must bind approved policy,
+source/tree SHA, emitted IR/object digest, compiler binary and Linux
+verifier/attach receipts under a trusted provenance contract. None of those
+cryptographic/external evidence bindings are supplied by this pilot.
 
+The **profile registry itself** is also parsed as authority-bearing input:
+`loadProfiles()` now requires regular, non-symlink `.json` files, bounded at
+64 KiB each, with strict UTF-8, no BOM, and no duplicate object names at any
+nesting depth. Unsupported hosts must fail closed rather than silently
+dropping `O_NONBLOCK` or `O_NOFOLLOW`. A policy registry is valid only after
+both strict file parsing and `validateRegistry()` succeed. This cannot
+authenticate a mutable checkout, replace source-review provenance, or
+prevent a compromised parent directory from being swapped externally.
 
-## GitHub / R2 fallback (registry down, CDN up)
-
-`.github/workflows/github-r2-fallback.yml` is a reusable canary for the
-`cdn.zpkg.net` guessable-object contract. `scripts/github_r2_fallback.py`
-publishes a disposable package to a `file://` registry, copies the tarball onto
-`packages/` and `github/` keys, points `--registry` at a closed loopback port,
-and proves `zed install --frozen` restores the packed payload from a loopback
-CDN. It also round-trips the typed `get_version` RPC frame over TCP NDJSON
-(from `github.com/oresoftware/api-docs`). Pull requests only compile the
-script; a full product run needs exact `zed-cli` and `zed-interfaces` commits
-via `workflow_call` or `workflow_dispatch`. See
-`docs/github-r2-fallback-canary.md`.
-
-## Durable first-install acceptance
-
-`.github/workflows/durable-first-install.yml` is the cross-organization
-acceptance gate for DEN-1413. It builds one immutable `zed-cli` commit on Linux
-and macOS, publishes the exact pinned `zed-pkg-test/node-lib` fixture to a fresh
-`file://` registry, removes Zed state from the pinned `node-app` fixture, and
-installs the real package from a nested consumer directory.
-
-`scripts/durable-first-install.sh` verifies that:
-
-- a dependency-bearing first install creates `.zpkg.toml` at the inferred
-  native-project root, not in the nested invocation directory;
-- two independently created consumers with the same basename and inputs receive
-  byte-identical manifests and lockfiles;
-- the generated manifest records direct dependency, target, adapter, marker,
-  and deterministic local identity metadata;
-- copy-mode package and Node adapter outputs contain no symlinks and the real
-  Node application executes successfully;
-- an inferred local consumer cannot be published, even with dry-run and VCS
-  checks skipped;
-- `--do-not-write-new-manifest` is an informational no-op for generated and
-  authored existing manifests;
-- the canonical flag and `ZED_PKG_DO_NOT_WRITE_NEW_MANIFEST` preserve explicit
-  ephemeral installs, while `--skip-manifest` remains a deprecated compatibility
-  spelling;
-- failed resolution removes the exact generated manifest and leaves no lock,
-  package tree, adapter output, or transaction debris; and
-- lock-only frozen restoration fails by default and succeeds byte-for-byte only
-  when no-new-manifest intent is explicit.
-
-All component refs and actions are immutable. During implementation review, the
-workflow pins the exact head of the corresponding `zed-cli` pull request. The
-pin must move to that PR's final reviewed head after every implementation
-change, then to the merge commit when the CLI work lands. The workflow has
-read-only repository permissions and uploads only bounded local-registry
-diagnostics on failure.
-
-## GitHub / R2 fallback (registry down, CDN up)
-
-`.github/workflows/github-r2-fallback.yml` is a reusable canary for the
-`cdn.zpkg.net` guessable-object contract. `scripts/github_r2_fallback.py`
-publishes a disposable package to a `file://` registry, copies the tarball onto
-`packages/` and `github/` keys, points `--registry` at a closed loopback port,
-and proves `zed install --frozen` restores the packed payload from a loopback
-CDN. It also round-trips the typed `get_version` RPC frame over TCP NDJSON
-(from `github.com/oresoftware/api-docs`). Pull requests only compile the
-script; a full product run needs exact `zed-cli` and `zed-interfaces` commits
-via `workflow_call` or `workflow_dispatch`. See
-`docs/github-r2-fallback-canary.md`.
-
-Run the acceptance harness locally with sibling fixture checkouts:
-
-```bash
-cargo build --release --manifest-path ../zed-cli/Cargo.toml --bin zed
-bash scripts/durable-first-install.sh \
-  ../zed-cli/target/release/zed \
-  ../node-lib \
-  ../node-app \
-  /tmp/zed-durable-first-install
-```
-
-### Polyglot durable first-install acceptance
-
-`.github/workflows/durable-first-install-polyglot.yml` verifies the same default
-manifest-creation contract against immutable real Go, Python, and Rust
-app/library pairs on Linux and macOS. It is intentionally separate from the full
-lifecycle matrix because it removes each consumer's authored `.zpkg.toml` before
-installation and treats the resulting generated manifest as the artifact under
-test.
-
-For every ecosystem, `scripts/durable-first-install-polyglot.sh`:
-
-- publishes the pinned library to a fresh credential-free `file://` registry;
-- invokes `zed install` from a nested directory below the native project root;
-- verifies that one deterministic, non-publishable `.zpkg.toml` is created only
-  at the inferred root;
-- checks inferred target and adapter metadata plus the direct dependency;
-- compares an explicit `@^1.0.0` install with an unversioned latest-resolution
-  install and requires byte-identical manifest and lockfile output;
-- executes the real native application through Go, Python, or Cargo;
-- proves copy-mode output contains no symlinks;
-- uninstalls materialized content while retaining managed state; and
-- performs a frozen nested-directory reinstall without changing manifest or
-  lockfile bytes.
-
-All source repositories, the CLI implementation, the shared interface contract,
-and third-party actions are pinned to immutable commit SHAs. Each matrix entry
-owns isolated registry, home, build, consumer, and diagnostics directories.
-
-Run one ecosystem locally after building the selected CLI:
-
-```bash
-bash scripts/durable-first-install-polyglot.sh \
-  ../zed-cli/target/release/zed \
-  go \
-  ../go-lib \
-  ../go-app \
-  /tmp/zed-durable-go
-```
-
-## Browser suites
-
-| Suite | What it covers |
-| --- | --- |
-| `suites/fixture-package-pages.spec.ts` | Each single-language fixture (`node-lib`, `rust-lib`, `go-lib`, `python-lib`) renders the version, description, repository URL, and install snippet persisted from its `.zpkg.toml`; each is findable through HTMX search; a missing package is a real 404. |
-| `suites/polyglot-fan-out.spec.ts` | `polyglot-lib` becomes four separately addressable packages with distinct content hashes, and the unsuffixed repository name is not itself a package. Ecosystem-specific install enforcement remains in the lifecycle matrix, which reads each derived artifact manifest and exercises the native toolchain. |
-
-## Managed application lifecycle certification
-
-`.github/workflows/formal-app-lifecycle.yml` pins the exact production
-`zed-pkg/zed-sync` commit for DEN-4181. It verifies immutable commit and artifact
-provenance, cross-checks the registered Quint model against the canonical trace
-and JSON Schema, requires Rust, JavaScript, and Dart to consume the same fixture,
-and executes the production repository's complete pinned verification matrix.
-
-Run the cross-repository structural check against a sibling checkout:
-
-```bash
-python3 scripts/verify_formal_app_lifecycle_contract.py ../zed-sync
-python3 -m unittest -v tests/test_formal_app_lifecycle_contract.py
-```
-
-The browser workflow pins the stack, CLI, interfaces, Rust servers, and fixture
-inputs to immutable commit SHAs. Both Node workspaces install from their checked-in
-lockfiles with `npm ci`. The fixture publisher forces the local API URL, uses a
-disposable zed home, clears ambient credentials, and mints owner tokens scoped to
-each fixture manifest org through the local test database. It never falls back
-to the public registry or a developer's saved state.
-
-### Run browser automation
-
-```bash
-# 1. Bring up the stack through the suite that owns it.
-cd ../zed-e2e && npm ci --ignore-scripts && npm run stack:up && cd -
-
-# 2. Install browser-test prerequisites from the lockfile.
-npm ci --ignore-scripts
-npm exec -- playwright install chromium
-
-# 3. Publish the fixture inputs and drive the UI.
-npm run e2e
-npm run e2e:fixtures
-npm run e2e:polyglot
-```
-
-Sibling checkouts are expected alongside this repository: `zed-cli`,
-`zed-interfaces`, `zed-api-server.rs`, `zed-web-server.rs`, and the fixture
-repositories the browser tests publish (`node-lib`, `rust-lib`, `go-lib`,
-`python-lib`, and `polyglot-lib`). The lifecycle harness instead clones
-prerequisites into its disposable work root according to the explicit dependency
-graph.
-
-## Browser configuration
-
-| Variable | Default | Purpose |
-| --- | --- | --- |
-| `ZED_E2E_API_URL` | `http://127.0.0.1:48080` | Local API server whose health and package metadata are asserted. |
-| `ZED_E2E_WEB_URL` | `http://127.0.0.1:48081` | Local web server the browser drives. |
-| `ZED_E2E_DATABASE_URL` | `postgres://zed:zed@127.0.0.1:55432/zed_e2e` | Test database used only to mint scoped fixture tokens. |
-| `ZED_E2E_HOME` | process-specific directory under the OS temp root | Disposable zed store and credentials root. |
-| `ZED_BIN` | `../zed-cli/target/debug/zed` | zed binary used to publish browser fixtures. |
-| `ZED_E2E_API_BIN` | `../zed-api-server.rs/target/debug/zed-api-server` | API binary used to create scoped test tokens. |
-| `PW_CONNECT_WS` | — | Connect Playwright to a remote browser server instead of local Chromium. |
-
-Defaults match `zed-pkg/zed-e2e`, so the common local case needs no additional
-environment variables after the sibling stack is running.
-
-## License
-
-MIT
-
-## Archived DEN-2725 replay evidence
-
-The preserved `evidence/den-2725-final-export/` namespace contains the verified
-final replay export from source run `31243116442`:
-
-- root-dispatch commit: `1c94813c6b59c7621c1256d7c55246e7f06f44b7`;
-- current-main commit: `0246a3af901b65ca6724d936c7f3232c9f72fcd7`; and
-- verified product tree: `99ab08e3142c2a52d2c97482134e99fae3811b43`.
-
-The original export identified eight root product files for import. They remain
-evidence only here and do not replace this repository's E2E control-plane tree.
+Both profiles require pinned compiler/target evidence and runtime enforcement. An upper-bound registry PASS is never an executed program, eBPF verifier result, deadline proof or hardware/physical signoff. See LLVM source PR #544 (BPF) and #660 (CGL), and Java source PR #1442 (CGL). Do not merge this change until downstream profile consumers and schema version-1 compatibility are reviewed; the vocabulary is expanded without changing the schema number.

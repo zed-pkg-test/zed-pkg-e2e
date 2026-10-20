@@ -1,0 +1,138 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:oreslang:target-profiles:resolved-closure:v1",
+  "title": "Oreslang Resolved Target Closure v1",
+  "description": "Structural shape of a compiler-resolved closure. Semantic admission (edge target coverage, transitive capabilities, no unreachable units) MUST additionally run validateClosure.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "nodes",
+    "entry",
+    "target",
+    "backend"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "const": 1
+    },
+    "nodes": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 4096,
+      "items": {
+        "$ref": "#/$defs/node"
+      }
+    },
+    "entry": {
+      "$ref": "#/$defs/unitId"
+    },
+    "target": {
+      "$ref": "#/$defs/environment"
+    },
+    "backend": {
+      "$ref": "#/$defs/backend"
+    },
+    "grants": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "$ref": "#/$defs/capability"
+      }
+    }
+  },
+  "$defs": {
+    "unitId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 512,
+      "pattern": "^[^\\u0000]+$"
+    },
+    "environment": {
+      "enum": [
+        "server",
+        "desktop",
+        "browser",
+        "edge-js",
+        "edge-wasi",
+        "ios",
+        "android",
+        "embedded",
+        "fpga",
+        "asic",
+        "litegraph",
+        "ebpf",
+        "carrier-linux"
+      ]
+    },
+    "backend": {
+      "enum": [
+        "llvm",
+        "graal",
+        "wasm",
+        "javascript",
+        "dex",
+        "c",
+        "bytecode",
+        "hdl"
+      ]
+    },
+    "capability": {
+      "enum": [
+        "clock",
+        "random",
+        "net.client",
+        "net.server",
+        "fs.read",
+        "fs.write",
+        "threads",
+        "interop.java",
+        "interop.native",
+        "device.camera",
+        "device.gpio",
+        "dynamic.code",
+        "heap",
+        "gc",
+        "bpf.packet.read"
+      ]
+    },
+    "node": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "targets",
+        "requires",
+        "imports"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/unitId"
+        },
+        "targets": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/environment"
+          }
+        },
+        "requires": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/capability"
+          }
+        },
+        "imports": {
+          "type": "array",
+          "maxItems": 256,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/unitId"
+          }
+        }
+      }
+    }
+  }
+}

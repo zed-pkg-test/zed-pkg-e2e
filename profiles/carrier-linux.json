@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "name": "carrier-linux",
+  "backends": [
+    "llvm",
+    "graal"
+  ],
+  "capabilities": [
+    "clock",
+    "random",
+    "net.client",
+    "net.server",
+    "fs.read",
+    "fs.write",
+    "threads",
+    "interop.native",
+    "dynamic.code",
+    "heap",
+    "gc"
+  ],
+  "notes": "Generic x86_64/aarch64 Linux availability/soft-realtime pilot upper bound only. Explicit capabilities never imply PREEMPT_RT, no-GC, timing bounds or CGL vendor certification."
+}

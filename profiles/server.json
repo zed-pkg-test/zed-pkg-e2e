@@ -1,0 +1,23 @@
+{
+  "schemaVersion": 1,
+  "name": "server",
+  "backends": [
+    "llvm",
+    "graal"
+  ],
+  "capabilities": [
+    "clock",
+    "random",
+    "net.client",
+    "net.server",
+    "fs.read",
+    "fs.write",
+    "threads",
+    "interop.java",
+    "interop.native",
+    "dynamic.code",
+    "heap",
+    "gc"
+  ],
+  "notes": "Potential host upper bounds only; never grants; host-conditional features require explicit verification"
+}

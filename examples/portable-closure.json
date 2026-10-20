@@ -1,0 +1,37 @@
+{
+  "schemaVersion": 1,
+  "entry": "app.ores",
+  "nodes": [
+    {
+      "id": "app.ores",
+      "targets": [
+        "browser",
+        "edge-js",
+        "android",
+        "ios",
+        "server"
+      ],
+      "requires": [
+        "net.client",
+        "clock"
+      ],
+      "imports": [
+        "net.ores"
+      ]
+    },
+    {
+      "id": "net.ores",
+      "targets": [
+        "browser",
+        "edge-js",
+        "android",
+        "ios",
+        "server"
+      ],
+      "requires": [
+        "net.client"
+      ],
+      "imports": []
+    }
+  ]
+}

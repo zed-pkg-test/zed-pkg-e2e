@@ -1,0 +1,19 @@
+{
+  "schemaVersion": 1,
+  "entry": "ores_xdp",
+  "target": "ebpf",
+  "backend": "llvm",
+  "grants": [],
+  "nodes": [
+    {
+      "id": "ores_xdp",
+      "targets": [
+        "ebpf"
+      ],
+      "requires": [
+        "bpf.packet.read"
+      ],
+      "imports": []
+    }
+  ]
+}

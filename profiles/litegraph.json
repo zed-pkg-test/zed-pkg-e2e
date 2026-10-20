@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "name": "litegraph",
+  "backends": [
+    "wasm"
+  ],
+  "capabilities": [
+    "clock",
+    "random",
+    "net.client",
+    "net.server",
+    "heap"
+  ],
+  "notes": "LiteGraph Wasmtime actor target upper bounds only; no GC, filesystem, dynamic code, native interop, or ambient authority is granted by this profile"
+}

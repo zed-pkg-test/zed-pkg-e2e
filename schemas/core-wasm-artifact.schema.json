@@ -1,0 +1,100 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Oreslang core Wasm i64 artifact v1 (experimental)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "artifactType",
+    "target",
+    "environment",
+    "backend",
+    "entry",
+    "wasmSha256",
+    "wasmBytes",
+    "requiredCapabilities",
+    "imports",
+    "memory",
+    "producer"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "const": 1
+    },
+    "artifactType": {
+      "const": "oreslang.core-wasm.i64-v1"
+    },
+    "target": {
+      "const": "wasm32"
+    },
+    "environment": {
+      "enum": [
+        "browser",
+        "edge-js",
+        "edge-wasi"
+      ]
+    },
+    "backend": {
+      "const": "wasm"
+    },
+    "entry": {
+      "type": "string",
+      "pattern": "^[A-Za-z_][A-Za-z0-9_]*$",
+      "maxLength": 128
+    },
+    "wasmSha256": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "wasmBytes": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 16777216
+    },
+    "requiredCapabilities": {
+      "type": "array",
+      "maxItems": 0
+    },
+    "imports": {
+      "type": "array",
+      "maxItems": 0
+    },
+    "memory": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "maximumPages"
+      ],
+      "properties": {
+        "maximumPages": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 256
+        }
+      }
+    },
+    "producer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "compilerSha256",
+        "sourceSha256",
+        "llvmIrSha256"
+      ],
+      "properties": {
+        "compilerSha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "sourceSha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "llvmIrSha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        }
+      }
+    }
+  }
+}

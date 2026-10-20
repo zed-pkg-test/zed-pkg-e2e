@@ -1,0 +1,20 @@
+{
+  "schemaVersion": 1,
+  "name": "ios",
+  "backends": [
+    "llvm"
+  ],
+  "capabilities": [
+    "clock",
+    "random",
+    "net.client",
+    "net.server",
+    "fs.read",
+    "fs.write",
+    "threads",
+    "heap",
+    "gc",
+    "device.camera"
+  ],
+  "notes": "Potential host upper bounds only; never grants; host-conditional features require explicit verification"
+}

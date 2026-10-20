@@ -1,0 +1,11 @@
+{
+  "schemaVersion": 1,
+  "protocol": "oreslang-ecosystem-integration",
+  "repository": "ores-truffle-oreslang/oreslang-target-profiles",
+  "role": "contract",
+  "upstreams": [
+    "oreslang-common-source"
+  ],
+  "evidence": "not-attested",
+  "note": "Declared integration touchpoints only; no CI or runtime parity is asserted."
+}

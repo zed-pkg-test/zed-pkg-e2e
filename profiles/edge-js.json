@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "name": "edge-js",
+  "backends": [
+    "javascript",
+    "wasm"
+  ],
+  "capabilities": [
+    "clock",
+    "random",
+    "net.client",
+    "heap",
+    "gc"
+  ],
+  "notes": "Potential host upper bounds only; never grants; host-conditional features require explicit verification"
+}

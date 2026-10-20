@@ -1,0 +1,9 @@
+{
+  "schemaVersion": 1,
+  "name": "fpga",
+  "backends": [
+    "hdl"
+  ],
+  "capabilities": [],
+  "notes": "Static hardware HDL admission only; clock/reset are explicit ports, not host capabilities. Not proof of place-route or board execution."
+}

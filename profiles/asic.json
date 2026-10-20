@@ -1,0 +1,9 @@
+{
+  "schemaVersion": 1,
+  "name": "asic",
+  "backends": [
+    "hdl"
+  ],
+  "capabilities": [],
+  "notes": "Static hardware HDL admission only; Liberty/PDK and physical signoff are external hard requirements, not host capabilities."
+}

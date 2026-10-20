@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "name": "android",
+  "backends": [
+    "llvm",
+    "dex"
+  ],
+  "capabilities": [
+    "clock",
+    "random",
+    "net.client",
+    "net.server",
+    "fs.read",
+    "fs.write",
+    "threads",
+    "heap",
+    "gc",
+    "device.camera",
+    "interop.java"
+  ],
+  "notes": "Potential host upper bounds only; never grants; host-conditional features require explicit verification"
+}

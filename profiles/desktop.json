@@ -1,0 +1,24 @@
+{
+  "schemaVersion": 1,
+  "name": "desktop",
+  "backends": [
+    "llvm",
+    "graal"
+  ],
+  "capabilities": [
+    "clock",
+    "random",
+    "net.client",
+    "net.server",
+    "fs.read",
+    "fs.write",
+    "threads",
+    "interop.java",
+    "interop.native",
+    "dynamic.code",
+    "heap",
+    "gc",
+    "device.camera"
+  ],
+  "notes": "Potential host upper bounds only; never grants; host-conditional features require explicit verification"
+}
