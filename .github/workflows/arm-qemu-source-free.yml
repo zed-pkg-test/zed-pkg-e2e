@@ -23,7 +23,7 @@ jobs:
       - name: Install ARM Clang, LLD and QEMU
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y --no-install-recommends clang-18 lld-18 qemu-system-arm binutils
+          sudo apt-get install -y --no-install-recommends clang-18 lld-18 qemu-system-arm binutils llvm-18
           clang-18 --version | head -1
           qemu-system-arm --version | head -1
       - name: Cross-link and execute two synthetic bare-metal ARM guests
