@@ -51,6 +51,12 @@ IR
   clang-18 --target=armv7m-none-eabi -mcpu=cortex-m3 -mthumb \
     -nostdlib -fuse-ld=lld -Wl,-T,flash.ld -Wl,--no-undefined \
     reset.o guest.o -o "case_$answer.elf"
+  echo "-- clang18 ARM input symbols and relocations --"
+  readelf -W -s reset.o guest.o | tail -80
+  readelf -W -r reset.o guest.o | tail -100
+  echo "-- clang18 ARM linked symbol table and relocations --"
+  readelf -W -s "case_$answer.elf" | tail -90
+  readelf -W -r "case_$answer.elf" | tail -70
   readelf -W -h "case_$answer.elf" | grep -Eq 'Machine:[[:space:]]+ARM'
   readelf -W -s "case_$answer.elf" | awk '$7 == "UND" && NF >= 8 && $8 != "" {print "UNDEFINED",$8; bad=1} END {exit bad ? 1 : 0}'
   if readelf -W -l "case_$answer.elf" | grep -Eq '(INTERP|DYNAMIC)'; then exit 3; fi
