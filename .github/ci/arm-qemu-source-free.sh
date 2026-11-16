@@ -97,7 +97,7 @@ clang-18 --target=armv7m-none-eabi -mcpu=cortex-m3 -mthumb \
   -O1 -c host-import.ll -o host-import.o
 llvm-objcopy-18 --remove-section=.ARM.exidx --remove-section=.ARM.extab \
   --strip-unneeded host-import.o host-import-core.o
-readelf -W -s host-import-core.o | grep -Eq 'UND[[:space:]]+host_io
+readelf -W -s host-import-core.o | grep -Eq 'UND[[:space:]]+host_io'
 
 if clang-18 --target=armv7m-none-eabi -mcpu=cortex-m3 -mthumb \
   -nostdlib -fuse-ld=lld -Wl,-T,flash.ld -Wl,--no-undefined -Wl,--gc-sections \
