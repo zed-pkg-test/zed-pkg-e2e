@@ -81,4 +81,31 @@ IR
   [[ "$status" -eq "$expected" ]] || exit 4
   sha256sum "case_$answer.elf"
 done
-echo "SOURCE_FREE_ARM_QEMU_HARNESS_PASS guest42=0 guest41=1"
+# Adversarial live-import control: exception-metadata cleanup must NOT
+# remove an actual code call to a missing host service.
+cat > host-import.ll <<'IR'
+target triple = "thumbv7m-none-eabi"
+declare i32 @host_io()
+define i32 @main() {
+entry:
+  %v = call i32 @host_io()
+  ret i32 %v
+}
+IR
+clang-18 --target=armv7m-none-eabi -mcpu=cortex-m3 -mthumb \
+  -x ir -ffreestanding -fno-unwind-tables -fno-asynchronous-unwind-tables \
+  -O1 -c host-import.ll -o host-import.o
+llvm-objcopy-18 --remove-section=.ARM.exidx --remove-section=.ARM.extab \
+  --strip-unneeded host-import.o host-import-core.o
+readelf -W -s host-import-core.o | grep -Eq 'UND[[:space:]]+host_io
+
+if clang-18 --target=armv7m-none-eabi -mcpu=cortex-m3 -mthumb \
+  -nostdlib -fuse-ld=lld -Wl,-T,flash.ld -Wl,--no-undefined -Wl,--gc-sections \
+  reset_core.o host-import-core.o -o denied-host-import.elf >denied-host-import.log 2>&1; then
+  echo "FAIL: linker accepted a live missing host service" >&2
+  exit 10
+fi
+test ! -e denied-host-import.elf || { echo "FAIL: linker leaked denied binary" >&2; exit 11; }
+grep -q 'host_io' denied-host-import.log
+echo "PASS: live external host call remains unresolved and is denied"
+echo "SOURCE_FREE_ARM_QEMU_HARNESS_PASS guest42=0 guest41=1 host_negative=pass"
