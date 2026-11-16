@@ -49,7 +49,7 @@ IR
     -fno-unwind-tables -fno-asynchronous-unwind-tables \
     -c guest.ll -o guest.o
   clang-18 --target=armv7m-none-eabi -mcpu=cortex-m3 -mthumb \
-    -nostdlib -fuse-ld=lld -Wl,-T,flash.ld -Wl,--no-undefined \
+    -nostdlib -fuse-ld=lld -Wl,-T,flash.ld -Wl,--no-undefined -Wl,--gc-sections \
     reset.o guest.o -o "case_$answer.elf"
   echo "-- clang18 ARM input symbols and relocations --"
   readelf -W -s reset.o guest.o | tail -80
