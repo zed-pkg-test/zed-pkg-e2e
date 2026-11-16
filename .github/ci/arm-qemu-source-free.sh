@@ -48,9 +48,16 @@ IR
     -ffreestanding -fno-builtin -fno-stack-protector \
     -fno-unwind-tables -fno-asynchronous-unwind-tables \
     -c guest.ll -o guest.o
+  # Discard *only* exception-table metadata before linking. Retain actual
+  # code relocations and reject any remaining undefined guest dependency.
+  llvm-objcopy-18 --remove-section=.ARM.exidx --remove-section=.ARM.extab \
+    --strip-unneeded guest.o guest_core.o
+  llvm-objcopy-18 --remove-section=.ARM.exidx --remove-section=.ARM.extab \
+    --strip-unneeded reset.o reset_core.o
+  readelf -W -s guest_core.o | awk '$7 == "UND" && NF>=8 && $8!="" {print "GUEST_UNDEFINED",$8; bad=1} END{exit bad?1:0}'
   clang-18 --target=armv7m-none-eabi -mcpu=cortex-m3 -mthumb \
     -nostdlib -fuse-ld=lld -Wl,-T,flash.ld -Wl,--no-undefined -Wl,--gc-sections \
-    reset.o guest.o -o "case_$answer.elf"
+    reset_core.o guest_core.o -o "case_$answer.elf"
   echo "-- clang18 ARM input symbols and relocations --"
   readelf -W -s reset.o guest.o | tail -80
   readelf -W -r reset.o guest.o | tail -100
