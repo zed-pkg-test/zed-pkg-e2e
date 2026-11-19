@@ -1,0 +1,34 @@
+name: M5 experimental GraalVM Epsilon bounded mailbox actor workers
+on:
+  push:
+    branches: [feat/m5-bounded-mailbox-epsilon-20261107]
+  pull_request:
+    paths:
+      - 'src/m5/**'
+      - 'tests/m5/**'
+      - 'ci/m5/**'
+      - '.github/workflows/m5-bounded-mailbox-epsilon.yml'
+permissions:
+  contents: read
+jobs:
+  native-bounded-actor-worker:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 55
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - name: Install actual GraalVM JDK25 Native Image
+        uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3
+        with:
+          distribution: graalvm
+          java-version: '25'
+      - name: Compile and execute actual offheap asynchronous worker Native Image
+        env:
+          ATTO_EXPECTED_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: bash ci/m5/verify-bounded-mailbox-native.sh
+      - name: Explicit nonclaims
+        run: |
+          echo 'WORKER_NATIVE_AOT_HOST_TEST_ONLY_NOT_COMPILED_ATTO_GUEST'
+          echo 'No arbitrary malicious tenant OS sandbox, canonical frontend integration or long-term heap proof'

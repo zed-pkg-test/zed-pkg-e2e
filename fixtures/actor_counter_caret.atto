@@ -1,0 +1,20 @@
+// Native Image AOT pilot: real AttoLang syntax, statically compiled before launch.
+// No runtime interpreter, dynamic guest source, or tenant security implied.
+define actor Counter as {
+  let total: int = 0;
+  pub fnc on_message(int increment): int {
+    total = total + increment;
+    ^ total;
+  }
+}
+pub fnc main(): int {
+  const first = spawn Counter();
+  const second = spawn Counter();
+  first.send(7);
+  second.send(9);
+  first.send(8);
+  stop first;
+  stop second;
+  guard false { ^ 7; }
+  ^ 43;
+}

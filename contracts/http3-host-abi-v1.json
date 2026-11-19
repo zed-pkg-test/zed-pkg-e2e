@@ -1,0 +1,230 @@
+{
+  "schema": "atto.net.http3.host-abi.v1",
+  "status": "SPECIFICATION_ONLY_NO_TRANSPORT_ENGINE_BOUND",
+  "canonical_source": [
+    "stdlib/net/http_policy.atto",
+    "stdlib/net/quic_varint.atto",
+    "stdlib/net/http3_frames.atto"
+  ],
+  "source_policy": "PORTABLE_USER_FACING_LOGIC_MUST_BE_NATIVE_ATTO",
+  "boundary": "Host-only QUIC/TLS/UDP primitives may be implemented per target. HTTP/3 framing, admission, validation, request/response logic, actor ownership policy remain .atto; never replace with Java/C#/Rust/JS stdlib classes.",
+  "runtime_abi_version": 1,
+  "resource_handle": {
+    "bits": 64,
+    "interpretation": "Opaque per-actor handle containing table index and generation; layout private to host adapter",
+    "owner": "actor_id + isolation_domain",
+    "rules": [
+      "No shared mutable buffer alias across actors",
+      "Generation check on every call",
+      "Closed and cancelled handles fail E_CLOSED",
+      "All owned handles retired before actor arena teardown",
+      "No raw pointer escape across await or to another actor"
+    ]
+  },
+  "operations": [
+    {
+      "name": "quic_client_connect_async",
+      "params": [
+        "actor_id",
+        "origin",
+        "tls_policy",
+        "deadline",
+        "net_permission"
+      ],
+      "return": "Result<QuicConnection,NetworkError>",
+      "effects": [
+        "net",
+        "suspend"
+      ],
+      "require": "TLS1.3 certificate validation, ALPN h3, QUIC transport negotiation"
+    },
+    {
+      "name": "quic_server_listen_async",
+      "params": [
+        "actor_id",
+        "bind_address",
+        "tls_identity",
+        "net_permission"
+      ],
+      "return": "Result<QuicEndpoint,NetworkError>",
+      "effects": [
+        "net",
+        "suspend"
+      ],
+      "require": "Authorized UDP bind; no wildcard default; TLS identity loaded securely"
+    },
+    {
+      "name": "quic_accept_async",
+      "params": [
+        "endpoint",
+        "deadline",
+        "cancel_token"
+      ],
+      "return": "Result<QuicConnection,NetworkError>",
+      "effects": [
+        "net",
+        "suspend"
+      ],
+      "require": "Actor quota and handshake resource limit"
+    },
+    {
+      "name": "quic_open_bidi_stream_async",
+      "params": [
+        "connection",
+        "deadline",
+        "cancel_token"
+      ],
+      "return": "Result<QuicStream,NetworkError>",
+      "effects": [
+        "net",
+        "suspend"
+      ],
+      "require": "Peer stream limit and actor quota"
+    },
+    {
+      "name": "quic_accept_stream_async",
+      "params": [
+        "connection",
+        "deadline",
+        "cancel_token"
+      ],
+      "return": "Result<QuicStream,NetworkError>",
+      "effects": [
+        "net",
+        "suspend"
+      ],
+      "require": "Connection-scoped backpressure"
+    },
+    {
+      "name": "quic_stream_read_async",
+      "params": [
+        "stream",
+        "max_bytes",
+        "deadline",
+        "cancel_token"
+      ],
+      "return": "Result<OwnedBytes,NetworkError>",
+      "effects": [
+        "net",
+        "suspend"
+      ],
+      "require": "Bounded receive and actor-owned returned bytes"
+    },
+    {
+      "name": "quic_stream_write_async",
+      "params": [
+        "stream",
+        "owned_bytes",
+        "deadline",
+        "cancel_token"
+      ],
+      "return": "Result<int,NetworkError>",
+      "effects": [
+        "net",
+        "suspend"
+      ],
+      "require": "Progress, cancellation and partial-write semantics; no unpinned borrowed buffers"
+    },
+    {
+      "name": "quic_stream_finish_async",
+      "params": [
+        "stream",
+        "deadline"
+      ],
+      "return": "Result<void,NetworkError>",
+      "effects": [
+        "net",
+        "suspend"
+      ],
+      "require": "Exactly-once half-close"
+    },
+    {
+      "name": "quic_datagram_send_async",
+      "params": [
+        "connection",
+        "owned_bytes",
+        "deadline",
+        "cancel_token"
+      ],
+      "return": "Result<void,NetworkError>",
+      "effects": [
+        "net",
+        "suspend"
+      ],
+      "require": "Explicit negotiated datagram support, peer max, congestion and path MTU"
+    },
+    {
+      "name": "quic_close_async",
+      "params": [
+        "connection",
+        "application_error",
+        "deadline"
+      ],
+      "return": "Result<void,NetworkError>",
+      "effects": [
+        "net",
+        "suspend"
+      ],
+      "require": "Idempotent release and supervisor lifecycle"
+    },
+    {
+      "name": "quic_negotiated_capabilities",
+      "params": [
+        "connection"
+      ],
+      "return": "Result<NegotiatedCapabilities,NetworkError>",
+      "effects": [
+        "net"
+      ],
+      "require": "Authoritative ALPN, version, datagram and HTTP3 SETTINGS from live handshake; never caller-selected bools"
+    }
+  ],
+  "hardening": {
+    "permissions": "Deno-like permission model using flags-2-env; net/UDP/TLS/listen capabilities enforced at host boundary",
+    "tls": "TLS 1.3, authenticated peer validation, exact ALPN 'h3', no insecure fallback, no shared session tickets across trust domains",
+    "zero_rtt": "Off by default; requires explicit opt-in and replay-safety evidence; no retry of unsafe requests",
+    "actor": "Actor-owned handles, no cross-actor synchronous call, stream and connection quotas; supervisor CONTROL fault path; cancellation propagates",
+    "backpressure": "Bounded actor mailbox/connection/stream buffers; QUIC flow control governs reads and writes",
+    "body": "HTTP3 framing and QPACK validation in .atto, application body streaming bounded by configured policies",
+    "native_aot": "Closed-world static ABI imports; engine linked into Native AOT artifact, not runtime JIT-loaded",
+    "browser_wasm": "No raw UDP socket or listen by default; use supported fetch/WebTransport host capabilities; report E_UNSUPPORTED when guarantees unavailable"
+  },
+  "backend_status": [
+    {
+      "backend": "llvm",
+      "guest_source_copy": "VERIFIED_IDENTICAL",
+      "host_transport_binding": "NOT_IMPLEMENTED",
+      "guest_http3": "NOT_EXECUTED"
+    },
+    {
+      "backend": "java",
+      "guest_source_copy": "VERIFIED_IDENTICAL",
+      "host_transport_binding": "NOT_IMPLEMENTED",
+      "guest_http3": "NOT_EXECUTED"
+    },
+    {
+      "backend": "net",
+      "guest_source_copy": "VERIFIED_IDENTICAL",
+      "host_transport_binding": "NOT_IMPLEMENTED",
+      "guest_http3": "NOT_EXECUTED"
+    },
+    {
+      "backend": "rs",
+      "guest_source_copy": "VERIFIED_IDENTICAL",
+      "host_transport_binding": "NOT_IMPLEMENTED",
+      "guest_http3": "NOT_EXECUTED"
+    },
+    {
+      "backend": "wasm",
+      "guest_source_copy": "VERIFIED_IDENTICAL",
+      "host_transport_binding": "NOT_IMPLEMENTED",
+      "guest_http3": "NOT_EXECUTED"
+    }
+  ],
+  "evidence_boundaries": [
+    "Source byte identity only verifies identical Atto text, never backend semantic parity",
+    "Rust compiler -> Wasm guest pure codec tests do not verify QUIC, TLS or HTTP3 networking",
+    "Full AOT and zero/minimal GC status requires actual target-specific execution and memory measurements",
+    "No merge or release claim until independent QUIC/HTTP3 client/server interoperability with verified certificates and failure cases"
+  ]
+}
