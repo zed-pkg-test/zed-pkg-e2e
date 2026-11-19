@@ -1,0 +1,80 @@
+// QUIC RFC 9000 variable-length integer codec helpers (native AttoLang).
+// Pure, checked arithmetic. Inputs are octets 0..255 represented as int.
+// Returns -1 for malformed inputs; caller MUST reject the sentinel.
+// 1/2/4/8 byte encodings may be non-minimal: this is allowed by RFC 9000.
+// Does not access buffers or replace transport/TLS/QUIC packet processing.
+
+pub fnc quic_valid_octet(int b): bool {
+  if b < 0 then return false; fi
+  if b > 255 then return false; fi
+  return true;
+}
+
+pub fnc quic_varint_width(int first): int {
+  if quic_valid_octet(first) == false then return 0; fi
+  if first < 64 then return 1; fi
+  if first < 128 then return 2; fi
+  if first < 192 then return 4; fi
+  return 8;
+}
+
+pub fnc quic_varint_min_width(int value): int {
+  if value < 0 then return 0; fi
+  if value < 64 then return 1; fi
+  if value < 16384 then return 2; fi
+  if value < 1073741824 then return 4; fi
+  if value < 4611686018427387904 then return 8; fi
+  return 0;
+}
+
+pub fnc quic_varint_decode_1(int b0): int {
+  if quic_varint_width(b0) != 1 then return -1; fi
+  return b0;
+}
+
+pub fnc quic_varint_decode_2(int b0, int b1): int {
+  if quic_varint_width(b0) != 2 then return -1; fi
+  if quic_valid_octet(b1) == false then return -1; fi
+  return (b0 - 64) * 256 + b1;
+}
+
+pub fnc quic_varint_decode_4(int b0, int b1, int b2, int b3): int {
+  if quic_varint_width(b0) != 4 then return -1; fi
+  if quic_valid_octet(b1) == false then return -1; fi
+  if quic_valid_octet(b2) == false then return -1; fi
+  if quic_valid_octet(b3) == false then return -1; fi
+  let value: int = b0 - 128;
+  value = value * 256 + b1;
+  value = value * 256 + b2;
+  value = value * 256 + b3;
+  return value;
+}
+
+pub fnc quic_varint_decode_8(int b0, int b1, int b2, int b3, int b4, int b5, int b6, int b7): int {
+  if quic_varint_width(b0) != 8 then return -1; fi
+  if quic_valid_octet(b1) == false then return -1; fi
+  if quic_valid_octet(b2) == false then return -1; fi
+  if quic_valid_octet(b3) == false then return -1; fi
+  if quic_valid_octet(b4) == false then return -1; fi
+  if quic_valid_octet(b5) == false then return -1; fi
+  if quic_valid_octet(b6) == false then return -1; fi
+  if quic_valid_octet(b7) == false then return -1; fi
+  let value: int = b0 - 192;
+  value = value * 256 + b1;
+  value = value * 256 + b2;
+  value = value * 256 + b3;
+  value = value * 256 + b4;
+  value = value * 256 + b5;
+  value = value * 256 + b6;
+  value = value * 256 + b7;
+  return value;
+}
+
+// Check the octet count before any buffer read; lengths are nonnegative.
+// Never compute offset+width before validating remaining bytes (overflow).
+pub fnc quic_varint_can_read(int first, int available_bytes): bool {
+  if available_bytes < 0 then return false; fi
+  let width: int = quic_varint_width(first);
+  if width == 0 then return false; fi
+  return width <= available_bytes;
+}

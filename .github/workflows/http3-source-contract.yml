@@ -1,0 +1,25 @@
+name: Atto HTTP3 staged source contract (spec-only)
+on:
+  push:
+    branches: [feat/native-atto-http3-policy-20261114]
+  pull_request:
+    paths:
+      - 'contracts/http3-host-abi-v1.json'
+      - 'stdlib/net/**'
+      - 'ci/http3/**'
+      - '.github/workflows/http3-source-contract.yml'
+permissions:
+  contents: read
+jobs:
+  staged-source-only:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Validate pinned pure Atto source and ABI without claiming runtime
+        env:
+          ATTO_EXPECTED_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: bash ci/http3/verify-source-contract.sh

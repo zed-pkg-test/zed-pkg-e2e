@@ -1,0 +1,51 @@
+// AttoLang portable stdlib: HTTP/3 and QUIC policy gates.
+// This is native .atto code, shared byte-for-byte across compiler backends.
+// Scope: pure policy decisions only. Not an HTTP/3, QUIC, TLS or I/O engine.
+// 30 = HTTP/3, 20 = HTTP/2, 11 = HTTP/1.1, 0 = no usable protocol.
+
+pub fnc http3_attempt_allowed(bool udp_permitted, bool quic_available, bool tls13_available, bool h3_endpoint_discovered): bool {
+  if udp_permitted then
+    if quic_available then
+      if tls13_available then
+        return h3_endpoint_discovered;
+      fi
+    fi
+  fi
+  return false;
+}
+
+pub fnc http_version_preference(bool h3_ready, bool h2_ready, bool h11_ready, bool allow_tcp_fallback): int {
+  if h3_ready then
+    return 30;
+  fi
+  if allow_tcp_fallback then
+    if h2_ready then
+      return 20;
+    fi
+    if h11_ready then
+      return 11;
+    fi
+  fi
+  return 0;
+}
+
+// Requires negotiated peer DATAGRAM support; the caller must still check
+// per-peer maximum frame size, path MTU, memory budget, and send permission.
+pub fnc quic_datagram_may_send(bool local_supported, bool peer_limit_nonzero, bool application_allows_unreliable): bool {
+  if local_supported then
+    if peer_limit_nonzero then
+      return application_allows_unreliable;
+    fi
+  fi
+  return false;
+}
+
+// Preflight only: never automatically replay unsafe application requests.
+pub fnc http3_zero_rtt_candidate(bool resumed_session, bool explicitly_enabled, bool request_replay_safe): bool {
+  if resumed_session then
+    if explicitly_enabled then
+      return request_replay_safe;
+    fi
+  fi
+  return false;
+}

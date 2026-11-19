@@ -1,0 +1,36 @@
+name: M7 restricted compiled Atto actor cooperative scheduling native probe
+on:
+  push:
+    branches: [feat/m7-cooperative-compiled-actor-20261115]
+  pull_request:
+    paths:
+      - 'src/m7/**'
+      - 'tests/m7/**'
+      - 'fixtures/m7/**'
+      - 'tools/m7_compile_actor_continuation.py'
+      - 'ci/m7/**'
+      - '.github/workflows/m7-cooperative-native.yml'
+permissions:
+  contents: read
+jobs:
+  m7-restricted-compiled-atto-jvm-native:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 55
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - name: Install GraalVM JDK 25 Native Image
+        uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3
+        with:
+          distribution: graalvm
+          java-version: '25'
+      - name: Compile real .atto safe-point subset and execute JVM + Native Image
+        env:
+          ATTO_EXPECTED_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: bash ci/m7/verify-cooperative-native.sh
+      - name: Evidence scope
+        run: |
+          echo 'RESTRICTED STATIC ATTO SAFEPOINT COMPILER, not canonical AttoLang frontend'
+          echo 'No arbitrary guest preemption, hard-real-time certification, or LLVM/Rust/Wasm parity'

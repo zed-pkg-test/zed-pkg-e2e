@@ -1,0 +1,32 @@
+name: Atto Java FFM actor Ref32 host pilot
+on:
+  pull_request:
+    paths:
+      - 'src/memory/ActorRef32Arena.java'
+      - 'tests/ActorRef32ArenaTest.java'
+      - '.github/workflows/actor-ref32-ffm-host-pilot.yml'
+  workflow_dispatch:
+
+jobs:
+  ref32-host-ffm:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up JDK 25 for finalized FFM API
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '25'
+      - name: Compile and execute real Java FFM memory operations
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/atto-ref32-classes
+          javac -Xlint:all -Werror -d /tmp/atto-ref32-classes src/memory/ActorRef32Arena.java tests/ActorRef32ArenaTest.java
+          java --enable-native-access=ALL-UNNAMED -cp /tmp/atto-ref32-classes ActorRef32ArenaTest | tee /tmp/atto-ref32-host.log
+          grep -q '^ATTO_REF32_JAVA_HOST_PASS checks=' /tmp/atto-ref32-host.log
+      - name: Evidence boundary
+        run: |
+          echo "FFM_HOST_REF32_ADAPTER_ONLY: NOT compiled .atto guest; NOT Native Image AOT; NOT full Java backend parity"

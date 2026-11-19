@@ -1,0 +1,116 @@
+// HTTP/3 RFC 9114 frame and stream admission rules in native Atto.
+// Return values are pure validation decisions, not network I/O.
+// Extensions/unknown frame types are eligible to be skipped by length when
+// bounded; HTTP/2-only reserved type IDs MUST be rejected.
+// Transport must additionally validate QPACK/headers, stream state and limits.
+// All HTTP/3 frame type/length and SETTINGS integers are QUIC 62-bit values.
+
+// QUIC varints are unsigned integers in [0, 2^62 - 1].
+// This prevents host i64 values above the wire range from being silently
+// treated as unknown extension frame types or legal field lengths.
+pub fnc http3_valid_wire_integer(int value): bool {
+  if value < 0 then return false; fi
+  return value < 4611686018427387904;
+}
+
+pub fnc http3_http2_reserved_type(int kind): bool {
+  if kind == 2 then return true; fi
+  if kind == 6 then return true; fi
+  if kind == 8 then return true; fi
+  if kind == 9 then return true; fi
+  return false;
+}
+
+// A control stream MUST begin with SETTINGS and MUST NOT repeat it.
+// 0 = DATA, 1 = HEADERS, 3 = CANCEL_PUSH, 4 = SETTINGS,
+// 5 = PUSH_PROMISE, 7 = GOAWAY, 13 = MAX_PUSH_ID.
+pub fnc http3_control_frame_allowed(int kind, bool first_frame): bool {
+  if http3_valid_wire_integer(kind) == false then return false; fi
+  if http3_http2_reserved_type(kind) then return false; fi
+  if first_frame then return kind == 4; fi
+  if kind == 4 then return false; fi
+  if kind == 0 then return false; fi
+  if kind == 1 then return false; fi
+  if kind == 5 then return false; fi
+  return true;
+}
+
+// Request streams allow DATA, HEADERS, PUSH_PROMISE and unknown extensions.
+// Control-only frames and old HTTP/2 frame codes must be rejected.
+pub fnc http3_request_frame_allowed(int kind): bool {
+  if http3_valid_wire_integer(kind) == false then return false; fi
+  if http3_http2_reserved_type(kind) then return false; fi
+  if kind == 3 then return false; fi
+  if kind == 4 then return false; fi
+  if kind == 7 then return false; fi
+  if kind == 13 then return false; fi
+  return true;
+}
+
+// First request/response frame MUST be HEADERS, ignoring extension frames.
+// The framing engine must still reject DATA following trailers.
+pub fnc http3_request_first_known_frame_allowed(int kind): bool {
+  return kind == 1;
+}
+
+// PUSH streams disallow PUSH_PROMISE. Other known frame rules match request.
+pub fnc http3_push_frame_allowed(int kind): bool {
+  if http3_request_frame_allowed(kind) == false then return false; fi
+  if kind == 5 then return false; fi
+  return true;
+}
+
+// Stream types: 0 control, 1 push, 2 QPACK encoder, 3 QPACK decoder.
+// A duplicate control/QPACK critical stream must be rejected by the owner.
+pub fnc http3_critical_stream_can_open(bool already_open): bool {
+  return already_open == false;
+}
+
+pub fnc http3_known_unidirectional_stream(int kind): bool {
+  if http3_valid_wire_integer(kind) == false then return false; fi
+  return kind < 4;
+}
+
+// HTTP/2 settings identifiers reserved in HTTP/3 (RFC 9114 7.2.4.1).
+// Unknown positive identifiers are extension settings, not hard errors.
+pub fnc http3_settings_id_valid(int identifier): bool {
+  if http3_valid_wire_integer(identifier) == false then return false; fi
+  if identifier == 0 then return false; fi
+  if identifier == 2 then return false; fi
+  if identifier == 3 then return false; fi
+  if identifier == 4 then return false; fi
+  if identifier == 5 then return false; fi
+  return true;
+}
+
+// Never add two untrusted offsets or lengths to decide whether to read.
+// The caller has already validated the actual buffer lifetime and ownership.
+pub fnc http3_frame_payload_fits(int payload_length, int buffered_bytes, int frame_limit): bool {
+  if http3_valid_wire_integer(payload_length) == false then return false; fi
+  if http3_valid_wire_integer(buffered_bytes) == false then return false; fi
+  if http3_valid_wire_integer(frame_limit) == false then return false; fi
+  if payload_length > frame_limit then return false; fi
+  return payload_length <= buffered_bytes;
+}
+
+// Per-message admission guard. Unknown extension frames may precede HEADERS
+// (RFC 9114 4.1), but DATA must NOT appear until HEADERS has been received.
+// Once the caller has parsed and marked a trailing HEADERS section, both DATA
+// and subsequent HEADERS are forbidden. The caller must independently detect
+// interim/final response status and QPACK validity and update these flags.
+pub fnc http3_message_frame_allowed(int kind, bool saw_initial_headers, bool saw_trailers, bool is_push_stream): bool {
+  if is_push_stream then
+    if http3_push_frame_allowed(kind) == false then return false; fi
+  fi
+  if is_push_stream == false then
+    if http3_request_frame_allowed(kind) == false then return false; fi
+  fi
+  if kind == 0 then
+    if saw_initial_headers == false then return false; fi
+    if saw_trailers then return false; fi
+  fi
+  if kind == 1 then
+    if saw_trailers then return false; fi
+  fi
+  return true;
+}
