@@ -1,0 +1,49 @@
+{
+  "schema": "atto.m9.supervisor-notice-wire.v1",
+  "status": "CANDIDATE_RESTRICTED_HOST_ABI",
+  "encoding": "UTF-8 JSON object; canonical ASCII key order, no whitespace when encoded",
+  "fields": [
+    "kind",
+    "actor_id",
+    "generation",
+    "supervisor_id",
+    "message_id",
+    "fault_code",
+    "reason"
+  ],
+  "json_integer_range": {
+    "min": 0,
+    "max": 9007199254740991
+  },
+  "requirements": {
+    "actor_id": "zero-based host-assigned unique numeric id within runtime lifetime; never reused after incarnation",
+    "generation": "positive integer per actor name/incarnation",
+    "supervisor_id": "nonnegative numeric parent/supervisor id",
+    "message_id": "positive accepted DATA id for failed PANIC; zero for graceful STOP",
+    "reason": "UTF-8 nonempty, <=128 bytes, JSON-escaped; never use an unsafe unescaped string",
+    "kind": [
+      "STOP",
+      "PANIC"
+    ],
+    "fault_codes": {
+      "stop": 0,
+      "checked_add_overflow": 1,
+      "checked_index_increment_overflow": 2,
+      "worker_exit": 100,
+      "protocol_violation": 101
+    }
+  },
+  "sample_fixtures": {
+    "stop": "tests/fixtures/m9/stop.json",
+    "panic": "tests/fixtures/m9/panic.json"
+  },
+  "scope": {
+    "java_host_notice": true,
+    "rust_wasm_worker_host": true,
+    "canonical_java_compiler": false,
+    "full_actor_mailbox": false,
+    "await_select": false,
+    "hard_real_time": false
+  },
+  "notes": "Wire serialization is an explicit host API; no implication of network transport or cross-process supervisor identity authority"
+}
