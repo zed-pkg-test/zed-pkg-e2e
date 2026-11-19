@@ -1,0 +1,18 @@
+// First explicit, closed-world typed object storage M1 fixture.
+// Point is a value, stored inline within a Particle owned in one actor heap.
+// No cross-actor transfer, inheritance, suspension or general class lowering.
+define struct Point as
+  int x;
+  int y;
+end
+
+define class Particle as
+  final Point position;
+  int velocity;
+end
+
+pub fnc main(): int {
+  let Point point = Point(x=10, y=20);
+  let Particle particle = new Particle(position=point, velocity=3);
+  return particle.position.x + particle.velocity;
+}

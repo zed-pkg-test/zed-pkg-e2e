@@ -1,0 +1,34 @@
+name: M6 experimental NIO carrier scheduler and supervisor CONTROL
+on:
+  push:
+    branches: [feat/m6-nio-carrier-supervisor-20261115]
+  pull_request:
+    paths:
+      - 'src/m6/**'
+      - 'tests/m6/**'
+      - 'ci/m6/**'
+      - '.github/workflows/m6-nio-carrier-control.yml'
+permissions:
+  contents: read
+jobs:
+  m6-jvm-and-native-image:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 55
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - name: Install GraalVM JDK 25 Native Image
+        uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3
+        with:
+          distribution: graalvm
+          java-version: '25'
+      - name: Execute real JDK and Native Image NIO/concurrency race probes
+        env:
+          ATTO_EXPECTED_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: bash ci/m6/verify-nio-runtime-native.sh
+      - name: Evidence scope
+        run: |
+          echo 'HOST_NATIVE_AOT_ONLY — no compiler-generated .atto actor, tenant sandbox, or hard-real-time certification'
+          echo 'Supervisor CONTROL is host-side, not language select lowering'
