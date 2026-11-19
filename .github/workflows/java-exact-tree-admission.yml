@@ -1,0 +1,44 @@
+name: Atto Java exact-tree admission gate
+on:
+  pull_request:
+    paths:
+      - 'ci/admission/**'
+      - '.github/workflows/java-exact-tree-admission.yml'
+  push:
+    branches: [ci/java-exact-tree-admission-v1-20261119]
+permissions:
+  contents: read
+jobs:
+  admission:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Exact-tree clean source admission
+        env:
+          ATTO_EXPECTED_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          bash ci/admission/exact-tree.sh ci/admission/exact-tree.sh .github/workflows/java-exact-tree-admission.yml
+      - name: Fail closed on wrong commit identity
+        env:
+          ATTO_EXPECTED_HEAD_SHA: '0000000000000000000000000000000000000000'
+        run: |
+          if bash ci/admission/exact-tree.sh ci/admission/exact-tree.sh; then
+            echo "UNEXPECTED_SHA_GATE_BYPASS" >&2
+            exit 1
+          fi
+          echo ATTO_SHA_DENIAL=PASS
+      - name: Fail closed on untracked path injection
+        env:
+          ATTO_EXPECTED_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          trap 'rm -f .atto-admission-plant' EXIT
+          printf 'planted\n' > .atto-admission-plant
+          if bash ci/admission/exact-tree.sh ci/admission/exact-tree.sh; then
+            echo "UNTRACKED_INJECTION_BYPASS" >&2
+            exit 1
+          fi
+          echo ATTO_UNTRACKED_DENIAL=PASS
