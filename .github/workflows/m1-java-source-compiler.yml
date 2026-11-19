@@ -1,0 +1,28 @@
+name: Java ObjectStorage M1 source-compiled JVM and Native Image
+on:
+  pull_request:
+    paths:
+      - 'src/compiler/m1/**'
+      - 'tests/compiler/AttoObjectM1JavaCompilerProbe.java'
+      - 'ci/compiler/verify-m1-java.sh'
+      - '.github/workflows/m1-java-source-compiler.yml'
+permissions:
+  contents: read
+jobs:
+  java-m1:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+          ref: ${{ github.event.pull_request.head.sha }}
+      - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3
+        with:
+          distribution: graalvm
+          java-version: '25'
+      - name: Execute bounded compiled Atto guest on JVM and real native machine code
+        env:
+          ATTO_EXPECTED_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          ATTO_NATIVE_IMAGE_REQUIRED: '1'
+        run: bash ci/compiler/verify-m1-java.sh
