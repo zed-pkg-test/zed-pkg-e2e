@@ -1,0 +1,64 @@
+{
+  "schema": "atto.m9.supervisor-control.v1",
+  "status": "CANDIDATE_NOT_FULL_BACKEND_PARITY",
+  "scope": {
+    "worker_guest": "single-frame compiled .atto M8 cooperative profile",
+    "general_actor": false,
+    "await_select": false,
+    "hard_real_time": false
+  },
+  "limits": {
+    "actors": {
+      "min": 1,
+      "max": 128
+    },
+    "mailbox": {
+      "min": 1,
+      "max": 10000
+    },
+    "reductions_per_slice": {
+      "min": 1,
+      "max": 65536
+    },
+    "control_slots": {
+      "min": 1,
+      "max": 4
+    }
+  },
+  "notice": {
+    "required": [
+      "kind",
+      "actor_id",
+      "generation",
+      "supervisor_id",
+      "message_id",
+      "fault_code",
+      "reason"
+    ],
+    "kind": [
+      "STOP",
+      "PANIC"
+    ],
+    "fault_codes": {
+      "none": 0,
+      "checked_add_overflow": 1,
+      "checked_index_increment_overflow": 2,
+      "worker_exit": 100,
+      "guest_protocol_violation": 101
+    },
+    "generation": "nonzero monotonic actor incarnation",
+    "message_id": "zero for STOP without an active turn; otherwise accepted DATA id"
+  },
+  "host_rules": [
+    "supervisor priority CONTROL queue independent of bounded DATA mailbox",
+    "STOP fences new DATA and drains all previously accepted queued and in-flight work",
+    "PANIC fences new DATA and continuation resumption, settles current DATA as FAILED, pending queued DATA as ABANDONED",
+    "at most one PANIC supervisor notice for each actor generation; duplicate STOP coalesces, STOP-to-PANIC escalation retained",
+    "a YIELD retains one accepted in-flight DATA turn and may not increment completed or re-admit",
+    "workers must physically quiesce before frame reclamation or actor reincarnation",
+    "stale actor generation and stale message sequence cannot send, complete or resume",
+    "accepted = completed + failed + abandoned + queued + in_flight for every actor generation",
+    "host must preserve guest fault code after trap and deliver supervisor PANIC independently of DATA capacity"
+  ],
+  "limits_nonclaims": "No forced OS-thread preemption or proof of hard-real-time deadlines; one dedicated worker per actor is not a pooled scheduler"
+}
