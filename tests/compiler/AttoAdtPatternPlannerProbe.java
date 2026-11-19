@@ -39,6 +39,8 @@ public final class AttoAdtPatternPlannerProbe {
         rejects("E_PATTERN_BINDER", () -> parse("Ok(await)", Family.RESULT, Position.MATCH));
         rejects("E_PATTERN_SYNTAX", () -> parse("Ok", Family.RESULT, Position.MATCH));
         rejects("E_VARIANT_TAG", () -> parse("Success(x)", Family.RESULT, Position.MATCH));
+        rejects("E_VARIANT_TAG", () -> parse("ok()", Family.RESULT, Position.MATCH));
+        rejects("E_VARIANT_TAG", () -> parse("ERR(_)", Family.RESULT, Position.MATCH));
         Plan plan = check(Family.RESULT, List.of(
             arm("Ok()", Family.RESULT, "ok"),
             arm("Err(error)", Family.RESULT, "err")), true);

@@ -72,9 +72,15 @@ public final class AttoAdtPatternPlanner {
         }
         int left = source.indexOf('(');
         String rawTag = left < 0 ? source : source.substring(0, left);
-        Tag tag;
-        try { tag = Tag.valueOf(rawTag.toUpperCase(java.util.Locale.ROOT)); }
-        catch (IllegalArgumentException e) { throw error("E_VARIANT_TAG"); }
+        // Atto nominal variant constructors are case-sensitive. Case folding
+        // would incorrectly accept ok()/ERR(_) and change match admission.
+        Tag tag = switch (rawTag) {
+            case "Ok" -> Tag.OK;
+            case "Err" -> Tag.ERR;
+            case "Some" -> Tag.SOME;
+            case "None" -> Tag.NONE;
+            default -> throw error("E_VARIANT_TAG");
+        };
         if (!isAllowed(family, tag)) throw error("E_VARIANT_FAMILY");
         if (tag == Tag.NONE) {
             if (left >= 0) throw error("E_NULLARY_ARITY");
