@@ -1,0 +1,10 @@
+fnc plus_one(int x): int {
+    ^ x + 1;
+}
+pub susp fnc main(): int {
+    val pending = task { ^ 41; };
+    ^ pending
+        |> susp |f| -> await f
+        |> plus_one
+        >> val answer: int;
+}
