@@ -1,0 +1,27 @@
+name: Java ADT pattern host JVM and Native Image
+on:
+  pull_request:
+    paths:
+      - 'src/compiler/adt/**'
+      - 'tests/compiler/AttoAdtPatternPlannerProbe.java'
+permissions:
+  contents: read
+jobs:
+  adt:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 50
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+          ref: ${{ github.event.pull_request.head.sha }}
+      - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3
+        with:
+          distribution: graalvm
+          java-version: '25'
+      - name: Verify exact head and execute typed host ADT pattern checks
+        env:
+          EXPECTED_SOURCE_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SOURCE_SHA"
+          bash ci/compiler/verify-adt-pattern.sh
