@@ -16,9 +16,13 @@ public final class ActorRef32Arena implements AutoCloseable {
     public static final class TrustedRef {
         private final int token;
         private final Owner origin;
-        private TrustedRef(int token, Owner origin) {
+        // Host-only issuance witness: an actor Owner value may have multiple
+        // live or sequential arenas with colliding 32-bit guest token values.
+        private final ActorRef32Arena issuing_arena;
+        private TrustedRef(int token, Owner origin, ActorRef32Arena issuing_arena) {
             this.token = token;
             this.origin = origin;
+            this.issuing_arena = issuing_arena;
         }
         public int guest_token() { return token; }
     }
@@ -67,7 +71,7 @@ public final class ActorRef32Arena implements AutoCloseable {
             if (!live[i] && !retired[i]) {
                 live[i] = true;
                 type_id[i] = type;
-                return new TrustedRef((generation[i] << SLOT_BITS) | (i + 1), owner);
+                return new TrustedRef((generation[i] << SLOT_BITS) | (i + 1), owner, this);
             }
         }
         return null; // quota refusal, without mutating any live allocation.
@@ -76,6 +80,10 @@ public final class ActorRef32Arena implements AutoCloseable {
     private int checked(TrustedRef ref, Owner caller,
                         int type, int byte_offset) {
         if (ref == null) throw new IllegalStateException("null actor reference");
+        // Owner tuple equality alone is insufficient: two actor arenas can
+        // independently issue the same slot/generation/type. Do not alias.
+        if (ref.issuing_arena != this)
+            throw new IllegalStateException("foreign actor arena reference");
         check_origin(ref.origin, caller);
         int token = ref.token;
         int i = (token & SLOT_MASK) - 1;

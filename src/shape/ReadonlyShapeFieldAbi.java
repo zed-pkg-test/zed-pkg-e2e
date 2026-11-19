@@ -23,7 +23,8 @@ public final class ReadonlyShapeFieldAbi {
         public Field {
             Objects.requireNonNull(name);
             Objects.requireNonNull(scalar);
-            if (name.isEmpty() || offset < 0 || offset % 8 != 0) {
+            if (name.length() > 128 || !name.matches("[A-Za-z_][A-Za-z_0-9]*") ||
+                offset < 0 || offset % 8 != 0) {
                 throw new IllegalArgumentException("invalid compiled field descriptor");
             }
         }
@@ -32,12 +33,23 @@ public final class ReadonlyShapeFieldAbi {
     public record Layout(String nominal_name, List<Field> fields, boolean sealed_actor_state) {
         public Layout {
             Objects.requireNonNull(nominal_name);
+            // These records are compiler-issued metadata, never freeform
+            // names from a host object or arbitrary Java reflection.
+            if (nominal_name.length() > 128 ||
+                    !nominal_name.matches("[A-Za-z_][A-Za-z_0-9]*(\\.[A-Za-z_][A-Za-z_0-9]*)*")) {
+                throw new IllegalArgumentException("invalid nominal shape name");
+            }
             fields = List.copyOf(fields);
             if (fields.size() > 32) throw new IllegalArgumentException("shape width bound");
             for (int i = 0; i < fields.size(); i++) {
                 for (int j = i + 1; j < fields.size(); j++) {
                     if (fields.get(i).name().equals(fields.get(j).name())) {
                         throw new IllegalArgumentException("duplicate compiled member");
+                    }
+                    // A structural witness has independent, non-overlapping
+                    // scalar storage; two visible names cannot alias one slot.
+                    if (fields.get(i).offset() == fields.get(j).offset()) {
+                        throw new IllegalArgumentException("overlapping compiled field offsets");
                     }
                 }
             }

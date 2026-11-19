@@ -33,6 +33,25 @@ public final class ActorRef32ArenaTest {
             first.write_i64(pa, a, 101, 0, 10);
             first.write_i64(pa, a, 101, 8, 20);
             first.write_i64(pa, a, 101, 16, 3);
+            // The same owner incarnation can have two distinct backing arenas.
+            // Numeric 32-bit slots collide; host witnesses must not.
+            try (var twin = new ActorRef32Arena(a, 2)) {
+                var other = twin.allocate(a, 101);
+                check(other != null && other.guest_token() == pa.guest_token(),
+                      "same-owner numeric Ref32 collision setup");
+                twin.write_i64(other, a, 101, 0, 99);
+                reject(() -> first.read_i64(other, a, 101, 0),
+                       "foreign same-owner arena read");
+                reject(() -> first.write_i64(other, a, 101, 0, 123),
+                       "foreign same-owner arena write");
+                reject(() -> twin.read_i64(pa, a, 101, 0),
+                       "foreign same-owner arena read in reverse");
+                reject(() -> twin.release(pa, a, 101),
+                       "foreign same-owner arena release");
+                check(twin.read_i64(other, a, 101, 0) == 99 &&
+                      first.read_i64(pa, a, 101, 0) == 10,
+                      "cross-arena rejection preserved independent storage");
+            }
             check(first.read_i64(pa, a, 101, 0) == 10, "point x");
             check(first.read_i64(pa, a, 101, 8) == 20, "point y");
             check(first.read_i64(pa, a, 101, 16) == 3, "velocity");

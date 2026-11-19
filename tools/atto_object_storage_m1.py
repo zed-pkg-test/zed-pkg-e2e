@@ -5,6 +5,8 @@ Exact-source hash admission, fixed shape, no executable guest source at runtime.
 """
 import argparse
 import hashlib
+import os
+import tempfile
 from pathlib import Path
 import re
 import sys
@@ -312,11 +314,29 @@ def main():
             raise Reject("source SHA-256 mismatch")
         plan = Parser(tokenize(raw.decode("utf-8", errors="strict"))).parse()
         result = render_java(plan) if args.backend == "java" else render_llvm(plan)
-        # Exclusive O_EXCL file creation: do not overwrite an output planted
-        # between admission and emission, including a symlink.
-        with output.open("x", encoding="utf-8", newline="\n") as stream:
-            written = stream.write(result)
-        if written != len(result) or not output.is_file() or output.stat().st_size == 0:
+        # Generate into a private same-directory file, then publish with an
+        # atomic hard-link NO-CLOBBER operation. Unlike writing directly to
+        # output.open("x"), a short write or process error cannot expose a
+        # partially generated compiler artifact at the requested output path.
+        temporary = None
+        try:
+            with tempfile.NamedTemporaryFile(
+                    mode="w", encoding="utf-8", newline="\n",
+                    prefix=".atto-object-m1-", dir=output.parent,
+                    delete=False) as stream:
+                temporary = Path(stream.name)
+                written = stream.write(result)
+                if written != len(result):
+                    raise Reject("incomplete compiled object output")
+                stream.flush()
+                os.fsync(stream.fileno())
+            # link() fails if output was planted after the original check,
+            # including an attacker-owned symlink. Never rename over it.
+            os.link(temporary, output, follow_symlinks=False)
+        finally:
+            if temporary is not None:
+                temporary.unlink(missing_ok=True)
+        if not output.is_file() or output.stat().st_size == 0:
             raise Reject("generated backend artifact missing or incomplete")
         print("ATTO_OBJECT_M1_COMPILE_PASS backend=" + args.backend +
               " source_sha256=" + sha + " expected_exit=" + str(plan["result"]))

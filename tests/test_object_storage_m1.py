@@ -4,10 +4,12 @@ This deliberately bounded single-actor shape is not general Atto compiler parity
 """
 import argparse
 import hashlib
+import importlib.util
 from pathlib import Path
 import subprocess
 import tempfile
 import unittest
+from unittest import mock
 
 argp = argparse.ArgumentParser()
 argp.add_argument("--backend", choices=("java", "llvm"), required=True)
@@ -139,6 +141,32 @@ class ObjectM1CompilerGuests(unittest.TestCase):
                       "--backend", args.backend, "--out", dest])
         self.assertNotEqual(result.returncode, 0)
         self.assertEqual(dest.read_text(encoding="utf-8"), "DO_NOT_REPLACE")
+
+    def test_atomic_no_clobber_against_publication_race(self):
+        source = self.root / "race.atto"
+        source.write_text(BASE, encoding="utf-8")
+        sha = hashlib.sha256(source.read_bytes()).hexdigest()
+        dest = self.root / ("race.java" if args.backend == "java" else "race.ll")
+        spec = importlib.util.spec_from_file_location("object_m1_for_test", GENERATOR)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        real_link = module.os.link
+        observed = []
+
+        def plant_destination(temp_path, final_path, **kwargs):
+            observed.append((Path(temp_path), Path(final_path)))
+            dest.write_text("ATTACKER_OWNED", encoding="utf-8")
+            return real_link(temp_path, final_path, **kwargs)
+
+        argv = [str(GENERATOR), str(source), "--source-sha256", sha,
+                "--backend", args.backend, "--out", str(dest)]
+        with mock.patch.object(module.os, "link", side_effect=plant_destination):
+            with mock.patch("sys.argv", argv):
+                self.assertEqual(module.main(), 2)
+        self.assertEqual(len(observed), 1)
+        self.assertEqual(dest.read_text(encoding="utf-8"), "ATTACKER_OWNED")
+        self.assertFalse(list(self.root.glob(".atto-object-m1-*")),
+                         "private intermediate artifact leaked after failed publish")
 
     def test_source_sha_rejection(self):
         path = self.root / "sha.atto"
