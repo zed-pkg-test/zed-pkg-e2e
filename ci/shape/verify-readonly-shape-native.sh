@@ -14,7 +14,7 @@ mkdir -p "$work/classes"
 "$JAVA_HOME/bin/javac" -Xlint:all -Werror -d "$work/classes" \
   src/shape/ReadonlyShapeFieldAbi.java tests/shape/ReadonlyShapeFieldAbiProbe.java
 "$JAVA_HOME/bin/java" -cp "$work/classes" atto.shape.ReadonlyShapeFieldAbiProbe | tee "$work/jvm.out"
-grep -Fx 'JAVA_SHAPE_FIELD_WITNESS_PASS checks=13' "$work/jvm.out"
+grep -Fx 'JAVA_SHAPE_FIELD_WITNESS_PASS checks=21' "$work/jvm.out"
 (
   cd "$work"
   "$JAVA_HOME/bin/native-image" --no-fallback --gc=epsilon \
@@ -24,7 +24,7 @@ test -x "$work/atto-shape-abi" && test -s "$work/atto-shape-abi" || { echo SHAPE
 file "$work/atto-shape-abi" | grep -Eq 'ELF|Mach-O'
 timeout 60 "$work/atto-shape-abi" > "$work/native.out" 2> "$work/native.err"
 cat "$work/native.out"
-grep -Fx 'JAVA_SHAPE_FIELD_WITNESS_PASS checks=13' "$work/native.out"
+grep -Fx 'JAVA_SHAPE_FIELD_WITNESS_PASS checks=21' "$work/native.out"
 test ! -s "$work/native.err" || { cat "$work/native.err" >&2; exit 1; }
 echo SHAPE_HOST_JVM_AND_NATIVE_IMAGE=PASS
 echo SHAPE_COMPILED_ATTO_GUEST=NOT_VERIFIED
