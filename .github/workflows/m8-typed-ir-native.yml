@@ -1,0 +1,32 @@
+name: M8 Java restricted safe-point IR native executable receipt
+on:
+  push:
+    branches: [audit/m8-java-cooperate-ir-20261115]
+  pull_request:
+    paths:
+      - 'tools/m7_compile_actor_continuation.py'
+      - 'tests/m8/**'
+      - 'ci/m8/**'
+      - '.github/workflows/m8-typed-ir-native.yml'
+permissions:
+  contents: read
+jobs:
+  m8-restricted-ir-native:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - name: Install GraalVM JDK 25 Native Image
+        uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3
+        with:
+          distribution: graalvm
+          java-version: '25'
+      - name: Verify M8 typed safe-point IR and execute JVM/Native Image
+        env:
+          ATTO_EXPECTED_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: bash ci/m8/verify-typed-ir-native.sh
+      - name: Scope
+        run: echo 'M8 restricted Python/JVM compiler path, not canonical Java frontend, not hard RT'

@@ -1,0 +1,14 @@
+// M7 restricted compiled AttoLang actor receive. This is not the full language grammar.
+// The compiler persists total/index/PC across rt cooperate and checks i64 arithmetic.
+define actor CooperativeSum as {
+    pub fnc on_message(int amount): int {
+        let total: int = 0;
+        let i: int = 0;
+        while (i < amount) {
+            total = total + i;
+            i = i + 1;
+            rt cooperate;
+        }
+        return total;
+    }
+}
