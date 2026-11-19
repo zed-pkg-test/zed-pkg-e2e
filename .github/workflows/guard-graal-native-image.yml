@@ -1,0 +1,36 @@
+name: GraalVM Epsilon real compiled Atto guard fail-arm guest
+on:
+  pull_request:
+    paths:
+      - 'tools/atto_static_actor_aot.py'
+      - 'fixtures/actor_counter_guard.atto'
+      - 'tests/test_static_actor_aot.py'
+      - 'ci/verify-static-actor-native-image.sh'
+      - '.github/workflows/guard-graal-native-image.yml'
+permissions:
+  contents: read
+jobs:
+  compiled-atto-guard-graal:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - name: Checkout exact review HEAD without persisted credentials
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - name: Install actual GraalVM 25 Native Image
+        uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3
+        with:
+          distribution: graalvm
+          java-version: '25'
+      - name: Compile guest guard source into actual Epsilon native binary and execute
+        env:
+          ATTO_EXPECTED_CARRIER_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+          ATTO_STATIC_GUEST_FIXTURE: fixtures/actor_counter_guard.atto
+        run: bash ci/verify-static-actor-native-image.sh
+      - name: Declare narrow pilot evidence scope
+        run: |
+          echo 'ATTO_GUARD_GRAAL_EPSILON_GUEST=COMPILED_NATIVE_STATIC_ACTOR_BOOL_LITERAL_GUARD'
+          echo 'GRAAL_FULL_LANGUAGE_TRUFFLE_PARITY=NOT_EXECUTED'
+          echo 'TENANT_SECURITY_SANDBOX=NOT_CERTIFIED'

@@ -1,0 +1,42 @@
+name: M9 Java supervisor CONTROL exact-head GraalVM Native Image
+on:
+  push:
+    branches: [feat/m9-supervisor-notice-parity-20261115]
+  pull_request:
+    paths:
+      - 'src/m7/AttoM7CooperativeRuntime.java'
+      - 'tests/m9/**'
+      - 'tests/m9_notice_wire.rs'
+      - 'contracts/m9-supervisor-notice-wire-v1.json'
+      - 'tests/fixtures/m9/**'
+      - 'tests/m7/**'
+      - 'ci/m7/**'
+      - 'ci/m9/**'
+      - '.github/workflows/m9-supervisor-native.yml'
+permissions:
+  contents: read
+jobs:
+  m9-java-real-native:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - name: Install GraalVM JDK 25 Native Image
+        uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3
+        with:
+          distribution: graalvm
+          java-version: '25'
+      - name: Install pinned Rust test toolchain
+        run: |
+          rustup toolchain install 1.85.1 --profile minimal
+          rustup default 1.85.1
+          rustc --version
+      - name: Execute M9 priority supervisor notice and full M7/M8 Native Image
+        env:
+          ATTO_EXPECTED_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: bash ci/m9/verify-supervisor-native.sh
+      - name: Evidence scope
+        run: echo 'M9 Java HOST notice, not canonical compiler/LLVM parity or hard realtime'
