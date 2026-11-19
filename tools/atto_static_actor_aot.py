@@ -82,7 +82,7 @@ class Parser:
         return result
 
     def return_marker(self):
-        # ^ is a lexical return marker; it is not a numeric or XOR operator.
+        # ^ is a lexical return statement, never an arithmetic operator.
         marker = self.take()
         if marker not in ("return", "^"):
             raise CompileError("expected 'return' or '^'")
@@ -191,7 +191,8 @@ class Parser:
                 self.take(";")
                 self.take("}")
                 if self.peek() == "else":
-                    raise CompileError("E_GUARD_ELSE_NOT_REQUIRED: Atto guard has no else arm")
+                    raise CompileError(
+                        "E_GUARD_ELSE_NOT_REQUIRED: Atto guard has no else arm")
                 actions.append(("guard", condition == "true", early_value))
             elif token in ("return", "^"):
                 self.return_marker()

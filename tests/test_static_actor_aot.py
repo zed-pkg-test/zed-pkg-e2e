@@ -198,6 +198,25 @@ class StaticActorPilotTests(unittest.TestCase):
                              "guard false { " + marker + " 7; } else { " +
                              marker + " 8; }\n  return 43;"))
 
+    def test_explicit_suspend_lambda_capture_is_not_fake_compiled(self):
+        self.rejects("unsupported AttoLang token",
+                     self.source.read_text().replace(
+                         "return 43;",
+                         "val pending = task { ^ 41; }; " +
+                         "^ pending |> susp |f| -> await f >> val answer: int;"))
+
+    def test_unlowered_await_is_rejected_before_native_source(self):
+        self.rejects("expected a signed integer literal",
+                     self.source.read_text().replace(
+                         "return 43;", "^ await pending;"))
+
+    def test_typed_channel_future_profile_is_rejected_before_aot(self):
+        self.rejects("unsupported AttoLang token",
+                     self.source.read_text().replace(
+                         "return 43;",
+                         "val result: Future<Result<Option<int>,IoError>> = " +
+                         "nb readch channel; ^ 42;"))
+
     def test_guard_rejects_extra_effect_after_early_return(self):
         self.rejects("expected '}'",
                      self.source.read_text().replace(
@@ -301,24 +320,6 @@ class StaticActorPilotTests(unittest.TestCase):
             "return 43;", "return Class.forName(7);"))
 
 
-    def test_explicit_suspend_lambda_capture_is_not_fake_compiled(self):
-        self.rejects("unsupported AttoLang token",
-                     self.source.read_text().replace(
-                         "return 43;",
-                         "val pending = task { ^ 41; }; " +
-                         "^ pending |> susp |f| -> await f >> val answer: int;"))
-
-    def test_unlowered_await_is_rejected_before_native_source(self):
-        self.rejects("expected a signed integer literal",
-                     self.source.read_text().replace(
-                         "return 43;", "^ await pending;"))
-
-    def test_typed_channel_future_profile_is_rejected_before_aot(self):
-        self.rejects("unsupported AttoLang token",
-                     self.source.read_text().replace(
-                         "return 43;",
-                         "val result: Future<Result<Option<int>,IoError>> = " +
-                         "nb readch channel; ^ 42;"))
 
     def test_caret_main_return_matches_keyword_after_actor_teardown(self):
         self.source.write_text(self.source.read_text().replace("return 43;", "^ 43;"))
@@ -372,7 +373,6 @@ class StaticActorPilotTests(unittest.TestCase):
         manifest = json.loads((self.output / "manifest.json").read_text())
         self.assertEqual(manifest["expected_guest_result"], 7)
         self.assertEqual(manifest["actor_sends"], 3)
-
 
 if __name__ == "__main__":
     unittest.main()
