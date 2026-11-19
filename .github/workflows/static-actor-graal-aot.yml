@@ -1,0 +1,39 @@
+name: Atto application-specific GraalVM static actor AOT pilot
+on:
+  push:
+    branches:
+      - feat/static-atto-actor-graal-native-aot-pilot-20261106
+  pull_request:
+    paths:
+      - 'tools/atto_static_actor_aot.py'
+      - 'fixtures/actor_counter.atto'
+      - 'tests/test_static_actor_aot.py'
+      - 'tests/test_static_actor_aot_hardening.py'
+      - 'tests/AttoGeneratedAtomicityProbe.java'
+      - 'ci/verify-static-actor-native-image.sh'
+      - '.github/workflows/static-actor-graal-aot.yml'
+permissions:
+  contents: read
+jobs:
+  compiled-atto-source-native-image:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 50
+    steps:
+      - name: Checkout exact source SHA without persisted credentials
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Install real GraalVM JDK25 with Native Image
+        uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3
+        with:
+          distribution: graalvm
+          java-version: '25'
+      - name: Run parser negative controls, statically compile Atto actors and execute Epsilon native guest
+        env:
+          ATTO_EXPECTED_CARRIER_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: bash ci/verify-static-actor-native-image.sh
+      - name: Explicit pilot and security limits
+        run: |
+          echo 'RESTRICTED_REAL_ATTO_SOURCE_STATIC_GRAAL_AOT_NO_INTERPRETER'
+          echo 'NOT independent concurrent actors, full language, tenant sandbox, or long-term zero-GC memory certification'

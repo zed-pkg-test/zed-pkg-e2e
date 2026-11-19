@@ -1,0 +1,37 @@
+name: M4 identical Atto source application-specific GraalVM AOT
+on:
+  push:
+    branches: [test/m4-identical-actor-counter-20261106]
+  pull_request:
+    paths:
+      - 'fixtures/m4/**'
+      - 'tests/test_static_actor_aot_hardening.py'
+      - 'tests/AttoGeneratedAtomicityProbe.java'
+      - 'ci/verify-static-actor-native-image.sh'
+      - '.github/workflows/m4-identical-actor-graal.yml'
+permissions:
+  contents: read
+jobs:
+  graal-same-source-actor:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - name: Checkout exact source commit
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Install actual GraalVM JDK25 Native Image
+        uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3
+        with:
+          distribution: graalvm
+          java-version: '25'
+      - name: Compile same byte-pinned Atto actor program and execute native Epsilon guest
+        env:
+          ATTO_EXPECTED_CARRIER_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+          ATTO_M4_FIXTURE: fixtures/m4/shared_actor_counter.atto
+        run: bash ci/verify-static-actor-native-image.sh
+      - name: Evidence boundary
+        run: |
+          echo 'M4_IDENTICAL_SOURCE_NATIVE_GRAALVM_GUEST_EXECUTED'
+          echo 'Messages are synchronous in this pilot; no independently scheduled actors or tenant-security guarantee'
