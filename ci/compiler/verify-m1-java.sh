@@ -2,6 +2,7 @@
 # Bounded native Java ObjectStorage M1 compiler and actual generated guest.
 set -euo pipefail
 cd "$(dirname "$0")/../.."
+bash ci/admission/exact-tree.sh src/compiler/m1/AttoObjectM1JavaCompiler.java tests/compiler/AttoObjectM1JavaCompilerProbe.java fixtures/object_m1/point_particle.atto ci/compiler/verify-m1-java.sh
 if [[ -n "$ATTO_EXPECTED_HEAD_SHA" ]]; then
   [[ "$ATTO_EXPECTED_HEAD_SHA" =~ ^[0-9a-f]{40}$ ]]
   [[ "$(git rev-parse HEAD)" = "$ATTO_EXPECTED_HEAD_SHA" ]]

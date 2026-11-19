@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 cd "$(dirname "$0")/../.."
+bash ci/admission/exact-tree.sh src/compiler/adt/AttoAdtPatternPlanner.java tests/compiler/AttoAdtPatternPlannerProbe.java ci/compiler/verify-adt-pattern.sh
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
 mkdir -p "$work/classes"

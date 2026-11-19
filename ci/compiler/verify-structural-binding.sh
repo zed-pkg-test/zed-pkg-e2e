@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 cd "$(dirname "$0")/../.."
+bash ci/admission/exact-tree.sh src/compiler/shape/AttoStructuralBinding.java tests/compiler/AttoStructuralBindingProbe.java ci/compiler/verify-structural-binding.sh
 test -x "$JAVA_HOME/bin/javac"
 test -x "$JAVA_HOME/bin/native-image"
 work="$(mktemp -d)"

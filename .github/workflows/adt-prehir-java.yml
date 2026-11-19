@@ -21,7 +21,7 @@ jobs:
           java-version: '25'
       - name: Verify exact head and execute typed host ADT pattern checks
         env:
-          EXPECTED_SOURCE_SHA: ${{ github.event.pull_request.head.sha }}
+          ATTO_EXPECTED_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
-          test "$(git rev-parse HEAD)" = "$EXPECTED_SOURCE_SHA"
+          test "$(git rev-parse HEAD)" = "$ATTO_EXPECTED_HEAD_SHA"
           bash ci/compiler/verify-adt-pattern.sh
