@@ -1,0 +1,13 @@
+name: Forge PR50 isolated runner capacity canary
+on:
+  push:
+    branches: [ci/atto-forge-pr50-capacity-20261120]
+permissions:
+  contents: read
+jobs:
+  admission:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 3
+    steps:
+      - name: Executed step marker
+        run: echo ATTO_FORGE_RUNNER_ADMITTED_20261120
