@@ -88,6 +88,8 @@ int main() {
   }
   for (const std::string_view src : {
       "copy!=item", "copy!eq item", "copy !item",
+      "ref!=handle", "deref!eq handle", "unref!eq handle",
+      "mut borrow!eq handle",
       "ref!value", "deref!ptr", "unref!ptr" }) {
     assert(tokenize(src).ok());
   }
