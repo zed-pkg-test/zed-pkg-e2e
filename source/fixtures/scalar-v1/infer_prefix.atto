@@ -1,0 +1,1 @@
+fnc infer <- main() { return 42; }

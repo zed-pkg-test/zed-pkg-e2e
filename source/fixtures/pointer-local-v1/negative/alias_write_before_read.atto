@@ -1,0 +1,9 @@
+// expect-error: E_POINTER_PROFILE
+pub fnc main(): int {
+  let value: int = 42;
+  val Pointer<int> ptr = rt ref value;
+  value = 7;
+  val answer = rt deref ptr;
+  rt unref ptr;
+  return answer;
+}

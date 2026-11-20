@@ -1,0 +1,7 @@
+pub fnc main(): int {
+  let score: int = 13;
+  val Pointer<int> lease = rt ref score;
+  val observed = deref! lease;
+  rt unref lease;
+  return observed;
+}

@@ -1,0 +1,41 @@
+name: Atto Forge PR50 exact-tree full native CTest
+on:
+  push:
+    branches:
+      - ci/atto-forge-pr50-full-ctest-20261120
+permissions:
+  contents: read
+jobs:
+  ctest:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        cxx: [g++, clang++]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify exact Forge source tree
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD:source)" = "2d95af6aa96776553cee0d0fa5cc4163618a1a24"
+          echo SOURCE_TREE_SHA=$(git rev-parse HEAD:source)
+          echo SOURCE_COMMIT=bdbd253abc71c3631cf0d5b3e5922a5b58155936
+      - name: Toolchains
+        run: |
+          ${{ matrix.cxx }} --version | head -n 1
+          cmake --version | head -n 1
+      - name: Configure
+        run: cmake -S source -B build -DCMAKE_CXX_COMPILER=${{ matrix.cxx }} -DATTO_FORGE_SANITIZERS=ON -DCMAKE_BUILD_TYPE=Debug
+      - name: Build
+        run: cmake --build build --parallel 2
+      - name: Full CTest
+        run: ctest --test-dir build --output-on-failure -j 2
+      - name: Upload reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: forge-pr50-${{ matrix.cxx }}-ctest
+          path: build/Testing/
+          if-no-files-found: ignore

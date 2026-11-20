@@ -1,0 +1,5 @@
+// source header
+pub fnc main(): int {
+  /* arithmetic, do not treat / as a comment */
+  return 4 + 5 * /* factor */ 2; // expected 14
+}

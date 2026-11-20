@@ -1,0 +1,1 @@
+fnc main(): infer -> { return 42; }

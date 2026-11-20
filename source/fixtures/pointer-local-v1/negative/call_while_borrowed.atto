@@ -1,0 +1,9 @@
+// expect-error: E_PARSE_LEXICAL
+pub fnc main(): int {
+  let value: int = 42;
+  val Pointer<int> ptr = rt ref value;
+  val answer = rt deref ptr;
+  stdio.println(answer);
+  rt unref ptr;
+  return answer;
+}

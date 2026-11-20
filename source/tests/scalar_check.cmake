@@ -1,0 +1,41 @@
+# Check-only native Forge CLI must not create or delete generated files.
+if(NOT DEFINED FORGE OR NOT DEFINED ROOT OR NOT DEFINED OUT_DIR)
+  message(FATAL_ERROR "missing check mode inputs")
+endif()
+file(MAKE_DIRECTORY "${OUT_DIR}")
+file(GLOB samples "${ROOT}/fixtures/scalar-v1/*.atto")
+list(LENGTH samples count)
+if(count LESS 10)
+  message(FATAL_ERROR "insufficient fixtures")
+endif()
+foreach(sample IN LISTS samples)
+  execute_process(COMMAND "${FORGE}" --check "${sample}"
+    RESULT_VARIABLE rc OUTPUT_VARIABLE out ERROR_VARIABLE err)
+  if(NOT "${rc}" STREQUAL "0" OR NOT "${out}" STREQUAL "" OR NOT "${err}" STREQUAL "")
+    message(FATAL_ERROR "check mode rejected valid fixture ${sample}: ${err}")
+  endif()
+endforeach()
+set(input "${OUT_DIR}/bad.atto")
+set(artifact "${OUT_DIR}/bad.cpp")
+file(WRITE "${input}" "fnc main(): int {return 1 + ;}\n")
+file(WRITE "${artifact}" "preserve bytes")
+execute_process(COMMAND "${FORGE}" --check "${input}"
+  RESULT_VARIABLE rc OUTPUT_VARIABLE out ERROR_VARIABLE err)
+file(READ "${artifact}" bytes)
+if(NOT "${rc}" STREQUAL "2" OR
+   NOT "${err}" MATCHES "^E_PARSE_SYNTAX byte=[0-9]+\n$" OR
+   NOT "${bytes}" STREQUAL "preserve bytes")
+  message(FATAL_ERROR "invalid check must diagnose and preserve output")
+endif()
+execute_process(COMMAND "${FORGE}" --check "${OUT_DIR}/absent.atto"
+  RESULT_VARIABLE rc OUTPUT_VARIABLE out ERROR_VARIABLE err)
+if(NOT "${rc}" STREQUAL "2")
+  message(FATAL_ERROR "absent file accepted in check mode")
+endif()
+string(REPEAT "x" 17000 huge)
+file(WRITE "${OUT_DIR}/huge.atto" "${huge}")
+execute_process(COMMAND "${FORGE}" --check "${OUT_DIR}/huge.atto"
+  RESULT_VARIABLE rc OUTPUT_VARIABLE out ERROR_VARIABLE err)
+if(NOT "${rc}" STREQUAL "2" OR NOT "${err}" MATCHES "^E_SOURCE_LIMIT")
+  message(FATAL_ERROR "check mode failed to enforce source cap")
+endif()
