@@ -18,7 +18,7 @@ struct Node {
   i64 value = 0;
 };
 enum class ParseError {
-  none, lexical, syntax, literal_out_of_range, depth_limit, node_limit,
+  none, lexical, ownership_bang_unsupported, syntax, literal_out_of_range, depth_limit, node_limit,
   pointer_profile
 };
 // Stable sanitized diagnostics; never echo user source bytes.
@@ -26,6 +26,7 @@ enum class ParseError {
   switch (error) {
     case ParseError::none: return "NONE";
     case ParseError::lexical: return "E_PARSE_LEXICAL";
+    case ParseError::ownership_bang_unsupported: return "E_OWNERSHIP_BANG_UNSUPPORTED";
     case ParseError::syntax: return "E_PARSE_SYNTAX";
     case ParseError::literal_out_of_range: return "E_PARSE_RANGE";
     case ParseError::depth_limit: return "E_PARSE_DEPTH";
@@ -402,7 +403,8 @@ public:
   Parser(std::string_view source, Lexed lexed)
       : source_(source), tokens_(std::move(lexed.tokens)) {
     if (!lexed.ok()) {
-      out_.error = ParseError::lexical;
+      out_.error = lexed.error == LexError::ownership_bang_unsupported
+          ? ParseError::ownership_bang_unsupported : ParseError::lexical;
       out_.error_offset = lexed.error_offset;
     }
   }

@@ -76,5 +76,35 @@ int main() {
   assert(distinct_shifts.tokens[3].kind == Kind::lshr);
   const auto distinct_arrow = tokenize("int <- main()");
   assert(distinct_arrow.tokens[1].kind == Kind::left_arrow);
+  // Unlowered ownership operations fail closed, but the typed pointer
+  // profile must continue to tokenize its ref!/deref!/unref! aliases.
+  for (const std::string_view src : {
+      "copy!42", "take!item", "borrow! mut item", "share!item",
+      "pin!item", "drop!item", "freeze!item", "weak!item",
+      "copy!eqfoo", "copy!eq\xC3\xA9" }) {
+    const auto lexed = tokenize(src);
+    assert(lexed.error == LexError::ownership_bang_unsupported);
+    assert(lexed.error_offset == 0);
+  }
+  for (const std::string_view src : {
+      "copy!=item", "copy!eq item", "copy !item",
+      "ref!value", "deref!ptr", "unref!ptr" }) {
+    assert(tokenize(src).ok());
+  }
+  // Nested comments, including ownership-looking source, stay inert.
+  const std::string nested_comments =
+      "/* outer /* copy! item */ still outer */ ref!item";
+  const auto nested_tokens = tokenize(nested_comments);
+  assert(nested_tokens.ok());
+  assert(nested_tokens.tokens[0].offset == nested_comments.find("ref!"));
+  assert(tokenize("/* outer /* ref!item */").error == LexError::unterminated_comment);
+  std::string nested_64, nested_65;
+  for (int n = 0; n < 64; ++n) nested_64 += "/*";
+  for (int n = 0; n < 64; ++n) nested_64 += "*/";
+  nested_65 = "/*" + nested_64 + "*/";
+  assert(tokenize(nested_64 + "42").ok());
+  const auto exceeded = tokenize(nested_65);
+  assert(exceeded.error == LexError::comment_nesting_limit);
+  assert(exceeded.error_offset == 128);
 
 }
