@@ -53,3 +53,26 @@ test('executed private nominal Result receipt cannot promote general backend sta
   assert.ok(executed.excluded.some(s=>s.includes('RangeError lacks owned runtime')));
   assert.ok(executed.excluded.some(s=>s.includes('not general production AST')));
 });
+
+
+test('production nominal AST and checked ? receipt is limited to the Rust/browser subset',()=>{
+  const receipt=registry.verified_subprofiles.find(
+    p=>p.id==='rust-browser-production-ast-result-checked-propagation-v0');
+  assert.ok(receipt,'new production AST and ?-guest receipt must be explicit');
+  assert.equal(receipt.status,'FOCUSED_EXECUTED');
+  assert.equal(receipt.source_head,'e8fe817541c9282a1b9c7077df8ea3ce5c647b51');
+  assert.equal(receipt.executed.total_rust_tests_passed,112);
+  assert.equal(receipt.executed.production_ast_generic_result_integration_passed,8);
+  assert.equal(receipt.executed.typed_result_propagation_integration_passed,10);
+  assert.equal(receipt.executed.native_wasm32_browser_compiler_byte_identical_guests_passed,9);
+  assert.equal(receipt.executed.native_wasm32_matching_negative_diagnostic_no_artifact_passed,11);
+  assert.equal(receipt.source_files_exact_sha_verified+receipt.conformance_files_exact_sha_verified,99);
+  assert.equal(receipt.combined_v1_status,'TARGET_NOT_EXECUTED');
+  assert.equal(receipt.backend_parity,'NOT_VERIFIED');
+  assert.ok(receipt.excluded.some(x=>x.includes('no owned runtime RangeError')));
+  assert.ok(receipt.excluded.some(x=>x.includes('cannot yet generate general guest')));
+  assert.ok(receipt.excluded.some(x=>x.includes('no independent Java')));
+  assert.equal(registry.status,'TARGET_NOT_EXECUTED');
+  assert.ok(registry.cases.every(x=>x.verification==='NOT_EXECUTED'));
+  assert.ok(Object.values(registry.backend_status).every(x=>x==='NOT_VERIFIED'));
+});

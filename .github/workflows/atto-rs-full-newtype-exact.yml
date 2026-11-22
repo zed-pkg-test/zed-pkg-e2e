@@ -103,7 +103,7 @@ jobs:
           test "$(git hash-object 'attolang-mirror/atto-source.rs/tests/newtype_runtime_guest.rs')" = '78a0ff1409d05b35cbc3109a029a2b4617e0ab61'
           test "$(git hash-object 'attolang-mirror/atto-source.rs/tests/newtype_scalar_guest.rs')" = '7c326058a1e448e74f10b4ee873e398f24d23074'
           test "$(git hash-object 'attolang-mirror/atto-source.rs/tests/newtype_typed_ir_guest.rs')" = '1059001ddfc0a918ccc54d747e683870f7eb2271'
-          test "$(git hash-object 'attolang-mirror/atto-platform-conformance/contracts/opaque-newtypes-bounds-const-generics-v1.json')" = '4e73a11820d06e2da2d87b91c011cd859bd25cef'
+          test "$(git hash-object 'attolang-mirror/atto-platform-conformance/contracts/opaque-newtypes-bounds-const-generics-v1.json')" = 'a1390ad72669aa9c51344526dc3424a0aee70d5b'
           test "$(git hash-object 'attolang-mirror/atto-platform-conformance/fixtures/opaque-newtypes-bounds-const-generics-v1/fail/dimension-overflow.atto')" = 'dc3434cb7b4dc4311903315f5bb841986b74c2aa'
           test "$(git hash-object 'attolang-mirror/atto-platform-conformance/fixtures/opaque-newtypes-bounds-const-generics-v1/fail/empty-range.atto')" = 'dd08da49aebca08ef14d44a890301ca3a6bac829'
           test "$(git hash-object 'attolang-mirror/atto-platform-conformance/fixtures/opaque-newtypes-bounds-const-generics-v1/fail/invalid-port-zero.atto')" = '494197a2cd5a67b5dc3d32ec94631c52edaeb6d1'
@@ -116,7 +116,7 @@ jobs:
           test "$(git hash-object 'attolang-mirror/atto-platform-conformance/fixtures/opaque-newtypes-bounds-const-generics-v1/pass/dynamic-port-try-from.atto')" = '83c118659d1b498f6d33119439587d95f074e2fc'
           test "$(git hash-object 'attolang-mirror/atto-platform-conformance/fixtures/opaque-newtypes-bounds-const-generics-v1/pass/matrix-const-shape.atto')" = '46d24f8a08fe02f350cfe7418ea422532b89c205'
           test "$(git hash-object 'attolang-mirror/atto-platform-conformance/fixtures/opaque-newtypes-bounds-const-generics-v1/pass/nominal-user-id.atto')" = '14b9aad4bd9bfba8b1f6a77f7f03fe3b5c0896cc'
-          test "$(git hash-object 'attolang-mirror/atto-platform-conformance/test/opaque-newtypes-bounds-const-generics.test.mjs')" = '960330112a95c2b61d588f5bb00b941ec7b28768'
+          test "$(git hash-object 'attolang-mirror/atto-platform-conformance/test/opaque-newtypes-bounds-const-generics.test.mjs')" = '71c83ec5ea0e30158f84fe45474ceb89934ca45a'
       - name: Run whole Rust library and production AST/newtype integration suites
         shell: bash
         run: |

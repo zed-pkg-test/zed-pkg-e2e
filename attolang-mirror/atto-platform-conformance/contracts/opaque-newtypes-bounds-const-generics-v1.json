@@ -233,6 +233,58 @@
       "combined_v1_status": "TARGET_NOT_EXECUTED",
       "backend_parity": "NOT_VERIFIED",
       "note": "This receipt certifies exactly the bounded Rust/browser compiler subset; all 12 shared broad cases stay NOT_EXECUTED, and wasm32 browser parity is the same Rust compiler cross-target, not independent backend parity."
+    },
+    {
+      "id": "rust-browser-production-ast-result-checked-propagation-v0",
+      "status": "FOCUSED_EXECUTED",
+      "source_repo": "atto-lang/atto-source.rs",
+      "source_head": "e8fe817541c9282a1b9c7077df8ea3ce5c647b51",
+      "carrier_repo": "zed-pkg-test/zed-pkg-e2e",
+      "carrier_run_id": 44981027690,
+      "carrier_workflow_url": "https://github.com/zed-pkg-test/zed-pkg-e2e/actions/runs/44981027690",
+      "carrier_commit": "e28d691c648b5906b3c9036b9d4753bbb84137ac",
+      "source_files_exact_sha_verified": 85,
+      "conformance_head_at_execution": "b59256b334c4cb0ea0fceabe11bad545f9886e06",
+      "conformance_files_exact_sha_verified": 14,
+      "executed": {
+        "full_library_unit_passed": 70,
+        "nominal_admission_integration_passed": 8,
+        "static_newtype_integration_passed": 5,
+        "runtime_result_integration_passed": 11,
+        "typed_result_propagation_integration_passed": 10,
+        "production_ast_generic_result_integration_passed": 8,
+        "total_rust_tests_passed": 112,
+        "native_compiled_static_guests_passed": 3,
+        "native_compiled_runtime_guests_passed": 14,
+        "compiler_negative_no_artifact_passed": 10,
+        "native_wasm32_browser_compiler_byte_identical_guests_passed": 9,
+        "native_wasm32_matching_negative_diagnostic_no_artifact_passed": 11,
+        "rustfmt_new_test_files": "PASS",
+        "pinned_rust_1_85_1_strict_clippy": "PASS",
+        "host_only_shared_registry_assertions_passed": 3,
+        "host_import_count": 0,
+        "guest_panic_code": 0
+      },
+      "admitted": [
+        "ordinary production parser records newtype declaration bounds and parameterized Result<Ok,Err> type arguments in real AST",
+        "identical generic nominal type arguments intern by spelling instead of source-occurrence index; distinct names remain distinct",
+        "ordinary production checker verifies nominal identity, duplicate/unknown type rejection and fail-closed generic layout gate",
+        "private Result<Nominal,RangeError> helper ? early-exits with original Err and explicit checked Ok return",
+        "native and actual wasm32 browser compilers produce byte-identical checked ? guests and matching negative diagnostics",
+        "no interpreter/JIT/host validation and no unverified ABI silent fallback"
+      ],
+      "excluded": [
+        "normal production AST generic Result typechecker cannot yet generate general guest Result<T,E> layout",
+        "no owned runtime RangeError extends Error object; only semantic inheritance metadata exists",
+        "private compiled Result still uses Result<int,string> tagged record and inaccessible error marker",
+        "no public or cross-module nominal Result ABI, actor/wire/serialization/FFI, general ownership",
+        "no executable generic Array/Matrix shape storage and indexing",
+        "no independent Java LLVM NET Forge or other compiler parity"
+      ],
+      "combined_v1_status": "TARGET_NOT_EXECUTED",
+      "backend_parity": "NOT_VERIFIED",
+      "source_ci_zero_step_run_id": 44980998012,
+      "note": "Narrow executed Rust/browser subset; full shared v1 registry and every independent backend remain unverified. Browser compiler is the wasm32 build of the same Rust implementation."
     }
   ]
 }
