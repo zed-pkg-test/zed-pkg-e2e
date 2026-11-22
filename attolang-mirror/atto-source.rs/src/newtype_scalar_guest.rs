@@ -208,6 +208,13 @@ pub fn try_lower(tokens:&[Token])->R<Option<Vec<Token>>>{
         if name=="main"{saw_main=true;}
     }
     if !saw_main || count==0{return Ok(None);}
+    // Do not claim executable nominal support for a declaration that is
+    // never constructed. Such programs stay on the original fail-closed path.
+    let has_checked_construction = tokens.windows(4).any(|w|
+        matches!((&w[0].tok,&w[1].tok,&w[2].tok,&w[3].tok),
+            (Tok::Ident(name),Tok::Dot,Tok::Ident(method),Tok::LParen)
+                if admission.nominal.contains_key(name) && method=="from_const"));
+    if !has_checked_construction { return Ok(None); }
     if emitted.len()>crate::SOURCE_CAP {return Err(c.err("E_SOURCE_LIMIT","expanded nominal guest exceeds source size budget"));}
     Ok(Some(lexer::lex(&emitted)?))
 }

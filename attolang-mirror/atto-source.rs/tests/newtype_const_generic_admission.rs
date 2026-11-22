@@ -129,7 +129,7 @@ fn unsafe_nominal_constructors_reject_without_a_guest_artifact() {
     }";
     assert!(compile(good).is_ok());
     let bare = "define newtype Seconds(int); pub fnc main(): int { return 42; }";
-    assert!(compile(bare).is_ok());
+    expect_diagnostic(bare, "E_UNSUPPORTED");
 }
 
 #[test]
