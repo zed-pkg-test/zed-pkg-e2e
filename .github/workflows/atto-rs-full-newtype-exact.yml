@@ -1,4 +1,4 @@
-name: Atto Rust full crate exact-head newtype admission
+name: Atto Rust exact-head scalar newtype guest + admission
 on:
   push:
     branches: [ci/atto-rs-full-exact-20261121]
@@ -6,15 +6,15 @@ on:
 permissions:
   contents: read
 jobs:
-  cargo-newtype-real-compiler:
+  nominal-guest-compiler:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-      - name: Checkout private same-org carrier without persisted credentials
+      - name: Checkout private carrier without persisted credentials
         uses: actions/checkout@v4
         with:
           persist-credentials: false
-      - name: Verify all 74 production blobs against exact Atto source head
+      - name: Verify 77 exact source Git blob SHAs
         shell: bash
         run: |
           set -euo pipefail
@@ -55,7 +55,7 @@ jobs:
           test "$(git hash-object 'attolang-mirror/atto-source.rs/src/layout_plan.rs')" = '4d63804dc258e3b56e37206738fce96a06b1b37e'
           test "$(git hash-object 'attolang-mirror/atto-source.rs/src/layout_trace.rs')" = 'f487129dcf20605c2ce3118ce66b28ce51efd2f2'
           test "$(git hash-object 'attolang-mirror/atto-source.rs/src/lexer.rs')" = '9cbde947cb7685b301ce0ea580f6462716cd9f78'
-          test "$(git hash-object 'attolang-mirror/atto-source.rs/src/lib.rs')" = '39170b6e8a43639f44687dce1b22185fffda3d72'
+          test "$(git hash-object 'attolang-mirror/atto-source.rs/src/lib.rs')" = '3996d25df3fe268d782fa98d9347e7be891156eb'
           test "$(git hash-object 'attolang-mirror/atto-source.rs/src/linked_symbols.rs')" = '4689efdaa50fe7585f133f7aa569e9a870c0de3c'
           test "$(git hash-object 'attolang-mirror/atto-source.rs/src/linker.rs')" = 'd1e547b821fc15d53f66f513ad2d23a5f5dd8611'
           test "$(git hash-object 'attolang-mirror/atto-source.rs/src/main.rs')" = 'dd08c3c39977a1f760f262f92b3025e921b04f2b'
@@ -63,6 +63,7 @@ jobs:
           test "$(git hash-object 'attolang-mirror/atto-source.rs/src/module_lower.rs')" = '930900b22e8b9a80ac6e0739613ece017309ffed'
           test "$(git hash-object 'attolang-mirror/atto-source.rs/src/namespace.rs')" = 'c17ed0ccccc40ce0ea8911735f26fd2b7f4f7260'
           test "$(git hash-object 'attolang-mirror/atto-source.rs/src/newtype_const_generic_admission.rs')" = '18e2572065f128dc1e785dd6ff66b1c8671736cd'
+          test "$(git hash-object 'attolang-mirror/atto-source.rs/src/newtype_scalar_guest.rs')" = 'b78f5e38bfb9322092f2d58f36352201e41959a5'
           test "$(git hash-object 'attolang-mirror/atto-source.rs/src/nominal_contract_admission.rs')" = 'bfca563b360f5b56aebb71a5e0e0a0a9d11b0852'
           test "$(git hash-object 'attolang-mirror/atto-source.rs/src/nominal_lower.rs')" = '6da18fc53cf071540fdee28088085a55b8ab500c'
           test "$(git hash-object 'attolang-mirror/atto-source.rs/src/owner_arena.rs')" = '0bf76d2a9cd9df82b12f0c0cd9506d7404523ffd'
@@ -91,15 +92,19 @@ jobs:
           test "$(git hash-object 'attolang-mirror/atto-source.rs/src/visibility_lower.rs')" = '19c67504b0e1b71d72ecb2626bb2670410eee509'
           test "$(git hash-object 'attolang-mirror/atto-source.rs/src/wasm.rs')" = 'be756f19707f62a0b4830417fef2f4b2ad82147d'
           test "$(git hash-object 'attolang-mirror/atto-source.rs/src/wasm/generator_runtime.rs')" = 'a66e48d8a46cdf6eb18aaae2f3942b82bc4165d1'
-          test "$(git hash-object 'attolang-mirror/atto-source.rs/tests/newtype_const_generic_admission.rs')" = '0e53a4ec9222c5334f4236046387b9029b3a3929'
-      - name: Compile real browser compiler and execute 8 integration tests
+          test "$(git hash-object 'attolang-mirror/atto-source.rs/tests/newtype-scalar-guest.mjs')" = 'ff97c5443a6a9e0c992a53b0d2a9e577aa726ad3'
+          test "$(git hash-object 'attolang-mirror/atto-source.rs/tests/newtype_const_generic_admission.rs')" = '4404dae9883d13b6c1acc05d34791e06501034e7'
+          test "$(git hash-object 'attolang-mirror/atto-source.rs/tests/newtype_scalar_guest.rs')" = '7c326058a1e448e74f10b4ee873e398f24d23074'
+      - name: Compile real Rust browser compiler and run both integration suites
         shell: bash
         run: |
           set -euo pipefail
-          cargo --version
           cargo test --manifest-path attolang-mirror/atto-source.rs/Cargo.toml --locked --offline --test newtype_const_generic_admission -- --nocapture
-      - name: Execute seven production-module Rust unit tests
+          cargo test --manifest-path attolang-mirror/atto-source.rs/Cargo.toml --locked --offline --test newtype_scalar_guest -- --nocapture
+          cargo test --manifest-path attolang-mirror/atto-source.rs/Cargo.toml --locked --offline --lib newtype_const_generic_admission -- --nocapture
+      - name: Build native attoc and execute genuine guest Wasm regression
         shell: bash
         run: |
           set -euo pipefail
-          cargo test --manifest-path attolang-mirror/atto-source.rs/Cargo.toml --locked --offline --lib newtype_const_generic_admission -- --nocapture
+          cargo build --manifest-path attolang-mirror/atto-source.rs/Cargo.toml --locked --offline --bin attoc
+          ATTOC="$PWD/attolang-mirror/atto-source.rs/target/debug/attoc" node attolang-mirror/atto-source.rs/tests/newtype-scalar-guest.mjs

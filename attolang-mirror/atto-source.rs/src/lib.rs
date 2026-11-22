@@ -76,6 +76,8 @@ pub mod target_typed;
 pub mod type_declarations;
 /// Exact-i64 nominal interval and fixed-array dimension admission; no guest ABI yet.
 pub mod newtype_const_generic_admission;
+/// A closed, nominally checked source-local scalar i64 guest profile.
+pub mod newtype_scalar_guest;
 pub mod wasm;
 
 pub use diag::{Diagnostic, Pos};
@@ -101,8 +103,15 @@ pub fn compile_with_imports<F>(
     source: &str, logical_path: &std::path::Path, load: F,
 ) -> Result<Vec<u8>, Diagnostic>
 where F: FnMut(&std::path::Path) -> std::io::Result<String> {
+    // Linked imports have cross-module nominal identity and ABI obligations
+    // not certified by the source-local scalar profile. Only a source with
+    // no module/import tokens can use this narrow private-newtype lowering.
+    let original = lexer::lex(source)?;
+    let source_local_only = !original.iter().any(|t| matches!(&t.tok,
+        lexer::Tok::Ident(w) if matches!(w.as_str(),
+            "use" | "import" | "module" | "namespace")));
     let tokens = import_link::lower(source, logical_path, load)?;
-    compile_prelexed(tokens, Some(logical_path))
+    compile_prelexed(tokens, Some(logical_path), source_local_only)
 }
 
 fn compile_inner(source: &str, logical_path: Option<&std::path::Path>)
@@ -114,15 +123,25 @@ fn compile_inner(source: &str, logical_path: Option<&std::path::Path>)
             format!("source exceeds {SOURCE_CAP} UTF-8 bytes"),
         ));
     }
-    compile_prelexed(lexer::lex(source)?, logical_path)
+    compile_prelexed(lexer::lex(source)?, logical_path, true)
 }
 
-fn compile_prelexed(tokens: Vec<lexer::Token>, logical_path: Option<&std::path::Path>)
-    -> Result<Vec<u8>, Diagnostic> {
+fn compile_prelexed(tokens: Vec<lexer::Token>, logical_path: Option<&std::path::Path>,
+    allow_source_local_nominals: bool) -> Result<Vec<u8>, Diagnostic> {
     let original_tokens = namespace::normalize(&tokens, logical_path)?;
-    // Validate newtype identity and integer dimensions before ANY guest producer.
-    // Valid yet unsupported features remain non-executable, never erased to int.
-    newtype_const_generic_admission::preflight(&original_tokens)?;
+    // Source-local immutable i64 newtypes are checked for nominal identity
+    // before lowering to the existing typed scalar guest backend. Anything
+    // requiring runtime checking, generic layouts or external nominal ABI
+    // remains behind the original fail-closed gate.
+    let lowered_nominals = if allow_source_local_nominals {
+        newtype_scalar_guest::try_lower(&original_tokens)?
+    } else { None };
+    let original_tokens = if let Some(proven) = lowered_nominals {
+        proven
+    } else {
+        newtype_const_generic_admission::preflight(&original_tokens)?;
+        original_tokens
+    };
     // A type-declaration syntax preflight must not publish a fake guest artifact.
     if type_declarations::contains_type_declaration(&original_tokens) {
         type_declarations::parse_tokens(&original_tokens)?;

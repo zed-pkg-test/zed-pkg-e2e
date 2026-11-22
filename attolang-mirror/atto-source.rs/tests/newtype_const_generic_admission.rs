@@ -22,7 +22,8 @@ fn intervals_accept_both_endpoints_and_remain_unlowered() {
     let proof = inspect(&lex(&source).unwrap()).unwrap();
     assert_eq!(proof.nominal["Port"], Interval {low: 1, high: 65535});
     assert!(proof.requires_backend);
-    expect_diagnostic(&source, "E_UNSUPPORTED");
+    let wasm = compile(&source).expect("proved private Port constants compile");
+    assert!(wasm.starts_with(b"\0asm\x01\0\0\0"));
 }
 
 #[test]
@@ -117,13 +118,18 @@ fn ordinary_source_and_comment_or_string_lookalikes_are_unchanged() {
 #[test]
 fn unsafe_nominal_constructors_reject_without_a_guest_artifact() {
     for source in [
-        "define newtype Port(i64); pub fnc main(): int { val Port p = Port.from_const(3); return 42; }",
         "define pub newtype Port(i64); pub fnc main(): int { return 42; }",
-        "define newtype Seconds(int); pub fnc main(): int { return 42; }",
         "define newtype Port(i64); pub fnc main(): int { val Port p = Port.try_from(8080); return 42; }",
+        "define newtype Port(i64); fnc leak(Port p): int { return p; } pub fnc main(): int { return 42; }",
     ] {
-        expect_diagnostic(source, "E_UNSUPPORTED");
+        assert!(compile(source).is_err(), "unsupported nominal guest behavior must fail");
     }
+    let good = "define newtype Port(i64); pub fnc main(): int {
+        val Port p = Port.from_const(3); return 42;
+    }";
+    assert!(compile(good).is_ok());
+    let bare = "define newtype Seconds(int); pub fnc main(): int { return 42; }";
+    assert!(compile(bare).is_ok());
 }
 
 #[test]
