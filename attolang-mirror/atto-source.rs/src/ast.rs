@@ -36,6 +36,10 @@ pub enum Type {
     /// Other generic instantiations reject without emitting an artifact.
     OptionInt,
     ResultIntStr,
+    /// Interned source-level Result<Ok,Err> instantiation in Program::generic_results.
+    /// The normal checker preserves both type arguments and enforces nominal
+    /// identities; unsupported guest layouts cannot be erased to ResultIntStr.
+    GenericResult(u32),
     /// First nested ADT profile: Some(Result<int,string>) or None.
     /// Generic ADT instantiations remain deliberately restricted.
     OptionResultIntStr,
@@ -55,6 +59,7 @@ impl Type {
             Type::Str => "string",
             Type::OptionInt => "Option<int>",
             Type::ResultIntStr => "Result<int,string>",
+            Type::GenericResult(_) => "Result<T,E>",
             Type::OptionResultIntStr => "Option<Result<int,string>>",
             Type::GeneratorInt => "Generator<int>",
             Type::Callable(_) => "fnc(...)->...",
@@ -87,6 +92,33 @@ pub struct Program {
     pub type_names: Vec<(String, Pos)>,
     /// Interned Array specializations shared by all ordinary declarations.
     pub array_types: Vec<ArrayType>,
+    /// Real nominal declarations retained by the regular production AST
+    /// instead of being silently reinterpreted as scalar classes.
+    pub newtypes: Vec<NewtypeDecl>,
+    /// Canonically interned parameterized Result types; each argument is a
+    /// real AST Type and retains the source position for diagnostics.
+    pub generic_results: Vec<GenericResultType>,
+}
+
+/// Bounded opaque i64 newtype descriptor. Physical guest layout and an
+/// owned RangeError runtime must both be proven before this can be emitted.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct NewtypeDecl {
+    pub name: String,
+    pub pos: Pos,
+    pub representation: Type,
+    pub low: i64,
+    pub high: i64,
+    pub public: bool,
+}
+
+/// Source-order stable generic Result instantiation. Argument erasure is
+/// forbidden: Result<Port,RangeError> is not Result<int,string>.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct GenericResultType {
+    pub ok: Type,
+    pub err: Type,
+    pub pos: Pos,
 }
 
 

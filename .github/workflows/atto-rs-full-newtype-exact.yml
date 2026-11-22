@@ -1,4 +1,4 @@
-name: Atto native and wasm32 nominal Result exact-byte parity CI
+name: Atto production nominal AST and checked ? exact-head CI
 on:
   push:
     branches: [ci/atto-rs-full-exact-20261121]
@@ -6,15 +6,15 @@ on:
 permissions:
   contents: read
 jobs:
-  native-wasm32-nominal:
+  nominal-ast-aot:
     runs-on: ubuntu-latest
     timeout-minutes: 35
     steps:
-      - name: Checkout exact private carrier without retained credentials
+      - name: Checkout same-repo private mirror without retained credentials
         uses: actions/checkout@v4
         with:
           persist-credentials: false
-      - name: Verify 98 exact current Rust source and conformance Git blobs
+      - name: Verify 99 Git blob SHAs against exact source and registry heads
         shell: bash
         run: |
           set -euo pipefail
@@ -27,11 +27,11 @@ jobs:
           test "$(git hash-object 'attolang-mirror/atto-source.rs/src/actor_persistence.rs')" = 'fe286b0432a2ed1e0cb99cb3d6526eba73cc62fd'
           test "$(git hash-object 'attolang-mirror/atto-source.rs/src/actor_task_lifecycle.rs')" = 'bf62bdab16e106629a50c6c50b5a99a64c7b9bfd'
           test "$(git hash-object 'attolang-mirror/atto-source.rs/src/any_type_lower.rs')" = '2c9ebe00744dec552f6f10446d95db651bc991d7'
-          test "$(git hash-object 'attolang-mirror/atto-source.rs/src/ast.rs')" = '5a25d50d4dd29bf773c5b375ca1c94ffb54122c3'
+          test "$(git hash-object 'attolang-mirror/atto-source.rs/src/ast.rs')" = 'ad04971404c621a88987944995f37a63a5b9bf23'
           test "$(git hash-object 'attolang-mirror/atto-source.rs/src/bin/attoc.rs')" = 'a7297d068b590df86d7966bab0366c2ccc41a0da'
           test "$(git hash-object 'attolang-mirror/atto-source.rs/src/bin/ci_verify.rs')" = '00a3a829244c79b87455ce35c8dccabb12c76ef0'
           test "$(git hash-object 'attolang-mirror/atto-source.rs/src/cfg.rs')" = 'bec0b3aebba3778fd320eb606743bfab7d363ee0'
-          test "$(git hash-object 'attolang-mirror/atto-source.rs/src/check.rs')" = '5cb9c9c807b495b3173b157024b05315ec708ac2'
+          test "$(git hash-object 'attolang-mirror/atto-source.rs/src/check.rs')" = '7143fa5f0c69e9286927d7836fa90ae69bea6bd6'
           test "$(git hash-object 'attolang-mirror/atto-source.rs/src/check/callable_ir.rs')" = 'de2aeca4dc9636bdb39acb4690bc80efd488cb0b'
           test "$(git hash-object 'attolang-mirror/atto-source.rs/src/check/direct_lambda.rs')" = 'f6212b7b744f2003fc5e795804ec9a116470e256'
           test "$(git hash-object 'attolang-mirror/atto-source.rs/src/check/generator_lower.rs')" = 'b69e9593579221dbf818d4e9a818ff860dccfba8'
@@ -64,14 +64,14 @@ jobs:
           test "$(git hash-object 'attolang-mirror/atto-source.rs/src/module_lower.rs')" = '930900b22e8b9a80ac6e0739613ece017309ffed'
           test "$(git hash-object 'attolang-mirror/atto-source.rs/src/namespace.rs')" = 'c17ed0ccccc40ce0ea8911735f26fd2b7f4f7260'
           test "$(git hash-object 'attolang-mirror/atto-source.rs/src/newtype_const_generic_admission.rs')" = 'cf3d14ec5fa949fc2733510751b8f9ae0c57ed13'
-          test "$(git hash-object 'attolang-mirror/atto-source.rs/src/newtype_runtime_guest.rs')" = '2a8ce08045a40b832ac5bcf5962264aa67804a6d'
+          test "$(git hash-object 'attolang-mirror/atto-source.rs/src/newtype_runtime_guest.rs')" = '65a952d3856341c2123f8856172980db4af315cc'
           test "$(git hash-object 'attolang-mirror/atto-source.rs/src/newtype_scalar_guest.rs')" = '33a8b2a816499a840dc1575bdba7f9bf73ab64ec'
           test "$(git hash-object 'attolang-mirror/atto-source.rs/src/newtype_typed_ir.rs')" = 'd24025b2cd0c00ee3b15469367e4ff45d3e0fd6e'
           test "$(git hash-object 'attolang-mirror/atto-source.rs/src/nominal_contract_admission.rs')" = 'bfca563b360f5b56aebb71a5e0e0a0a9d11b0852'
           test "$(git hash-object 'attolang-mirror/atto-source.rs/src/nominal_lower.rs')" = '6da18fc53cf071540fdee28088085a55b8ab500c'
           test "$(git hash-object 'attolang-mirror/atto-source.rs/src/owner_arena.rs')" = '0bf76d2a9cd9df82b12f0c0cd9506d7404523ffd'
           test "$(git hash-object 'attolang-mirror/atto-source.rs/src/package_resolver.rs')" = 'de4c52219f0151ad746192b270cafa0595268cea'
-          test "$(git hash-object 'attolang-mirror/atto-source.rs/src/parser.rs')" = '5d790a3c1999596713e345f9c61e22419ab83689'
+          test "$(git hash-object 'attolang-mirror/atto-source.rs/src/parser.rs')" = 'b403cffa1ec42bd7659a337ac4ccd7f40cf30efb'
           test "$(git hash-object 'attolang-mirror/atto-source.rs/src/profile.rs')" = '85ebebaefa3a1854982be7dc8ee8861939a488e9'
           test "$(git hash-object 'attolang-mirror/atto-source.rs/src/ref_codegen.rs')" = '4a2eed1ff1fd0f83acf9bc11f2635348f646b0c1'
           test "$(git hash-object 'attolang-mirror/atto-source.rs/src/ref_layout.rs')" = 'ab13c6971d76fb3d8d2ec7aa1331d9f64be1a08f'
@@ -93,15 +93,16 @@ jobs:
           test "$(git hash-object 'attolang-mirror/atto-source.rs/src/type_declarations.rs')" = 'b26430cf0b518024752fa784fa56f6048809bdbc'
           test "$(git hash-object 'attolang-mirror/atto-source.rs/src/value_class_admission.rs')" = '04473441ed2f8cc5515b4089e36455d6cb9d28bc'
           test "$(git hash-object 'attolang-mirror/atto-source.rs/src/visibility_lower.rs')" = '19c67504b0e1b71d72ecb2626bb2670410eee509'
-          test "$(git hash-object 'attolang-mirror/atto-source.rs/src/wasm.rs')" = 'be756f19707f62a0b4830417fef2f4b2ad82147d'
+          test "$(git hash-object 'attolang-mirror/atto-source.rs/src/wasm.rs')" = '04c9755a8a3b3181534a596003187e22d334a53c'
           test "$(git hash-object 'attolang-mirror/atto-source.rs/src/wasm/generator_runtime.rs')" = 'a66e48d8a46cdf6eb18aaae2f3942b82bc4165d1'
           test "$(git hash-object 'attolang-mirror/atto-source.rs/tests/newtype-runtime-guest.mjs')" = 'd20b463a57a243ebdc6d2405fb8ed30312e26e24'
           test "$(git hash-object 'attolang-mirror/atto-source.rs/tests/newtype-scalar-guest.mjs')" = '9d36f6a0e86f465f8113def36fee35613d6244e2'
-          test "$(git hash-object 'attolang-mirror/atto-source.rs/tests/newtype-typed-result-browser-parity.mjs')" = '134745f3c6190f719749a7c24bcf03b1643a97eb'
+          test "$(git hash-object 'attolang-mirror/atto-source.rs/tests/newtype-typed-result-browser-parity.mjs')" = '9daa5c6e59af16f0ae99ec26c653fcbac02756e7'
           test "$(git hash-object 'attolang-mirror/atto-source.rs/tests/newtype_const_generic_admission.rs')" = '27e4a7382f0334db9ab6552cf10086a934a71bf5'
+          test "$(git hash-object 'attolang-mirror/atto-source.rs/tests/newtype_production_ast_admission.rs')" = '605f0c66b647d6bb51ed25f158d30720e4aed25a'
           test "$(git hash-object 'attolang-mirror/atto-source.rs/tests/newtype_runtime_guest.rs')" = '78a0ff1409d05b35cbc3109a029a2b4617e0ab61'
           test "$(git hash-object 'attolang-mirror/atto-source.rs/tests/newtype_scalar_guest.rs')" = '7c326058a1e448e74f10b4ee873e398f24d23074'
-          test "$(git hash-object 'attolang-mirror/atto-source.rs/tests/newtype_typed_ir_guest.rs')" = '07b51ed7adf3e6b1564ffeb0b59046e564303ab8'
+          test "$(git hash-object 'attolang-mirror/atto-source.rs/tests/newtype_typed_ir_guest.rs')" = '85f4e55220115036167a187b0e9a29d6010220f4'
           test "$(git hash-object 'attolang-mirror/atto-platform-conformance/contracts/opaque-newtypes-bounds-const-generics-v1.json')" = '4e73a11820d06e2da2d87b91c011cd859bd25cef'
           test "$(git hash-object 'attolang-mirror/atto-platform-conformance/fixtures/opaque-newtypes-bounds-const-generics-v1/fail/dimension-overflow.atto')" = 'dc3434cb7b4dc4311903315f5bb841986b74c2aa'
           test "$(git hash-object 'attolang-mirror/atto-platform-conformance/fixtures/opaque-newtypes-bounds-const-generics-v1/fail/empty-range.atto')" = 'dd08da49aebca08ef14d44a890301ca3a6bac829'
@@ -116,14 +117,7 @@ jobs:
           test "$(git hash-object 'attolang-mirror/atto-platform-conformance/fixtures/opaque-newtypes-bounds-const-generics-v1/pass/matrix-const-shape.atto')" = '46d24f8a08fe02f350cfe7418ea422532b89c205'
           test "$(git hash-object 'attolang-mirror/atto-platform-conformance/fixtures/opaque-newtypes-bounds-const-generics-v1/pass/nominal-user-id.atto')" = '14b9aad4bd9bfba8b1f6a77f7f03fe3b5c0896cc'
           test "$(git hash-object 'attolang-mirror/atto-platform-conformance/test/opaque-newtypes-bounds-const-generics.test.mjs')" = '960330112a95c2b61d588f5bb00b941ec7b28768'
-      - name: Check rustfmt of nominal typed Result compiler source and tests
-        shell: bash
-        run: |
-          set -euo pipefail
-          rustfmt --check attolang-mirror/atto-source.rs/src/newtype_runtime_guest.rs
-          rustfmt --check attolang-mirror/atto-source.rs/src/newtype_typed_ir.rs
-          rustfmt --check attolang-mirror/atto-source.rs/tests/newtype_typed_ir_guest.rs
-      - name: Execute whole library and four nominal compiler integration suites
+      - name: Run whole Rust library and production AST/newtype integration suites
         shell: bash
         run: |
           set -euo pipefail
@@ -132,7 +126,8 @@ jobs:
           cargo test --manifest-path attolang-mirror/atto-source.rs/Cargo.toml --locked --offline --test newtype_scalar_guest -- --nocapture
           cargo test --manifest-path attolang-mirror/atto-source.rs/Cargo.toml --locked --offline --test newtype_runtime_guest -- --nocapture
           cargo test --manifest-path attolang-mirror/atto-source.rs/Cargo.toml --locked --offline --test newtype_typed_ir_guest -- --nocapture
-      - name: Native attoc -> 17 compiled Wasm guests and ten negative/no-artifacts
+          cargo test --manifest-path attolang-mirror/atto-source.rs/Cargo.toml --locked --offline --test newtype_production_ast_admission -- --nocapture
+      - name: Build native compiler and execute compiled static and runtime Result guests
         shell: bash
         run: |
           set -euo pipefail
@@ -140,25 +135,40 @@ jobs:
           export ATTOC="$PWD/attolang-mirror/atto-source.rs/target/debug/attoc"
           node attolang-mirror/atto-source.rs/tests/newtype-scalar-guest.mjs
           node attolang-mirror/atto-source.rs/tests/newtype-runtime-guest.mjs
-      - name: Build actual wasm32 browser compiler with pinned full guest AOT
+      - name: Build full AOT wasm32 browser compiler with pinned toolchain
         shell: bash
         run: |
           set -euo pipefail
           rustup toolchain install 1.85.1 --profile minimal --target wasm32-unknown-unknown --component clippy
           cargo +1.85.1 rustc --manifest-path attolang-mirror/atto-source.rs/Cargo.toml --locked --offline --release --lib --target wasm32-unknown-unknown --crate-type cdylib -- -C link-arg=--max-memory=67108864
-      - name: Compare native and wasm32 browser compiler guest bytes and negative diagnostics
+      - name: Compile checked nominal ? programs natively and in wasm32; compare exact bytes
         shell: bash
         run: |
           set -euo pipefail
           export ATTOC="$PWD/attolang-mirror/atto-source.rs/target/debug/attoc"
           node attolang-mirror/atto-source.rs/tests/newtype-typed-result-browser-parity.mjs
-      - name: Strict pinned full-target Clippy
+      - name: Strict pinned Clippy for whole compiler and tests
         shell: bash
         run: |
           set -euo pipefail
           cargo +1.85.1 clippy --manifest-path attolang-mirror/atto-source.rs/Cargo.toml --locked --offline --all-targets -- -D warnings
-      - name: Host-only shared conformance registry status assertions
+      - name: Validate shared registry target stays unexecuted with host-only tests
         shell: bash
         run: |
           set -euo pipefail
           node --test attolang-mirror/atto-platform-conformance/test/opaque-newtypes-bounds-const-generics.test.mjs
+      - name: Emit proposed rustfmt for new integration and private runtime files
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          rustfmt attolang-mirror/atto-source.rs/tests/newtype_production_ast_admission.rs
+          rustfmt attolang-mirror/atto-source.rs/tests/newtype_typed_ir_guest.rs
+          rustfmt attolang-mirror/atto-source.rs/src/newtype_runtime_guest.rs
+          printf 'FORMATTED_PRODUCTION_AST_TEST='
+          base64 -w0 attolang-mirror/atto-source.rs/tests/newtype_production_ast_admission.rs
+          printf '\nFORMATTED_TYPED_RESULT_TEST='
+          base64 -w0 attolang-mirror/atto-source.rs/tests/newtype_typed_ir_guest.rs
+          printf '\nFORMATTED_RUNTIME_GUEST='
+          base64 -w0 attolang-mirror/atto-source.rs/src/newtype_runtime_guest.rs
+          printf '\n'

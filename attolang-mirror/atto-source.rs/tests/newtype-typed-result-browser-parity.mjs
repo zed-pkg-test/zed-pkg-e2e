@@ -58,15 +58,26 @@ const program=value=>[
  ' end;',
  '}'
 ].join('\n');
+const relay=source=>source.replace('pub fnc main(): int {',
+  'fnc relay_port(int value): Result<Port,RangeError> {\n'+
+  ' val Port port = create_port(value)?;\n'+
+  ' return Ok(port);\n'+
+  '}\n'+
+  'pub fnc main(): int {').replace(
+  'val Result<Port,RangeError> result = create_port(input);',
+  'val Result<Port,RangeError> result = relay_port(input);');
 let passed=0;
 try {
  const cases=[
   ['lower-bound','1',1n],['middle','8080',8080n],['upper-bound','65535',65535n],
   ['range-zero','0',0n],['range-over','65536',0n],
-  ['range-negative','-9223372036854775808',0n]
+  ['range-negative','-9223372036854775808',0n],
+  ['relay-ok','8080',8080n],
+  ['relay-err-zero','0',0n],
+  ['relay-err-high','65536',0n]
  ];
  for(const [name,value,expected] of cases) {
-   const source=program(value);
+   const source=name.startsWith('relay-')?relay(program(value)):program(value);
    const compiled=browser(source);
    assert.ok(compiled.ok,name+': '+compiled.diagnostic);
    const n=native(source,name);
@@ -89,6 +100,12 @@ try {
   ['missing-arm-comma',program('42').replace('port.to_base(),','port.to_base()')],
   ['public-nominal-escape',program('42').replace('define newtype Port','define pub newtype Port')],
   ['public-result-escape',program('42').replace('fnc create_port','pub fnc create_port')],
+  ['relay-wrong-nominal',relay(program('42')).replace(
+    'val Port port = create_port(value)?;', 'val Wrong port = create_port(value)?;')],
+  ['relay-missing-question',relay(program('42')).replace(
+    'create_port(value)?;', 'create_port(value);')],
+  ['relay-wrong-Ok',relay(program('42')).replace(
+    'return Ok(port);','return Ok(value);')],
  ];
  for(const [name,source] of negative){
    const compiled=browser(source);
@@ -100,7 +117,7 @@ try {
    assert.ok(m,name+': missing browser error code '+compiled.diagnostic);
    assert.ok(n.stderr.includes(m[0]),name+': mismatched browser/native diagnostic '+n.stderr);
  }
- console.log('PASS '+passed+' native/wasm32 browser compiler byte-identical typed Result guests; 8 matching diagnostic/no-artifact negatives; zero imports');
+ console.log('PASS '+passed+' native/wasm32 browser compiler byte-identical typed Result guests; 11 matching diagnostic/no-artifact negatives; zero imports');
 } finally {
  rmSync(dir,{recursive:true,force:true});
 }

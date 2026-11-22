@@ -251,6 +251,8 @@ pub struct Parser {
     type_names: Vec<(String, Pos)>,
     /// Canonically interned nominal Array<T, layout=...> type parameters.
     array_types: Vec<ArrayType>,
+    /// Canonical ordinary-AST Result<Ok,Err> type applications, not backend erasure.
+    generic_results: Vec<GenericResultType>,
     /// Scope of an explicit generator function body.
     in_generator: bool,
     /// Only the outer Erlang-style callable sequence accepts commas as
@@ -325,6 +327,7 @@ impl Parser {
             lambda_nesting: 0,
             type_names: Vec::new(),
             array_types: Vec::new(),
+            generic_results: Vec::new(),
             in_generator: false,
             erlang_body: false,
             state_method: false,
@@ -547,11 +550,26 @@ impl Parser {
                 self.expect(Tok::Comma, "',' between Result type arguments")?;
                 let bad = self.parse_type()?;
                 self.expect(Tok::Gt, "'>' after Result types")?;
-                if good != Type::Int || bad != Type::Str {
-                    return Err(Diagnostic::new(pos, "E_UNSUPPORTED_TYPE",
-                        "browser ADT v1 admits only Result<int,string>"));
+                if good == Type::Int && bad == Type::Str {
+                    Type::ResultIntStr
+                } else {
+                    // Intern full generic arguments in the PRODUCTION AST.
+                    // Checking and ABI admission remain separate phases.
+                    let at = self.generic_results.iter().position(|r| r.ok == good && r.err == bad);
+                    let id = match at {
+                        Some(i) => i as u32,
+                        None => {
+                            if self.generic_results.len() >= 128 {
+                                return Err(Diagnostic::new(pos,"E_SOURCE_LIMIT",
+                                    "too many concrete Result type specializations"));
+                            }
+                            let id = self.generic_results.len() as u32;
+                            self.generic_results.push(GenericResultType { ok: good, err: bad, pos });
+                            id
+                        }
+                    };
+                    Type::GenericResult(id)
                 }
-                Type::ResultIntStr
             },
             "bool" | "boolean" => Type::Bool,
             "void" => Type::Void,
@@ -690,6 +708,10 @@ impl Parser {
                     let decl = self.parse_actor(false, ActorPersistenceMode::Volatile)?;
                     prog.actors.push(decl);
                 }
+                (Some("define"), Some("newtype")) => {
+                    self.i += at + 2;
+                    prog.newtypes.push(self.parse_newtype(public)?);
+                }
                 (Some("define"), Some("enum")) => {
                     if public {
                         return Err(unsupported(start, "'pub' enums"));
@@ -712,7 +734,70 @@ impl Parser {
         }
         prog.type_names = std::mem::take(&mut self.type_names);
         prog.array_types = std::mem::take(&mut self.array_types);
+        prog.generic_results = std::mem::take(&mut self.generic_results);
         Ok(prog)
+    }
+
+    /// Ordinary production-AST admission for nominal i64 newtype declarations.
+    /// This retains exact signed closed intervals; it does not authorize a
+    /// public nominal ABI, allocation, or runtime Error object.
+    fn parse_newtype(&mut self, public: bool) -> R<NewtypeDecl> {
+        let (name, pos) = self.ident("a nominal newtype name")?;
+        if matches!(name.as_str(), "Error" | "RangeError") {
+            return Err(Diagnostic::new(pos, "E_RESERVED_TYPE",
+                "Error and RangeError are compiler-owned error classes"));
+        }
+        self.expect(Tok::LParen, "'(' after nominal newtype name")?;
+        if !self.eat_word("i64") && !self.eat_word("int") {
+            return Err(Diagnostic::new(self.pos(), "E_UNSUPPORTED_TYPE",
+                "first nominal newtype representation must be signed i64"));
+        }
+        self.expect(Tok::RParen, "')' after newtype representation")?;
+        let mut low = i64::MIN;
+        let mut high = i64::MAX;
+        if self.eat(&Tok::Semi) {
+            return Ok(NewtypeDecl {
+                name, pos, representation: Type::Int, low, high, public
+            });
+        }
+        self.expect_word("where")?;
+        let mut count = 0;
+        loop {
+            self.expect_word("value")?;
+            let lower = self.eat_word("gte") || self.eat(&Tok::Ge);
+            let upper = if lower { false } else { self.eat_word("lte") || self.eat(&Tok::Le) };
+            if !lower && !upper {
+                return Err(Diagnostic::new(self.pos(), "E_RANGE_UNPROVEN",
+                    "newtype constraints require value gte/lte signed integer"));
+            }
+            let negative = self.eat(&Tok::Minus);
+            let boundary = match self.peek() {
+                Tok::Int(Some(v)) if *v <= i64::MAX as u64 =>
+                    if negative { -(*v as i64) } else { *v as i64 },
+                Tok::Int(None) if negative => i64::MIN,
+                _ => return Err(Diagnostic::new(self.pos(), "E_RANGE_UNPROVEN",
+                    "newtype range boundary must be an exact signed i64 literal")),
+            };
+            self.advance();
+            if lower { low = low.max(boundary); }
+            if upper { high = high.min(boundary); }
+            count += 1;
+            if count > 16 {
+                return Err(Diagnostic::new(pos, "E_SOURCE_LIMIT",
+                    "newtype interval allows at most 16 predicates"));
+            }
+            if !self.eat_word("and") { break; }
+        }
+        self.expect(Tok::Semi, "';' after newtype range")?;
+        self.expect_word("end")?;
+        self.eat(&Tok::Semi);
+        if low > high {
+            return Err(Diagnostic::new(pos, "E_RANGE_INVALID",
+                "newtype interval has an empty intersection"));
+        }
+        Ok(NewtypeDecl {
+            name, pos, representation: Type::Int, low, high, public
+        })
     }
 
     /// After `define class`: `Name as { class_member } end`.

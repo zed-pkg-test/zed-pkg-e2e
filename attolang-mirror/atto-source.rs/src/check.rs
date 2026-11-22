@@ -805,7 +805,91 @@ fn authenticate_flat_copy_aot(classes: &[ClassInfo], ci: u32, pos: Pos) -> R<()>
     Ok(())
 }
 
+/// Resolve generic Result declarations through the ordinary production AST
+/// before backend or nominal representation erasure. The generic Result/Error
+/// object ABI has no certified guest layout yet: validate identity and reject
+/// rather than coercing it to the existing Result<int,string> tagged record.
+fn validate_unlowered_nominal_types(p: &Program) -> R<()> {
+    if p.newtypes.is_empty() && p.generic_results.is_empty() {
+        return Ok(());
+    }
+    let mut graph = crate::newtype_typed_ir::NominalGraph::default();
+    let mut names = std::collections::BTreeSet::new();
+    for decl in &p.newtypes {
+        if decl.public {
+            return Err(Diagnostic::new(decl.pos, "E_UNSUPPORTED_TYPE",
+                "public opaque newtype requires a verified cross-module nominal ABI"));
+        }
+        if p.classes.iter().any(|x| x.name == decl.name)
+            || p.enums.iter().any(|x| x.name == decl.name)
+            || p.actors.iter().any(|x| x.name == decl.name)
+        {
+            return Err(Diagnostic::new(decl.pos, "E_DUPLICATE",
+                "newtype identity collides with a nominal class/enum/actor"));
+        }
+        if !names.insert(decl.name.as_str()) {
+            return Err(Diagnostic::new(decl.pos, "E_DUPLICATE",
+                "duplicate nominal newtype declaration"));
+        }
+        if decl.representation != Type::Int {
+            return Err(Diagnostic::new(decl.pos, "E_UNSUPPORTED_TYPE",
+                "only exact i64 nominal storage has a validation contract"));
+        }
+        graph.declare("<private-module>", &decl.name,
+            crate::newtype_const_generic_admission::Interval {
+                low: decl.low, high: decl.high,
+            }, decl.pos)?;
+    }
+    fn resolve_arg(
+        p: &Program,
+        names: &std::collections::BTreeSet<&str>,
+        ty: Type,
+        pos: Pos,
+        error_position: bool,
+    ) -> R<()> {
+        match ty {
+            Type::Named(i) => {
+                let (name, at) = p.type_names.get(i as usize).ok_or_else(|| {
+                    Diagnostic::new(pos, "E_UNSUPPORTED_TYPE", "invalid generic type symbol index")
+                })?;
+                if error_position {
+                    if !matches!(name.as_str(), "Error" | "RangeError") {
+                        return Err(Diagnostic::new(*at, "E_UNSUPPORTED_TYPE",
+                            "generic Result Err must be a declared Error subclass"));
+                    }
+                } else if !names.contains(name.as_str()) && !p.classes.iter().any(|c| c.name == *name)
+                    && !p.enums.iter().any(|e| e.name == *name)
+                {
+                    return Err(Diagnostic::new(*at, "E_UNKNOWN_TYPE",
+                        format!("unknown Result success type '{name}'")));
+                }
+            }
+            Type::GenericResult(i) => {
+                let nested = p.generic_results.get(i as usize).ok_or_else(|| {
+                    Diagnostic::new(pos, "E_UNSUPPORTED_TYPE", "invalid nested Result specialization")
+                })?;
+                resolve_arg(p, names, nested.ok, nested.pos, false)?;
+                resolve_arg(p, names, nested.err, nested.pos, true)?;
+            }
+            Type::Int | Type::Bool | Type::Float | Type::Str | Type::ResultIntStr
+                if !error_position => {}
+            _ => return Err(Diagnostic::new(pos, "E_UNSUPPORTED_TYPE",
+                "unverified generic Result payload or Error-class type")),
+        }
+        Ok(())
+    }
+    for generic in &p.generic_results {
+        resolve_arg(p, &names, generic.ok, generic.pos, false)?;
+        resolve_arg(p, &names, generic.err, generic.pos, true)?;
+    }
+    let at = p.generic_results.first().map(|g| g.pos)
+        .or_else(|| p.newtypes.first().map(|n| n.pos)).unwrap_or_default();
+    Err(Diagnostic::new(at, "E_UNSUPPORTED_TYPE",
+        "production nominal Result typed AST is admitted but owned RangeError objects, generic Wasm layout and public AOT ABI are not yet implemented"))
+}
+
 pub fn check(p: &Program) -> R<TProgram> {
+    validate_unlowered_nominal_types(p)?;
     let lowered = direct_lambda::lower(p)?;
     check_lowered(&lowered)
 }

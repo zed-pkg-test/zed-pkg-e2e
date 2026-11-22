@@ -290,18 +290,47 @@ fn helper(
         ));
     };
     c.require(Tok::LBrace)?;
-    c.require_word("return")?;
     let vars = BTreeMap::from([(arg.clone(), Ty::I64)]);
-    let result = checked_expr(c, types, &vars, funcs)?;
-    same(c, &Ty::checked(nominal.clone()), &result.ty)?;
-    c.require(Tok::Semi)?;
+    // Source-local nominal ? lowers only after proving
+    // Result<ExactNewtype,RangeError> matches the enclosing return type.
+    // Production AdtPropagate evaluates once, returns the ORIGINAL Err
+    // tagged record and extracts the i64 Ok payload only on success.
+    let body = if c.eat_word("val") {
+        let bound_ty = c.ty(types)?;
+        same(c, &Ty::Nominal(nominal.clone()), &bound_ty)?;
+        let bound_name = c.name()?;
+        if bound_name == arg {
+            return Err(c.err("E_DUPLICATE", "propagated value shadows helper argument"));
+        }
+        c.require(Tok::Assign)?;
+        let checked = checked_expr(c, types, &vars, funcs)?;
+        same(c, &Ty::checked(nominal.clone()), &checked.ty)?;
+        c.require(Tok::Question)?;
+        c.require(Tok::Semi)?;
+        c.require_word("return")?;
+        c.require_word("Ok")?;
+        c.require(Tok::LParen)?;
+        let return_name = c.name()?;
+        if return_name != bound_name {
+            return Err(c.err("E_NEWTYPE_MISMATCH",
+                "Ok return must wrap the exactly propagated nominal binding"));
+        }
+        c.require(Tok::RParen)?;
+        c.require(Tok::Semi)?;
+        format!("val int {bound_name} = {}?; return Ok({bound_name});", checked.lower)
+    } else {
+        c.require_word("return")?;
+        let checked = checked_expr(c, types, &vars, funcs)?;
+        same(c, &Ty::checked(nominal.clone()), &checked.ty)?;
+        c.require(Tok::Semi)?;
+        format!("return {};", checked.lower)
+    };
     c.require(Tok::RBrace)?;
     if funcs.insert(name.clone(), Helper { nominal }).is_some() {
         return Err(c.err("E_DUPLICATE", "checked constructor helper is duplicated"));
     }
     code.push_str(&format!(
-        "fnc {name}(int {arg}): Result<int,string> {{ return {}; }}\n",
-        result.lower
+        "fnc {name}(int {arg}): Result<int,string> {{ {body} }}\n"
     ));
     Ok(())
 }
