@@ -183,6 +183,56 @@
       "complete_v1_status": "TARGET_ONLY",
       "source_ci_zero_step_run_id": 44973351794,
       "notes": "Full shared fixture set and other compiler backends remain NOT_VERIFIED; this record describes only the source-local executed subset and must not promote full v1."
+    },
+    {
+      "id": "rust-browser-nominal-result-graph-return-match-v0",
+      "status": "FOCUSED_EXECUTED",
+      "source_repo": "atto-lang/atto-source.rs",
+      "source_head": "f55af346231eb2bcfb766aa18d2f8f59cbfcb664",
+      "source_files_exact_sha_verified": 84,
+      "conformance_head_at_execution": "44e57535779cb92c67599c011f518bf58033280d",
+      "conformance_files_exact_sha_verified": 14,
+      "carrier_repo": "zed-pkg-test/zed-pkg-e2e",
+      "carrier_run_id": 44979314229,
+      "carrier_workflow_url": "https://github.com/zed-pkg-test/zed-pkg-e2e/actions/runs/44979314229",
+      "carrier_commit": "1a82089499ee4648591f0f9012eeb7b2eb6ce3b7",
+      "executed": {
+        "full_library_unit_passed": 70,
+        "nominal_admission_integration_passed": 8,
+        "static_newtype_integration_passed": 5,
+        "runtime_result_integration_passed": 11,
+        "semantic_result_return_match_integration_passed": 7,
+        "total_rust_tests_passed": 101,
+        "compiled_native_static_guest_passed": 3,
+        "compiled_native_runtime_guest_passed": 14,
+        "compiler_negative_no_artifact_passed": 10,
+        "native_wasm32_browser_compiler_byte_identical_guest_passed": 6,
+        "native_wasm32_matching_negative_diagnostic_no_artifact_passed": 8,
+        "shared_conformance_host_only_assertions_passed": 2,
+        "pinned_rust_1_85_1_strict_clippy": "PASS",
+        "rustfmt": "PASS",
+        "host_import_count": 0,
+        "guest_panic_code": 0
+      },
+      "admitted": [
+        "private source-local i64 newtypes with interval runtime checks",
+        "canonical parameterized semantic Result<Nominal,RangeError> type identities",
+        "semantic Error parent plus RangeError subclass relationship",
+        "module-qualified NominalIdentity descriptor for validation, with cross-module execution gated",
+        "restricted expression return match Ok/Err with exact typed to_base and exhaustive variants",
+        "native-vs-wasm32 browser compiler byte-identical actual guest output and rejection diagnostics"
+      ],
+      "excluded": [
+        "not general production AST/checker support for arbitrary Result<T,E>",
+        "RangeError lacks owned runtime Error subclass object representation",
+        "private compiled Result still lowers into existing Result<int,string> with hidden string marker",
+        "no public nominal or generic Result ABI, imports, actor/FFI/wire, error serialization",
+        "no executable Array or Matrix const-generic physical storage",
+        "no independent Java, LLVM, .NET, Forge or other-language compiler parity"
+      ],
+      "combined_v1_status": "TARGET_NOT_EXECUTED",
+      "backend_parity": "NOT_VERIFIED",
+      "note": "This receipt certifies exactly the bounded Rust/browser compiler subset; all 12 shared broad cases stay NOT_EXECUTED, and wasm32 browser parity is the same Rust compiler cross-target, not independent backend parity."
     }
   ]
 }
