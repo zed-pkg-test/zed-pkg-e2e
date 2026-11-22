@@ -295,6 +295,17 @@ fn array_dimensions(t: &[Token], i: usize, formals: &BTreeSet<String>,
 }
 
 pub fn inspect(t: &[Token]) -> R<Admission> {
+    inspect_inner(t, false)
+}
+
+/// Only the complete closed source-local runtime Result checker may call
+/// this provisional syntax admission. It is NOT a proof of a newtype
+/// constructor and must never be used by the ordinary preflight/AST path.
+pub(crate) fn inspect_runtime_candidates(t: &[Token]) -> R<Admission> {
+    inspect_inner(t, true)
+}
+
+fn inspect_inner(t: &[Token], permit_checked_question_candidate: bool) -> R<Admission> {
     let mut result = Admission::default();
     let mut formals = BTreeSet::new();
     let mut local_formals = BTreeSet::new();
@@ -380,9 +391,28 @@ pub fn inspect(t: &[Token]) -> R<Admission> {
                     }
                 }
             }
+            // A syntactic candidate for Result<Nominal,RangeError> ? may
+            // reach ONLY the private, complete nominal checker. Its
+            // constructor, exact Result arguments, lexical scope, Err
+            // propagation and return wrapper are validated there before
+            // producing the ordinary production ADT source. Ordinary
+            // inspect()/preflight() NEVER grants this exception.
+            let checked_question_candidate = permit_checked_question_candidate
+                && ident(t, rhs).is_some()
+                && ((at(t, rhs + 1) == Some(&Tok::LParen)
+                    && at(t, rhs + 3) == Some(&Tok::RParen)
+                    && at(t, rhs + 4) == Some(&Tok::Question)
+                    && at(t, rhs + 5) == Some(&Tok::Semi))
+                || (at(t, rhs + 1) == Some(&Tok::Dot)
+                    && word(t, rhs + 2, "try_from")
+                    && at(t, rhs + 3) == Some(&Tok::LParen)
+                    && at(t, rhs + 5) == Some(&Tok::RParen)
+                    && at(t, rhs + 6) == Some(&Tok::Question)
+                    && at(t, rhs + 7) == Some(&Tok::Semi)));
             if at(t, rhs) != Some(&Tok::Ident(dest.to_owned()))
                 && ident(t, rhs).and_then(|s| bindings.get(s))
                     .map(String::as_str) != Some(dest)
+                && !checked_question_candidate
             {
                 return Err(error(t, rhs, "E_NEWTYPE_CONSTRUCTION",
                     "raw base values cannot construct nominal types"));

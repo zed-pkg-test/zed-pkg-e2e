@@ -104,40 +104,50 @@ fn internal_type_graph_proves_nominal_scope_and_range_error_subclass() {
     assert_eq!(Ty::checked("Port".into()).checked_nominal(), Some("Port"));
 }
 
-
 fn propagated_source() -> String {
-    RETURN_MATCH.replace(
-        "pub fnc main(): int {",
-        "fnc relay_port(int value): Result<Port,RangeError> {\n\
+    RETURN_MATCH
+        .replace(
+            "pub fnc main(): int {",
+            "fnc relay_port(int value): Result<Port,RangeError> {\n\
          val Port port = create_port(value)?;\n\
          return Ok(port);\n\
          }\n\
          pub fnc main(): int {",
-    ).replace("create_port(input);","relay_port(input);")
+        )
+        .replace("create_port(input);", "relay_port(input);")
 }
 
 #[test]
-fn checked_nominal_question_mark_success_and_error_compile_to_guest(){
-    let program=propagated_source();
-    let output=compile(&program).expect("checked nominal ? must use production typed ADT propagation");
+fn checked_nominal_question_mark_success_and_error_compile_to_guest() {
+    let program = propagated_source();
+    let output =
+        compile(&program).expect("checked nominal ? must use production typed ADT propagation");
     assert!(output.starts_with(b"\0asm\x01\0\0\0"));
-    assert_eq!(output,compile(&program).unwrap());
+    assert_eq!(output, compile(&program).unwrap());
 }
 
 #[test]
-fn checked_nominal_propagation_rejects_different_nominal_type(){
-    let program=propagated_source()
-        .replace("define newtype Port(i64)", "define newtype UserId(i64); define newtype Port(i64)")
-        .replace("val Port port = create_port(value)?;",
-                 "val UserId port = create_port(value)?;");
-    assert_eq!(compile(&program).unwrap_err().code,"E_NEWTYPE_MISMATCH");
+fn checked_nominal_propagation_rejects_different_nominal_type() {
+    let program = propagated_source()
+        .replace(
+            "define newtype Port(i64)",
+            "define newtype UserId(i64); define newtype Port(i64)",
+        )
+        .replace(
+            "val Port port = create_port(value)?;",
+            "val UserId port = create_port(value)?;",
+        );
+    assert_eq!(compile(&program).unwrap_err().code, "E_NEWTYPE_MISMATCH");
 }
 
 #[test]
-fn checked_nominal_propagation_refuses_unwrapped_result_and_wrong_return(){
-    let base=propagated_source();
-    let no_question=base.replace("create_port(value)?;","create_port(value);");
+fn checked_nominal_propagation_refuses_unwrapped_result_and_wrong_return() {
+    let base = propagated_source();
+    let no_question = base.replace("create_port(value)?;", "create_port(value);");
     assert!(compile(&no_question).is_err());
-    let incorrect_return=base.replace("return Ok(port);","return Ok(value);");
-    assert_eq!(compile(&incorrect_return).unwrap_err().code,"E_NEWTYPE_MISMATCH");
+    let incorrect_return = base.replace("return Ok(port);", "return Ok(value);");
+    assert_eq!(
+        compile(&incorrect_return).unwrap_err().code,
+        "E_NEWTYPE_MISMATCH"
+    );
 }

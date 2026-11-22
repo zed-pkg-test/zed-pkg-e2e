@@ -462,7 +462,7 @@ fn main_body(
 
 /// Strictly private nominal typechecking prior to producing code.
 pub fn try_lower(tokens: &[Token]) -> R<Option<Vec<Token>>> {
-    let admitted = newtype_const_generic_admission::inspect(tokens)?;
+    let admitted = newtype_const_generic_admission::inspect_runtime_candidates(tokens)?;
     if admitted.nominal.is_empty() {
         return Ok(None);
     }
