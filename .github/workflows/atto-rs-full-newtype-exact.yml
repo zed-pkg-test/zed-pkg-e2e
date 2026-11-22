@@ -1,4 +1,4 @@
-name: Atto Rust exact-head scalar newtype guest + admission
+name: Atto Rust exact private nominal runtime Result Wasm
 on:
   push:
     branches: [ci/atto-rs-full-exact-20261121]
@@ -6,18 +6,19 @@ on:
 permissions:
   contents: read
 jobs:
-  nominal-guest-compiler:
+  rust-runtime-newtype-guest:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 25
     steps:
-      - name: Checkout private carrier without persisted credentials
+      - name: Checkout private token-free carrier
         uses: actions/checkout@v4
         with:
           persist-credentials: false
-      - name: Verify 78 exact source Git blob SHAs
+      - name: Verify 81 exact current Atto source file Git blob SHAs
         shell: bash
         run: |
           set -euo pipefail
+          test "$(git hash-object 'attolang-mirror/atto-source.rs/.github/workflows/ci.yml')" = '8bbcab02464dff19d02617c30d863aebda3f0dd0'
           test "$(git hash-object 'attolang-mirror/atto-source.rs/Cargo.lock')" = '387853d3838d48e0c89d77fbecfcd41d53fbd4ca'
           test "$(git hash-object 'attolang-mirror/atto-source.rs/Cargo.toml')" = 'd49ddddb17187d80a8f00503e5f0f2948d088a29'
           test "$(git hash-object 'attolang-mirror/atto-source.rs/src/actor_arena.rs')" = '942ffd71039258c13e6d7a9b678e6cc63d1c9238'
@@ -55,7 +56,7 @@ jobs:
           test "$(git hash-object 'attolang-mirror/atto-source.rs/src/layout_plan.rs')" = '4d63804dc258e3b56e37206738fce96a06b1b37e'
           test "$(git hash-object 'attolang-mirror/atto-source.rs/src/layout_trace.rs')" = 'f487129dcf20605c2ce3118ce66b28ce51efd2f2'
           test "$(git hash-object 'attolang-mirror/atto-source.rs/src/lexer.rs')" = '9cbde947cb7685b301ce0ea580f6462716cd9f78'
-          test "$(git hash-object 'attolang-mirror/atto-source.rs/src/lib.rs')" = '3996d25df3fe268d782fa98d9347e7be891156eb'
+          test "$(git hash-object 'attolang-mirror/atto-source.rs/src/lib.rs')" = '40e8ef528cf71be0abf66767fd6b6968223e5482'
           test "$(git hash-object 'attolang-mirror/atto-source.rs/src/linked_symbols.rs')" = '4689efdaa50fe7585f133f7aa569e9a870c0de3c'
           test "$(git hash-object 'attolang-mirror/atto-source.rs/src/linker.rs')" = 'd1e547b821fc15d53f66f513ad2d23a5f5dd8611'
           test "$(git hash-object 'attolang-mirror/atto-source.rs/src/main.rs')" = 'dd08c3c39977a1f760f262f92b3025e921b04f2b'
@@ -63,6 +64,7 @@ jobs:
           test "$(git hash-object 'attolang-mirror/atto-source.rs/src/module_lower.rs')" = '930900b22e8b9a80ac6e0739613ece017309ffed'
           test "$(git hash-object 'attolang-mirror/atto-source.rs/src/namespace.rs')" = 'c17ed0ccccc40ce0ea8911735f26fd2b7f4f7260'
           test "$(git hash-object 'attolang-mirror/atto-source.rs/src/newtype_const_generic_admission.rs')" = '6c8f62e611743ea442b8133297c03d06c5bf428b'
+          test "$(git hash-object 'attolang-mirror/atto-source.rs/src/newtype_runtime_guest.rs')" = '3d104cf156c98a4ae85b25297ed0dab69e841664'
           test "$(git hash-object 'attolang-mirror/atto-source.rs/src/newtype_scalar_guest.rs')" = '33a8b2a816499a840dc1575bdba7f9bf73ab64ec'
           test "$(git hash-object 'attolang-mirror/atto-source.rs/src/nominal_contract_admission.rs')" = 'bfca563b360f5b56aebb71a5e0e0a0a9d11b0852'
           test "$(git hash-object 'attolang-mirror/atto-source.rs/src/nominal_lower.rs')" = '6da18fc53cf071540fdee28088085a55b8ab500c'
@@ -92,20 +94,24 @@ jobs:
           test "$(git hash-object 'attolang-mirror/atto-source.rs/src/visibility_lower.rs')" = '19c67504b0e1b71d72ecb2626bb2670410eee509'
           test "$(git hash-object 'attolang-mirror/atto-source.rs/src/wasm.rs')" = 'be756f19707f62a0b4830417fef2f4b2ad82147d'
           test "$(git hash-object 'attolang-mirror/atto-source.rs/src/wasm/generator_runtime.rs')" = 'a66e48d8a46cdf6eb18aaae2f3942b82bc4165d1'
+          test "$(git hash-object 'attolang-mirror/atto-source.rs/tests/newtype-runtime-guest.mjs')" = '6fce8e503f8daf9e2a5741cb1ea83e9b93736cbc'
           test "$(git hash-object 'attolang-mirror/atto-source.rs/tests/newtype-scalar-guest.mjs')" = 'ff97c5443a6a9e0c992a53b0d2a9e577aa726ad3'
           test "$(git hash-object 'attolang-mirror/atto-source.rs/tests/newtype_const_generic_admission.rs')" = '27e4a7382f0334db9ab6552cf10086a934a71bf5'
+          test "$(git hash-object 'attolang-mirror/atto-source.rs/tests/newtype_runtime_guest.rs')" = '246623a9274c7488e3a4417658362cad504d6753'
           test "$(git hash-object 'attolang-mirror/atto-source.rs/tests/newtype_scalar_guest.rs')" = '7c326058a1e448e74f10b4ee873e398f24d23074'
-          test "$(git hash-object 'attolang-mirror/atto-source.rs/.github/workflows/ci.yml')" = '8bbcab02464dff19d02617c30d863aebda3f0dd0'
-      - name: Compile real Rust browser compiler and run both integration suites
+      - name: Build actual browser compiler and test all library and nominal entrypoints
         shell: bash
         run: |
           set -euo pipefail
+          cargo test --manifest-path attolang-mirror/atto-source.rs/Cargo.toml --locked --offline --lib -- --nocapture
           cargo test --manifest-path attolang-mirror/atto-source.rs/Cargo.toml --locked --offline --test newtype_const_generic_admission -- --nocapture
           cargo test --manifest-path attolang-mirror/atto-source.rs/Cargo.toml --locked --offline --test newtype_scalar_guest -- --nocapture
-          cargo test --manifest-path attolang-mirror/atto-source.rs/Cargo.toml --locked --offline --lib -- --nocapture
-      - name: Build native attoc and execute genuine guest Wasm regression
+          cargo test --manifest-path attolang-mirror/atto-source.rs/Cargo.toml --locked --offline --test newtype_runtime_guest -- --nocapture
+      - name: Build attoc and execute static and runtime checked newtype Wasm guests
         shell: bash
         run: |
           set -euo pipefail
           cargo build --manifest-path attolang-mirror/atto-source.rs/Cargo.toml --locked --offline --bin attoc
-          ATTOC="$PWD/attolang-mirror/atto-source.rs/target/debug/attoc" node attolang-mirror/atto-source.rs/tests/newtype-scalar-guest.mjs
+          export ATTOC="$PWD/attolang-mirror/atto-source.rs/target/debug/attoc"
+          node attolang-mirror/atto-source.rs/tests/newtype-scalar-guest.mjs
+          node attolang-mirror/atto-source.rs/tests/newtype-runtime-guest.mjs

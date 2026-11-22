@@ -78,6 +78,8 @@ pub mod type_declarations;
 pub mod newtype_const_generic_admission;
 /// A closed, nominally checked source-local scalar i64 guest profile.
 pub mod newtype_scalar_guest;
+/// Bounded private Result<newtype,RangeError> runtime check guest lowering.
+pub mod newtype_runtime_guest;
 pub mod wasm;
 
 pub use diag::{Diagnostic, Pos};
@@ -134,7 +136,11 @@ fn compile_prelexed(tokens: Vec<lexer::Token>, logical_path: Option<&std::path::
     // requiring runtime checking, generic layouts or external nominal ABI
     // remains behind the original fail-closed gate.
     let lowered_nominals = if allow_source_local_nominals {
-        newtype_scalar_guest::try_lower(&original_tokens)?
+        if let Some(proven) = newtype_runtime_guest::try_lower(&original_tokens)? {
+            Some(proven)
+        } else {
+            newtype_scalar_guest::try_lower(&original_tokens)?
+        }
     } else { None };
     let original_tokens = if let Some(proven) = lowered_nominals {
         proven
