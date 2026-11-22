@@ -1,0 +1,152 @@
+name: Portable Atto frontend and browser Wasm conformance
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  real-compiler:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Bind checkout to exact head/tree
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+          git rev-parse HEAD
+          git rev-parse HEAD^{tree}
+      - name: Verify byte-identical canonical AOT copy admission source
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git hash-object src/copy_graph_v1.rs)" = "3008a139cfba41131839de3567a263163152cf00"
+          echo "CANONICAL_COPY_GRAPH_SHA_VERIFIED=3008a139cfba41131839de3567a263163152cf00"
+      - name: Install pinned Rust toolchain and Wasm target
+        run: |
+          rustup toolchain install 1.85.1 --profile minimal --target wasm32-unknown-unknown
+          rustup component add clippy --toolchain 1.85.1
+          rustup default 1.85.1
+          rustc --version
+      - name: Test native compiler core over the fixture corpus
+        env:
+          RUST_MIN_STACK: "16777216"
+        run: cargo test --locked --verbose
+      - name: Strict Rust Clippy all targets
+        run: cargo clippy --locked --all-targets -- -D warnings
+      - name: Build native attoc host
+        run: cargo build --locked --release --bin attoc
+      - name: Execute AOT closed-world guests and reject runtime compilation fallbacks
+        env:
+          ATTOC: target/release/attoc
+        run: node tests/aot_no_fallback_guest.mjs
+      - name: Execute real native-compiled output I/O shorthand guest in Wasm
+        env:
+          ATTOC: target/release/attoc
+        run: node tests/io_shorthand_guest.mjs
+      - name: Execute bitwise operators in native-generated Wasm guests
+        env:
+          ATTOC: target/release/attoc
+        run: node tests/bitwise_guest.mjs
+      - name: Execute nominal scalar newtype guests and fail-closed negative cases
+        env:
+          ATTOC: target/release/attoc
+        run: node tests/newtype-scalar-guest.mjs
+      - name: Build actual Wasm compiler
+        run: |
+          cargo rustc --locked --release --lib --target wasm32-unknown-unknown --crate-type cdylib -- -C link-arg=--max-memory=67108864
+          sha256sum target/wasm32-unknown-unknown/release/atto_compiler.wasm
+      - name: Compile exact bitwise preview inside browser Wasm compiler and compare native guest bytes
+        env:
+          ATTOC: target/release/attoc
+        run: node tests/bitwise_browser_compiler.mjs
+      - name: Reject adversarial mailbox histories before compiled guest tests
+        run: node --test tests/actor-trace-refinement.test.mjs
+      - name: Conformance - wasm32 compiler, guest execution, native-vs-wasm byte parity
+        env:
+          ATTOC: target/release/attoc
+        run: node tests/conformance.mjs
+
+      - name: Shared scalar-v1 native vs wasm32 byte parity with guest execution
+        env:
+          ATTOC: target/release/attoc
+        run: node --test tests/shared-scalar-v1.test.mjs
+
+      - name: Execute five callable forms and class mtd guest with negative no-artifact proofs
+        env:
+          ATTOC: target/release/attoc
+        run: node tests/callable_guest_execution.mjs
+      - name: Compile and execute physical AoS SoA AoSoA guest layouts
+        env:
+          ATTOC: target/release/attoc
+        run: node tests/collection-layout-guest-execution.mjs
+      - name: Execute checked monomorphic Any type tests, captures and rejection oracles
+        env:
+          ATTOC: target/release/attoc
+        run: node tests/type_casting_guest_execution.mjs
+
+      - name: Compile and execute canonical copy!! scalar and flat-class Wasm guests
+        env:
+          ATTOC: target/release/attoc
+        run: |
+          node --check tests/copy_doublebang_guest.mjs
+          node tests/copy_doublebang_guest.mjs
+      - name: Execute defer/recover/try/raise unwind guests against spec trace oracles
+        env:
+          ATTOC: target/release/attoc
+        run: node tests/defer_recover_guest.mjs
+
+      - name: Execute recursive guests against the logical call-depth quota (spec 25)
+        env:
+          ATTOC: target/release/attoc
+        run: node tests/call_depth_guest.mjs
+
+      - name: Target-only actor receiver Wasm ABI rejects unsupported code
+        run: node tests/target_syntax_wasm.mjs
+
+      - name: Real Chromium browser and worker E2E
+        run: |
+          export CHROME_BIN="$(command -v google-chrome || command -v chromium)"
+          node tests/browser-e2e.mjs
+      - name: Build immutable compiler artifact receipt
+        run: |
+          mkdir -p dist
+          cp target/wasm32-unknown-unknown/release/atto_compiler.wasm dist/atto_compiler.wasm
+          node --input-type=module <<'JS'
+          import fs from 'node:fs';
+          import crypto from 'node:crypto';
+          import { execFileSync } from 'node:child_process';
+          const bytes = fs.readFileSync('dist/atto_compiler.wasm');
+          const module = new WebAssembly.Module(bytes);
+          const imports = WebAssembly.Module.imports(module);
+          const exports = WebAssembly.Module.exports(module).map(x => x.name);
+          const required = ['memory','abi_version','input_ptr','input_capacity','compile','result_ptr','result_length','error_ptr','error_line_number','error_column_number'];
+          if (imports.length || required.some(x => !exports.includes(x))) throw new Error('unexpected compiler ABI');
+          const git = (...args) => execFileSync('git', args, {encoding:'utf8'}).trim();
+          const receipt = {
+            schema:'atto.browser.compiler.artifact.v1',
+            source_head:git('rev-parse','HEAD'),
+            source_tree:git('rev-parse','HEAD^{tree}'),
+            target:'wasm32-unknown-unknown',
+            abi:'atto-playground-v2',
+            guest_abi:'atto.browser.guest.v2',
+            compiler_sha256:crypto.createHash('sha256').update(bytes).digest('hex'),
+            compiler_bytes:bytes.length,
+            import_count:imports.length,
+            exports
+          };
+          fs.writeFileSync('dist/receipt.json',JSON.stringify(receipt,null,2)+'\n');
+          console.log(receipt);
+          JS
+      - name: Publish verified compiler plus provenance
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: atto-compiler-wasm32-${{ github.event.pull_request.head.sha || github.sha }}
+          path: dist/
+          if-no-files-found: error
+          retention-days: 14

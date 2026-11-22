@@ -14,7 +14,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           persist-credentials: false
-      - name: Verify 77 exact source Git blob SHAs
+      - name: Verify 78 exact source Git blob SHAs
         shell: bash
         run: |
           set -euo pipefail
@@ -95,6 +95,7 @@ jobs:
           test "$(git hash-object 'attolang-mirror/atto-source.rs/tests/newtype-scalar-guest.mjs')" = 'ff97c5443a6a9e0c992a53b0d2a9e577aa726ad3'
           test "$(git hash-object 'attolang-mirror/atto-source.rs/tests/newtype_const_generic_admission.rs')" = '27e4a7382f0334db9ab6552cf10086a934a71bf5'
           test "$(git hash-object 'attolang-mirror/atto-source.rs/tests/newtype_scalar_guest.rs')" = '7c326058a1e448e74f10b4ee873e398f24d23074'
+          test "$(git hash-object 'attolang-mirror/atto-source.rs/.github/workflows/ci.yml')" = '8bbcab02464dff19d02617c30d863aebda3f0dd0'
       - name: Compile real Rust browser compiler and run both integration suites
         shell: bash
         run: |
