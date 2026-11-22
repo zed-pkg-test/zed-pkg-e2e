@@ -95,7 +95,7 @@ jobs:
           test "$(git hash-object 'attolang-mirror/atto-source.rs/src/wasm.rs')" = 'be756f19707f62a0b4830417fef2f4b2ad82147d'
           test "$(git hash-object 'attolang-mirror/atto-source.rs/src/wasm/generator_runtime.rs')" = 'a66e48d8a46cdf6eb18aaae2f3942b82bc4165d1'
           test "$(git hash-object 'attolang-mirror/atto-source.rs/tests/newtype-runtime-guest.mjs')" = '6fce8e503f8daf9e2a5741cb1ea83e9b93736cbc'
-          test "$(git hash-object 'attolang-mirror/atto-source.rs/tests/newtype-scalar-guest.mjs')" = 'ff97c5443a6a9e0c992a53b0d2a9e577aa726ad3'
+          test "$(git hash-object 'attolang-mirror/atto-source.rs/tests/newtype-scalar-guest.mjs')" = '9d36f6a0e86f465f8113def36fee35613d6244e2'
           test "$(git hash-object 'attolang-mirror/atto-source.rs/tests/newtype_const_generic_admission.rs')" = '27e4a7382f0334db9ab6552cf10086a934a71bf5'
           test "$(git hash-object 'attolang-mirror/atto-source.rs/tests/newtype_runtime_guest.rs')" = '246623a9274c7488e3a4417658362cad504d6753'
           test "$(git hash-object 'attolang-mirror/atto-source.rs/tests/newtype_scalar_guest.rs')" = '7c326058a1e448e74f10b4ee873e398f24d23074'

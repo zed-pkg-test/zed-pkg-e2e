@@ -20,7 +20,7 @@ const cases=[
 const failures=[
  ['below-range','Port.from_const(0)','E_RANGE_INVALID'],
  ['above-range','Port.from_const(65536)','E_RANGE_INVALID'],
- ['unproved-runtime','Port.try_from(42)','E_UNSUPPORTED']
+ ['unproved-runtime','Port.try_from(42)','E_NEWTYPE_MISMATCH']
 ];
 const dir=mkdtempSync(join(tmpdir(),'atto-opaque-guest-'));
 function build(name,expr){
