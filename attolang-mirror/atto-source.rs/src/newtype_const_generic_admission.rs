@@ -234,8 +234,12 @@ fn array_dimensions(t: &[Token], i: usize, formals: &BTreeSet<String>,
                     // Named layout arguments belong to the existing
                     // collection-layout checker; do not interpret their
                     // comma-separated options as const dimensions.
-                    if !matches!(at(t, first + 1), Some(Tok::Ident(_))) ||
-                        at(t, first + 2) != Some(&Tok::Assign) {
+                    let has_named_first = matches!(at(t, i + 2), Some(Tok::Ident(_))) &&
+                        at(t, i + 3) == Some(&Tok::Assign);
+                    let has_named_after_first_comma =
+                        matches!(at(t, first + 1), Some(Tok::Ident(_))) &&
+                        at(t, first + 2) == Some(&Tok::Assign);
+                    if !has_named_first && !has_named_after_first_comma {
                         return Err(error(t, p, "E_CONST_GENERIC_ARG",
                             "positional fixed Array accepts only one dimension"));
                     }
@@ -250,11 +254,15 @@ fn array_dimensions(t: &[Token], i: usize, formals: &BTreeSet<String>,
         return Err(error(t, i, "E_CONST_GENERIC_ARG", "unclosed Array dimensions"));
     }
     let Some(divider) = comma else { return Ok(p); };
-    // Legacy Array<Particle, layout=soa> and named layout=(aos/aosoa)
-    // are checked by collection_layout:: and collection_layout_guest::.
+    // Legacy Array<Particle, layout=soa> and even malformed
+    // Array<layout=soa, Particle> belong to the existing collection layout
+    // checker, which issues E_LAYOUT_VALUE or E_GENERIC_ORDER as appropriate.
     // Only positional Array<T, N> enters the const usize evaluator.
-    if matches!(at(t, divider + 1), Some(Tok::Ident(_))) &&
-        at(t, divider + 2) == Some(&Tok::Assign) {
+    let named_first = matches!(at(t, i + 2), Some(Tok::Ident(_))) &&
+        at(t, i + 3) == Some(&Tok::Assign);
+    let named_second = matches!(at(t, divider + 1), Some(Tok::Ident(_))) &&
+        at(t, divider + 2) == Some(&Tok::Assign);
+    if named_first || named_second {
         return Ok(p);
     }
     let end = p - 1;
@@ -511,6 +519,7 @@ mod tests {
             "fnc main(): int { val Array<Particle, layout=soa> a = 0; return 42; }",
             "fnc main(): int { val Array<Particle, layout=aosoa(4)> a = 0; return 42; }",
             "fnc main(): int { val Array<Particle, layout=aos, capacity=8> a = 0; return 42; }",
+            "fnc main(): int { val Array<layout=soa, Particle> a = 0; return 42; }",
         ] {
             let proof = analyze(src).expect("named physical layouts are not const dimensions");
             assert!(proof.known_lengths.is_empty(), "{src}");
