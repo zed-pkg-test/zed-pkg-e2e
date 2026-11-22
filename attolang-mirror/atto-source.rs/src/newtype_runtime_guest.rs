@@ -386,13 +386,19 @@ fn main_body(
             },
             Ty::Result { .. } => checked_expr(c, types, &vars, helpers)?,
             Ty::Nominal(_) | Ty::Error(_) => {
-                return Err(c.err("E_UNSUPPORTED", "unwrapped nominal/error local requires owned runtime layout"))
+                return Err(c.err(
+                    "E_UNSUPPORTED",
+                    "unwrapped nominal/error local requires owned runtime layout",
+                ))
             }
         };
         same(c, &ty, &init.ty)?;
         c.require(Tok::Semi)?;
         let repr = ty.private_wasm_lowered_type().ok_or_else(|| {
-            c.err("E_UNSUPPORTED_TYPE", "no verified guest layout for this generic Result")
+            c.err(
+                "E_UNSUPPORTED_TYPE",
+                "no verified guest layout for this generic Result",
+            )
         })?;
         lowered.push_str(&format!("val {name}: {repr} = {};\n", init.lower));
         vars.insert(name, ty);
@@ -492,7 +498,8 @@ pub fn try_lower(tokens: &[Token]) -> R<Option<Vec<Token>>> {
     // different module owner after the semantic type graph is constructed.
     for name in &definitions {
         let id = crate::newtype_typed_ir::NominalIdentity {
-            module: "<private-module>".to_owned(), name: name.clone(),
+            module: "<private-module>".to_owned(),
+            name: name.clone(),
         };
         if checked_types.get(&id).is_none() {
             return Err(cur.err("E_NEWTYPE_IDENTITY", "missing nominal identity"));

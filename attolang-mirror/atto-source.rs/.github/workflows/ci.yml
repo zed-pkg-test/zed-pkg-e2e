@@ -69,6 +69,10 @@ jobs:
         env:
           ATTOC: target/release/attoc
         run: node tests/bitwise_browser_compiler.mjs
+      - name: Verify compiled typed Result guests have native vs wasm32 browser compiler byte parity
+        env:
+          ATTOC: target/release/attoc
+        run: node tests/newtype-typed-result-browser-parity.mjs
       - name: Reject adversarial mailbox histories before compiled guest tests
         run: node --test tests/actor-trace-refinement.test.mjs
       - name: Conformance - wasm32 compiler, guest execution, native-vs-wasm byte parity

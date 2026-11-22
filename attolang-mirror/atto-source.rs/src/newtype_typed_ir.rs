@@ -70,9 +70,7 @@ impl Ty {
 
     pub fn checked_nominal(&self) -> Option<&str> {
         match self {
-            Self::Result { ok, err }
-                if **err == Self::Error(ErrorClass::RangeError) =>
-            {
+            Self::Result { ok, err } if **err == Self::Error(ErrorClass::RangeError) => {
                 match ok.as_ref() {
                     Self::Nominal(name) => Some(name),
                     _ => None,
@@ -87,9 +85,7 @@ impl Ty {
     pub fn private_wasm_lowered_type(&self) -> Option<&'static str> {
         match self {
             Self::I64 | Self::Nominal(_) => Some("int"),
-            Self::Result { .. } if self.checked_nominal().is_some() => {
-                Some("Result<int,string>")
-            }
+            Self::Result { .. } if self.checked_nominal().is_some() => Some("Result<int,string>"),
             Self::Error(_) | Self::Result { .. } => None,
         }
     }
@@ -123,17 +119,29 @@ impl NominalGraph {
         pos: Pos,
     ) -> Result<NominalIdentity, Diagnostic> {
         if module.is_empty() || name.is_empty() || name.starts_with("__atto_") {
-            return Err(Diagnostic::new(pos, "E_NEWTYPE_IDENTITY", "invalid nominal scope"));
+            return Err(Diagnostic::new(
+                pos,
+                "E_NEWTYPE_IDENTITY",
+                "invalid nominal scope",
+            ));
         }
         if interval.low > interval.high {
-            return Err(Diagnostic::new(pos, "E_RANGE_INVALID", "empty newtype interval"));
+            return Err(Diagnostic::new(
+                pos,
+                "E_RANGE_INVALID",
+                "empty newtype interval",
+            ));
         }
         let identity = NominalIdentity {
             module: module.to_owned(),
             name: name.to_owned(),
         };
         if self.declarations.contains_key(&identity) {
-            return Err(Diagnostic::new(pos, "E_DUPLICATE", "duplicate nominal declaration"));
+            return Err(Diagnostic::new(
+                pos,
+                "E_DUPLICATE",
+                "duplicate nominal declaration",
+            ));
         }
         self.declarations.insert(
             identity.clone(),
@@ -156,9 +164,9 @@ impl NominalGraph {
         value: i64,
         pos: Pos,
     ) -> Result<(), Diagnostic> {
-        let d = self.get(id).ok_or_else(|| {
-            Diagnostic::new(pos, "E_NEWTYPE_IDENTITY", "unknown nominal owner")
-        })?;
+        let d = self
+            .get(id)
+            .ok_or_else(|| Diagnostic::new(pos, "E_NEWTYPE_IDENTITY", "unknown nominal owner"))?;
         if !(d.closed_interval.low..=d.closed_interval.high).contains(&value) {
             return Err(Diagnostic::new(
                 pos,
@@ -204,7 +212,10 @@ mod tests {
     fn range_error_is_an_error_subclass_but_result_is_invariant() {
         assert!(ErrorClass::RangeError.is_subclass_of(&ErrorClass::Error));
         assert!(!ErrorClass::Error.is_subclass_of(&ErrorClass::RangeError));
-        assert_ne!(ErrorClass::Error.category_code(), ErrorClass::RangeError.category_code());
+        assert_ne!(
+            ErrorClass::Error.category_code(),
+            ErrorClass::RangeError.category_code()
+        );
         let strict = Ty::checked("Port".into());
         let supertype = Ty::Result {
             ok: Box::new(Ty::Nominal("Port".into())),
@@ -216,16 +227,28 @@ mod tests {
     #[test]
     fn nominal_owner_is_part_of_identity_even_with_same_i64_layout() {
         let mut g = NominalGraph::default();
-        let bounds = Interval { low: 1, high: 65535 };
+        let bounds = Interval {
+            low: 1,
+            high: 65535,
+        };
         let a = g.declare("+pkgA", "Port", bounds, p()).unwrap();
         let b = g.declare("+pkgB", "Port", bounds, p()).unwrap();
         assert!(!g.identical(&a, &b));
         assert_eq!(g.get(&a).unwrap().representation_bits, 64);
-        assert_eq!(g.declare("+pkgA", "Port", bounds, p()).unwrap_err().code, "E_DUPLICATE");
+        assert_eq!(
+            g.declare("+pkgA", "Port", bounds, p()).unwrap_err().code,
+            "E_DUPLICATE"
+        );
         assert!(g.validate_const(&a, 1, p()).is_ok());
         assert!(g.validate_const(&a, 65535, p()).is_ok());
-        assert_eq!(g.validate_const(&a, 0, p()).unwrap_err().code, "E_RANGE_INVALID");
-        assert_eq!(g.validate_const(&a, 65536, p()).unwrap_err().code, "E_RANGE_INVALID");
+        assert_eq!(
+            g.validate_const(&a, 0, p()).unwrap_err().code,
+            "E_RANGE_INVALID"
+        );
+        assert_eq!(
+            g.validate_const(&a, 65536, p()).unwrap_err().code,
+            "E_RANGE_INVALID"
+        );
     }
 
     #[test]
@@ -236,6 +259,9 @@ mod tests {
         };
         assert_eq!(impossible.checked_nominal(), None);
         assert_eq!(impossible.private_wasm_lowered_type(), None);
-        assert_eq!(Ty::Error(ErrorClass::RangeError).private_wasm_lowered_type(), None);
+        assert_eq!(
+            Ty::Error(ErrorClass::RangeError).private_wasm_lowered_type(),
+            None
+        );
     }
 }
