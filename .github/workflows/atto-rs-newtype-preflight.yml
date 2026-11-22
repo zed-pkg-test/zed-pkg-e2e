@@ -1,0 +1,37 @@
+name: Atto Rust newtype exact-blob focused compiler component
+on:
+  push:
+    branches: [ci/atto-rs-nominal-const-admission-20261121]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  exact-rust-preflight:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout carrier only without source secrets
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Prove all 5 exact source Git blob SHAs
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git hash-object 'attolang-mirror/atto-source.rs/src/newtype_const_generic_admission.rs')" = '18e2572065f128dc1e785dd6ff66b1c8671736cd'
+          test "$(git hash-object 'attolang-mirror/atto-source.rs/tests/newtype_const_generic_admission.rs')" = 'f3d28ad35f1e4cb7a0585181505259019932c06e'
+          test "$(git hash-object 'attolang-mirror/atto-source.rs/src/diag.rs')" = 'b9a5b982251315604e90680066bbbbfc49ab1a2a'
+          test "$(git hash-object 'attolang-mirror/atto-source.rs/src/lib.rs')" = '39170b6e8a43639f44687dce1b22185fffda3d72'
+          test "$(git hash-object 'attolang-mirror/atto-source.rs/src/lexer.rs')" = '9cbde947cb7685b301ce0ea580f6462716cd9f78'
+          grep -Fq 'newtype_const_generic_admission::preflight(&original_tokens)?;' attolang-mirror/atto-source.rs/src/lib.rs
+      - name: Compile unmodified production Rust lexer and admission module
+        shell: bash
+        run: |
+          set -euo pipefail
+          rustc --version
+          rustc --edition=2021 --test attolang_newtype_standalone.rs -o /tmp/atto-newtype-preflight-tests
+      - name: Execute focused Rust regression unit tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          /tmp/atto-newtype-preflight-tests --nocapture
