@@ -6,25 +6,12 @@
 use crate::diag::{Diagnostic, Pos};
 use crate::lexer::{self, Tok, Token};
 use crate::newtype_const_generic_admission::{self, Interval};
+use crate::newtype_typed_ir::{NominalGraph, Ty};
 use std::collections::{BTreeMap, BTreeSet};
 type R<T> = Result<T, Diagnostic>;
 const MAX_FUNCS: usize = 32;
 const MAX_VARS: usize = 128;
 
-#[derive(Clone, Debug, PartialEq, Eq)]
-enum Ty {
-    I64,
-    Nominal(String),
-    Checked(String),
-}
-impl Ty {
-    fn lowered(&self) -> &'static str {
-        match self {
-            Self::Checked(_) => "Result<int,string>",
-            _ => "int",
-        }
-    }
-}
 struct TypedValue {
     ty: Ty,
     lower: String,
@@ -126,7 +113,7 @@ impl Cur<'_> {
             self.require(Tok::Comma)?;
             self.require_word("RangeError")?;
             self.require(Tok::Gt)?;
-            return Ok(Ty::Checked(nominal));
+            return Ok(Ty::checked(nominal));
         }
         let name = self.name()?;
         if !n.contains_key(&name) {
@@ -250,7 +237,7 @@ fn checked_expr(
         let v = int_arg(c, vars)?;
         c.require(Tok::RParen)?;
         return Ok(TypedValue {
-            ty: Ty::Checked(name.clone()),
+            ty: Ty::checked(name.clone()),
             lower: format!("{}({v})", validator_name(&name)),
         });
     }
@@ -264,14 +251,14 @@ fn checked_expr(
         let v = int_arg(c, vars)?;
         c.require(Tok::RParen)?;
         return Ok(TypedValue {
-            ty: Ty::Checked(helper.nominal.clone()),
+            ty: Ty::checked(helper.nominal.clone()),
             lower: format!("{name}({v})"),
         });
     }
     let ty = vars
         .get(&name)
         .ok_or_else(|| c.err("E_UNSUPPORTED", "unknown checked-result binding"))?;
-    if !matches!(ty, Ty::Checked(_)) {
+    if ty.checked_nominal().is_none() {
         return Err(c.err(
             "E_NEWTYPE_MISMATCH",
             "only checked Result bindings are allowed here",
@@ -296,7 +283,7 @@ fn helper(
     c.require(Tok::RParen)?;
     c.require(Tok::Colon)?;
     let ret = c.ty(types)?;
-    let Ty::Checked(nominal) = ret else {
+    let Some(nominal) = ret.checked_nominal().map(str::to_owned) else {
         return Err(c.err(
             "E_UNSUPPORTED_TYPE",
             "helper must return Result<Newtype,RangeError>",
@@ -306,7 +293,7 @@ fn helper(
     c.require_word("return")?;
     let vars = BTreeMap::from([(arg.clone(), Ty::I64)]);
     let result = checked_expr(c, types, &vars, funcs)?;
-    same(c, &Ty::Checked(nominal.clone()), &result.ty)?;
+    same(c, &Ty::checked(nominal.clone()), &result.ty)?;
     c.require(Tok::Semi)?;
     c.require(Tok::RBrace)?;
     if funcs.insert(name.clone(), Helper { nominal }).is_some() {
@@ -318,7 +305,7 @@ fn helper(
     ));
     Ok(())
 }
-fn arm(c: &mut Cur<'_>, variant: &str, nominal: &str) -> R<String> {
+fn arm(c: &mut Cur<'_>, variant: &str, nominal: &str, expression: bool, last: bool) -> R<String> {
     c.require_word("on")?;
     c.require_word(variant)?;
     c.require(Tok::LParen)?;
@@ -334,8 +321,10 @@ fn arm(c: &mut Cur<'_>, variant: &str, nominal: &str) -> R<String> {
     };
     c.require(Tok::RParen)?;
     c.require(Tok::Arrow)?;
-    c.require(Tok::LBrace)?;
-    c.require_word("return")?;
+    if !expression {
+        c.require(Tok::LBrace)?;
+        c.require_word("return")?;
+    }
     let result = if matches!(c.tok(0), Some(Tok::Int(_)) | Some(Tok::Minus)) {
         integer(c)?.to_string()
     } else {
@@ -352,8 +341,16 @@ fn arm(c: &mut Cur<'_>, variant: &str, nominal: &str) -> R<String> {
         c.require(Tok::RParen)?;
         bind.clone()
     };
-    c.require(Tok::Semi)?;
-    c.require(Tok::RBrace)?;
+    if expression {
+        if last {
+            c.eat(Tok::Comma);
+        } else {
+            c.require(Tok::Comma)?;
+        }
+    } else {
+        c.require(Tok::Semi)?;
+        c.require(Tok::RBrace)?;
+    }
     Ok(format!("on {variant}({bind}) -> {{ return {result}; }}\n"))
 }
 fn main_body(
@@ -387,16 +384,20 @@ fn main_body(
                 ty: Ty::I64,
                 lower: int_arg(c, &vars)?,
             },
-            Ty::Checked(_) => checked_expr(c, types, &vars, helpers)?,
-            Ty::Nominal(_) => {
-                return Err(c.err("E_UNSUPPORTED", "unwrapped nominal local is not a result"))
+            Ty::Result { .. } => checked_expr(c, types, &vars, helpers)?,
+            Ty::Nominal(_) | Ty::Error(_) => {
+                return Err(c.err("E_UNSUPPORTED", "unwrapped nominal/error local requires owned runtime layout"))
             }
         };
         same(c, &ty, &init.ty)?;
         c.require(Tok::Semi)?;
-        lowered.push_str(&format!("val {name}: {} = {};\n", ty.lowered(), init.lower));
+        let repr = ty.private_wasm_lowered_type().ok_or_else(|| {
+            c.err("E_UNSUPPORTED_TYPE", "no verified guest layout for this generic Result")
+        })?;
+        lowered.push_str(&format!("val {name}: {repr} = {};\n", init.lower));
         vars.insert(name, ty);
     }
+    let expression_match = c.eat_word("return");
     c.require_word("match")?;
     let subject = c.name()?;
     let type_of_subject = vars.get(&subject).ok_or_else(|| {
@@ -405,7 +406,7 @@ fn main_body(
             "Result match must reference a checked Result binding",
         )
     })?;
-    let Ty::Checked(nominal) = type_of_subject else {
+    let Some(nominal) = type_of_subject.checked_nominal() else {
         return Err(c.err("E_NEWTYPE_MISMATCH", "match subject is not checked Result"));
     };
     c.require_word("over")?;
@@ -414,8 +415,8 @@ fn main_body(
         Some("Err") => ("Err", "Ok"),
         _ => return Err(c.err("E_MATCH", "match must cover Ok and Err")),
     };
-    let a = arm(c, first, nominal)?;
-    let b = arm(c, second, nominal)?;
+    let a = arm(c, first, nominal, expression_match, false)?;
+    let b = arm(c, second, nominal, expression_match, true)?;
     c.require_word("end")?;
     c.eat(Tok::Semi);
     c.require(Tok::RBrace)?;
@@ -447,6 +448,10 @@ pub fn try_lower(tokens: &[Token]) -> R<Option<Vec<Token>>> {
     let mut cur = Cur { ts: tokens, i: 0 };
     let mut code = String::new();
     let mut helpers = BTreeMap::<String, Helper>::new();
+    let mut checked_types = NominalGraph::default();
+    for (name, interval) in &admitted.nominal {
+        checked_types.declare("<private-module>", name, *interval, cur.pos())?;
+    }
     let mut definitions = BTreeSet::new();
     let mut functions = 0;
     let mut main = false;
@@ -482,6 +487,16 @@ pub fn try_lower(tokens: &[Token]) -> R<Option<Vec<Token>>> {
     }
     if !main || definitions.len() != admitted.nominal.len() {
         return Ok(None);
+    }
+    // This profile cannot invent a nominal declaration or substitute a
+    // different module owner after the semantic type graph is constructed.
+    for name in &definitions {
+        let id = crate::newtype_typed_ir::NominalIdentity {
+            module: "<private-module>".to_owned(), name: name.clone(),
+        };
+        if checked_types.get(&id).is_none() {
+            return Err(cur.err("E_NEWTYPE_IDENTITY", "missing nominal identity"));
+        }
     }
     let mut constructors = String::new();
     for (name, bounds) in &admitted.nominal {

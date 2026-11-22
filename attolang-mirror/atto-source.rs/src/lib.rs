@@ -79,6 +79,7 @@ pub mod newtype_const_generic_admission;
 /// A closed, nominally checked source-local scalar i64 guest profile.
 pub mod newtype_scalar_guest;
 /// Bounded private Result<newtype,RangeError> runtime check guest lowering.
+pub mod newtype_typed_ir;
 pub mod newtype_runtime_guest;
 pub mod wasm;
 

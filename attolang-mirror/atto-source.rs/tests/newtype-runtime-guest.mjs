@@ -31,7 +31,11 @@ const cases=[
  ['high-signed','9223372036854775807',0n],
  ['direct-checked','8080',8080n],
  ['unbounded-min','-9223372036854775808',-9223372036854775808n],
- ['unbounded-max','9223372036854775807',9223372036854775807n]
+ ['unbounded-max','9223372036854775807',9223372036854775807n],
+ ['return-match-valid','8080',8080n],
+ ['return-match-low','0',0n],
+ ['return-match-high','65536',0n],
+ ['return-match-reverse','65535',65535n]
 ];
 const directory=mkdtempSync(join(tmpdir(),'atto-newtype-runtime-'));
 const run=(name,source)=>{
@@ -52,6 +56,18 @@ try{
    if(name.startsWith('unbounded-')) {
       program=program.replace(' where value gte 1 and value lte 65535; end',';');
    }
+   if(name.startsWith('return-match-')) {
+      program=program.replace(
+        ' match result over\n on Ok(port) -> { return port.to_base(); }\n on Err(reason) -> { return 0; }\n end',
+        ' return match result over\n on Ok(port) -> port.to_base(),\n on Err(reason) -> 0\n end;'
+      );
+   }
+   if(name==='return-match-reverse') {
+      program=program.replace(
+        'on Ok(port) -> port.to_base(),\n on Err(reason) -> 0',
+        'on Err(reason) -> 0,\n on Ok(port) -> port.to_base()'
+      );
+   }
    const {result,output}=run(name,program);
    assert.equal(result.status,0,name+': '+result.stderr);
    const wasm=readFileSync(output);
@@ -71,13 +87,22 @@ try{
   ['wrong-err',guest('42').replace('Result<Port,RangeError> result',
     'Result<Port,string> result')],
   ['incorrect-match',guest('42').replace('on Err(reason)','on Ok(reason)')],
+  ['return-match-not-exhaustive',guest('42').replace(
+    ' match result over\n on Ok(port) -> { return port.to_base(); }\n on Err(reason) -> { return 0; }\n end',
+    ' return match result over\n on Ok(port) -> port.to_base(),\n on Ok(again) -> 0\n end;')],
+  ['return-match-implicit-opaque',guest('42').replace(
+    ' match result over\n on Ok(port) -> { return port.to_base(); }\n on Err(reason) -> { return 0; }\n end',
+    ' return match result over\n on Ok(port) -> port,\n on Err(reason) -> 0\n end;')],
+  ['return-match-missing-comma',guest('42').replace(
+    ' match result over\n on Ok(port) -> { return port.to_base(); }\n on Err(reason) -> { return 0; }\n end',
+    ' return match result over\n on Ok(port) -> port.to_base()\n on Err(reason) -> 0\n end;')],
  ];
  for(const [name,source] of malformed){
     const {result,output}=run(name,source);
     assert.notEqual(result.status,0,name+': invalid guest was compiled');
     assert.equal(existsSync(output),false,name+': rejected compilation emitted artifact');
  }
- console.log('PASS 10 real compiled runtime-newtype Wasm guests (7 valid/3 Err), 4 invalid/no-artifact checks, zero host imports');
+ console.log('PASS 14 real compiled runtime-newtype Wasm guests (9 valid/5 Err), 7 invalid/no-artifact checks, zero host imports');
 }finally{
  rmSync(directory,{recursive:true,force:true});
 }
