@@ -381,7 +381,8 @@ pub fn inspect(t: &[Token]) -> R<Admission> {
                 }
             }
             if at(t, rhs) != Some(&Tok::Ident(dest.to_owned()))
-                && !ident(t, rhs).is_some_and(|s| bindings.get(s).is_some_and(|x| x == dest))
+                && ident(t, rhs).and_then(|s| bindings.get(s))
+                    .map(String::as_str) != Some(dest)
             {
                 return Err(error(t, rhs, "E_NEWTYPE_CONSTRUCTION",
                     "raw base values cannot construct nominal types"));
