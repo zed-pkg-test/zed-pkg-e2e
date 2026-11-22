@@ -230,11 +230,16 @@ fn array_dimensions(t: &[Token], i: usize, formals: &BTreeSet<String>,
             Some(Tok::Lt) => nest += 1,
             Some(Tok::Gt) => nest -= 1,
             Some(Tok::Comma) if nest == 1 => {
-                if comma.is_some() {
-                    return Err(error(t, p, "E_CONST_GENERIC_ARG",
-                        "fixed Array requires exactly one dimension"));
-                }
-                comma = Some(p);
+                if let Some(first) = comma {
+                    // Named layout arguments belong to the existing
+                    // collection-layout checker; do not interpret their
+                    // comma-separated options as const dimensions.
+                    if !matches!(at(t, first + 1), Some(Tok::Ident(_))) ||
+                        at(t, first + 2) != Some(&Tok::Assign) {
+                        return Err(error(t, p, "E_CONST_GENERIC_ARG",
+                            "positional fixed Array accepts only one dimension"));
+                    }
+                } else { comma = Some(p); }
             }
             Some(Tok::Eof) => break,
             _ => {}
@@ -245,6 +250,13 @@ fn array_dimensions(t: &[Token], i: usize, formals: &BTreeSet<String>,
         return Err(error(t, i, "E_CONST_GENERIC_ARG", "unclosed Array dimensions"));
     }
     let Some(divider) = comma else { return Ok(p); };
+    // Legacy Array<Particle, layout=soa> and named layout=(aos/aosoa)
+    // are checked by collection_layout:: and collection_layout_guest::.
+    // Only positional Array<T, N> enters the const usize evaluator.
+    if matches!(at(t, divider + 1), Some(Tok::Ident(_))) &&
+        at(t, divider + 2) == Some(&Tok::Assign) {
+        return Ok(p);
+    }
     let end = p - 1;
     if divider + 1 == end {
         return Err(error(t, divider, "E_CONST_GENERIC_ARG", "empty const Array dimension"));
@@ -491,6 +503,20 @@ mod tests {
         let p = analyze("define struct Matrix<T, const usize N> as end define struct Vector<T, const usize N> as end").unwrap();
         assert!(p.requires_backend);
         rejects("define struct Pair<T, const usize N, const usize N> as end", "E_DUPLICATE");
+    }
+
+    #[test]
+    fn named_array_layout_preserves_existing_collection_layout_admission() {
+        for src in [
+            "fnc main(): int { val Array<Particle, layout=soa> a = 0; return 42; }",
+            "fnc main(): int { val Array<Particle, layout=aosoa(4)> a = 0; return 42; }",
+            "fnc main(): int { val Array<Particle, layout=aos, capacity=8> a = 0; return 42; }",
+        ] {
+            let proof = analyze(src).expect("named physical layouts are not const dimensions");
+            assert!(proof.known_lengths.is_empty(), "{src}");
+        }
+        rejects("fnc main(): int { val Array<int, 4, 5> a = 0; return 42; }",
+            "E_CONST_GENERIC_ARG");
     }
 
     #[test]

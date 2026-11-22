@@ -62,7 +62,7 @@ jobs:
           test "$(git hash-object 'attolang-mirror/atto-source.rs/src/mir.rs')" = '71da75f30f664eb18ef2159ddc41e9756a7dcacd'
           test "$(git hash-object 'attolang-mirror/atto-source.rs/src/module_lower.rs')" = '930900b22e8b9a80ac6e0739613ece017309ffed'
           test "$(git hash-object 'attolang-mirror/atto-source.rs/src/namespace.rs')" = 'c17ed0ccccc40ce0ea8911735f26fd2b7f4f7260'
-          test "$(git hash-object 'attolang-mirror/atto-source.rs/src/newtype_const_generic_admission.rs')" = '18e2572065f128dc1e785dd6ff66b1c8671736cd'
+          test "$(git hash-object 'attolang-mirror/atto-source.rs/src/newtype_const_generic_admission.rs')" = '04f3a84b77c907a952c13124f81b75a5a4a9d8d5'
           test "$(git hash-object 'attolang-mirror/atto-source.rs/src/newtype_scalar_guest.rs')" = '33a8b2a816499a840dc1575bdba7f9bf73ab64ec'
           test "$(git hash-object 'attolang-mirror/atto-source.rs/src/nominal_contract_admission.rs')" = 'bfca563b360f5b56aebb71a5e0e0a0a9d11b0852'
           test "$(git hash-object 'attolang-mirror/atto-source.rs/src/nominal_lower.rs')" = '6da18fc53cf071540fdee28088085a55b8ab500c'
