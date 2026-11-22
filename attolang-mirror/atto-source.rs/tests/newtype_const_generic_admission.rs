@@ -99,7 +99,7 @@ fn symbolic_matrix_parameters_are_recognized_without_unsafe_specialization() {
 }
 
 #[test]
-fn ordinary_source_and comment_or_string_lookalikes_are_unchanged() {
+fn ordinary_source_and_comment_or_string_lookalikes_are_unchanged() {
     let source = r#"
         // define newtype Fake(i64) where value gte 1; end
         pub fnc main(): int {
