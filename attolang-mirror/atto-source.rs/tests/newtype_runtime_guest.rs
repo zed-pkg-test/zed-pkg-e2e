@@ -71,3 +71,25 @@ fn unbounded_newtype_accepts_signed_extreme_constants_in_validator(){
         .replace("8080","-9223372036854775808");
     assert!(compile(&source).is_ok());
 }
+
+
+#[test]
+fn direct_runtime_try_from_does_not_need_a_wrapper_helper(){
+    let direct=SOURCE.replace("create_port(input);","Port.try_from(input);");
+    assert!(compile(&direct).is_ok(),"direct static nominal constructor must be typed");
+}
+#[test]
+fn checked_result_never_implicitly_unwraps_into_port(){
+    let wrong=SOURCE.replace(
+        "val Result<Port,RangeError> checked = create_port(input);",
+        "val Port checked = Port.try_from(input);");
+    assert!(compile(&wrong).is_err(),"Result<Port,RangeError> is not Port");
+}
+#[test]
+fn duplicate_and_unrecognized_nominal_type_fails_closed(){
+    let wrong=SOURCE.replace("define newtype Port(i64)", "define newtype Port(i64); define newtype Port(i64)");
+    assert_eq!(compile(&wrong).unwrap_err().code,"E_DUPLICATE");
+    let wrong=SOURCE.replace(
+        "Result<Port,RangeError> checked", "Result<Unknown,RangeError> checked");
+    assert!(compile(&wrong).is_err());
+}

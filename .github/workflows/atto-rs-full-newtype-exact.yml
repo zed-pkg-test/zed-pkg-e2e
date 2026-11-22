@@ -1,4 +1,4 @@
-name: Atto Rust exact private nominal runtime Result Wasm
+name: Atto Rust full runtime Result newtype exact-head CI
 on:
   push:
     branches: [ci/atto-rs-full-exact-20261121]
@@ -14,11 +14,11 @@ jobs:
         uses: actions/checkout@v4
         with:
           persist-credentials: false
-      - name: Verify 81 exact current Atto source file Git blob SHAs
+      - name: Verify 81 exact current Atto source Git blob SHAs
         shell: bash
         run: |
           set -euo pipefail
-          test "$(git hash-object 'attolang-mirror/atto-source.rs/.github/workflows/ci.yml')" = '8bbcab02464dff19d02617c30d863aebda3f0dd0'
+          test "$(git hash-object 'attolang-mirror/atto-source.rs/.github/workflows/ci.yml')" = '2c1c8f5186ba70afe28b70cda1a20f9790493d5f'
           test "$(git hash-object 'attolang-mirror/atto-source.rs/Cargo.lock')" = '387853d3838d48e0c89d77fbecfcd41d53fbd4ca'
           test "$(git hash-object 'attolang-mirror/atto-source.rs/Cargo.toml')" = 'd49ddddb17187d80a8f00503e5f0f2948d088a29'
           test "$(git hash-object 'attolang-mirror/atto-source.rs/src/actor_arena.rs')" = '942ffd71039258c13e6d7a9b678e6cc63d1c9238'
@@ -94,12 +94,12 @@ jobs:
           test "$(git hash-object 'attolang-mirror/atto-source.rs/src/visibility_lower.rs')" = '19c67504b0e1b71d72ecb2626bb2670410eee509'
           test "$(git hash-object 'attolang-mirror/atto-source.rs/src/wasm.rs')" = 'be756f19707f62a0b4830417fef2f4b2ad82147d'
           test "$(git hash-object 'attolang-mirror/atto-source.rs/src/wasm/generator_runtime.rs')" = 'a66e48d8a46cdf6eb18aaae2f3942b82bc4165d1'
-          test "$(git hash-object 'attolang-mirror/atto-source.rs/tests/newtype-runtime-guest.mjs')" = '6fce8e503f8daf9e2a5741cb1ea83e9b93736cbc'
+          test "$(git hash-object 'attolang-mirror/atto-source.rs/tests/newtype-runtime-guest.mjs')" = 'c8180e5aaadf310e670b069c2c616a796f32c091'
           test "$(git hash-object 'attolang-mirror/atto-source.rs/tests/newtype-scalar-guest.mjs')" = '9d36f6a0e86f465f8113def36fee35613d6244e2'
           test "$(git hash-object 'attolang-mirror/atto-source.rs/tests/newtype_const_generic_admission.rs')" = '27e4a7382f0334db9ab6552cf10086a934a71bf5'
-          test "$(git hash-object 'attolang-mirror/atto-source.rs/tests/newtype_runtime_guest.rs')" = '246623a9274c7488e3a4417658362cad504d6753'
+          test "$(git hash-object 'attolang-mirror/atto-source.rs/tests/newtype_runtime_guest.rs')" = '8bf80d2a757a72944d2e108c852f9c478840de93'
           test "$(git hash-object 'attolang-mirror/atto-source.rs/tests/newtype_scalar_guest.rs')" = '7c326058a1e448e74f10b4ee873e398f24d23074'
-      - name: Build actual browser compiler and test all library and nominal entrypoints
+      - name: Build real compiler and test all library and nominal entrypoints
         shell: bash
         run: |
           set -euo pipefail
@@ -107,7 +107,7 @@ jobs:
           cargo test --manifest-path attolang-mirror/atto-source.rs/Cargo.toml --locked --offline --test newtype_const_generic_admission -- --nocapture
           cargo test --manifest-path attolang-mirror/atto-source.rs/Cargo.toml --locked --offline --test newtype_scalar_guest -- --nocapture
           cargo test --manifest-path attolang-mirror/atto-source.rs/Cargo.toml --locked --offline --test newtype_runtime_guest -- --nocapture
-      - name: Build attoc and execute static and runtime checked newtype Wasm guests
+      - name: Build attoc and execute static plus runtime checked newtype Wasm
         shell: bash
         run: |
           set -euo pipefail
@@ -115,3 +115,19 @@ jobs:
           export ATTOC="$PWD/attolang-mirror/atto-source.rs/target/debug/attoc"
           node attolang-mirror/atto-source.rs/tests/newtype-scalar-guest.mjs
           node attolang-mirror/atto-source.rs/tests/newtype-runtime-guest.mjs
+      - name: Strict Clippy full crate including tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo clippy --manifest-path attolang-mirror/atto-source.rs/Cargo.toml --locked --offline --all-targets -- -D warnings
+      - name: Emit rustfmt-only proposal after source-exact tests
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo fmt --manifest-path attolang-mirror/atto-source.rs/Cargo.toml --all
+          printf 'FORMATTED_NOMINAL_RUNTIME='
+          base64 -w0 attolang-mirror/atto-source.rs/src/newtype_runtime_guest.rs
+          printf '\nFORMATTED_NOMINAL_TEST='
+          base64 -w0 attolang-mirror/atto-source.rs/tests/newtype_runtime_guest.rs
+          printf '\n'

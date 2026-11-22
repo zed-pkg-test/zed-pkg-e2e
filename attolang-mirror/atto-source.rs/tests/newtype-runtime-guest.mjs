@@ -28,7 +28,10 @@ const cases=[
  ['min-admitted','1',1n],['ordinary','42',42n],
  ['max-admitted','65535',65535n],['too-small','0',0n],
  ['negative','-12',0n],['too-large','65536',0n],
- ['high-signed','9223372036854775807',0n]
+ ['high-signed','9223372036854775807',0n],
+ ['direct-checked','8080',8080n],
+ ['unbounded-min','-9223372036854775808',-9223372036854775808n],
+ ['unbounded-max','9223372036854775807',9223372036854775807n]
 ];
 const directory=mkdtempSync(join(tmpdir(),'atto-newtype-runtime-'));
 const run=(name,source)=>{
@@ -42,7 +45,14 @@ const run=(name,source)=>{
 };
 try{
  for(const [name,input,want] of cases){
-   const {result,output}=run(name,guest(input));
+   let program=guest(input);
+   if(name==='direct-checked') {
+      program=program.replace('create_port(input)','Port.try_from(input)');
+   }
+   if(name.startsWith('unbounded-')) {
+      program=program.replace(' where value gte 1 and value lte 65535; end',';');
+   }
+   const {result,output}=run(name,program);
    assert.equal(result.status,0,name+': '+result.stderr);
    const wasm=readFileSync(output);
    assert.ok(WebAssembly.validate(wasm),name);
@@ -67,7 +77,7 @@ try{
     assert.notEqual(result.status,0,name+': invalid guest was compiled');
     assert.equal(existsSync(output),false,name+': rejected compilation emitted artifact');
  }
- console.log('PASS 7 real compiled runtime-newtype Wasm guests (4 valid/3 Err), 4 invalid/no-artifact checks, zero host imports');
+ console.log('PASS 10 real compiled runtime-newtype Wasm guests (7 valid/3 Err), 4 invalid/no-artifact checks, zero host imports');
 }finally{
  rmSync(directory,{recursive:true,force:true});
 }
