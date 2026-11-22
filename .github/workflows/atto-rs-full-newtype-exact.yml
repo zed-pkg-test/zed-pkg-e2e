@@ -1,4 +1,4 @@
-name: Atto Rust full runtime Result newtype exact-head CI
+name: Atto Rust exact checked nominal Result + pinned 1.85 Clippy
 on:
   push:
     branches: [ci/atto-rs-full-exact-20261121]
@@ -6,15 +6,15 @@ on:
 permissions:
   contents: read
 jobs:
-  rust-runtime-newtype-guest:
+  checked-nominal-result:
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
-      - name: Checkout private token-free carrier
+      - name: Checkout private token-free same-org carrier
         uses: actions/checkout@v4
         with:
           persist-credentials: false
-      - name: Verify 81 exact current Atto source Git blob SHAs
+      - name: Verify 81 exact source Git blob SHAs
         shell: bash
         run: |
           set -euo pipefail
@@ -64,7 +64,7 @@ jobs:
           test "$(git hash-object 'attolang-mirror/atto-source.rs/src/module_lower.rs')" = '930900b22e8b9a80ac6e0739613ece017309ffed'
           test "$(git hash-object 'attolang-mirror/atto-source.rs/src/namespace.rs')" = 'c17ed0ccccc40ce0ea8911735f26fd2b7f4f7260'
           test "$(git hash-object 'attolang-mirror/atto-source.rs/src/newtype_const_generic_admission.rs')" = '6c8f62e611743ea442b8133297c03d06c5bf428b'
-          test "$(git hash-object 'attolang-mirror/atto-source.rs/src/newtype_runtime_guest.rs')" = '3d104cf156c98a4ae85b25297ed0dab69e841664'
+          test "$(git hash-object 'attolang-mirror/atto-source.rs/src/newtype_runtime_guest.rs')" = '3fdca5ed87c8bd5f88c86747d646b5421a148c1c'
           test "$(git hash-object 'attolang-mirror/atto-source.rs/src/newtype_scalar_guest.rs')" = '33a8b2a816499a840dc1575bdba7f9bf73ab64ec'
           test "$(git hash-object 'attolang-mirror/atto-source.rs/src/nominal_contract_admission.rs')" = 'bfca563b360f5b56aebb71a5e0e0a0a9d11b0852'
           test "$(git hash-object 'attolang-mirror/atto-source.rs/src/nominal_lower.rs')" = '6da18fc53cf071540fdee28088085a55b8ab500c'
@@ -97,9 +97,15 @@ jobs:
           test "$(git hash-object 'attolang-mirror/atto-source.rs/tests/newtype-runtime-guest.mjs')" = 'c8180e5aaadf310e670b069c2c616a796f32c091'
           test "$(git hash-object 'attolang-mirror/atto-source.rs/tests/newtype-scalar-guest.mjs')" = '9d36f6a0e86f465f8113def36fee35613d6244e2'
           test "$(git hash-object 'attolang-mirror/atto-source.rs/tests/newtype_const_generic_admission.rs')" = '27e4a7382f0334db9ab6552cf10086a934a71bf5'
-          test "$(git hash-object 'attolang-mirror/atto-source.rs/tests/newtype_runtime_guest.rs')" = '8bf80d2a757a72944d2e108c852f9c478840de93'
+          test "$(git hash-object 'attolang-mirror/atto-source.rs/tests/newtype_runtime_guest.rs')" = '78a0ff1409d05b35cbc3109a029a2b4617e0ab61'
           test "$(git hash-object 'attolang-mirror/atto-source.rs/tests/newtype_scalar_guest.rs')" = '7c326058a1e448e74f10b4ee873e398f24d23074'
-      - name: Build real compiler and test all library and nominal entrypoints
+      - name: Check rustfmt of new nominal runtime module and tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          rustfmt --check attolang-mirror/atto-source.rs/src/newtype_runtime_guest.rs
+          rustfmt --check attolang-mirror/atto-source.rs/tests/newtype_runtime_guest.rs
+      - name: Execute full Rust library suite and all newtype integration tests
         shell: bash
         run: |
           set -euo pipefail
@@ -107,7 +113,7 @@ jobs:
           cargo test --manifest-path attolang-mirror/atto-source.rs/Cargo.toml --locked --offline --test newtype_const_generic_admission -- --nocapture
           cargo test --manifest-path attolang-mirror/atto-source.rs/Cargo.toml --locked --offline --test newtype_scalar_guest -- --nocapture
           cargo test --manifest-path attolang-mirror/atto-source.rs/Cargo.toml --locked --offline --test newtype_runtime_guest -- --nocapture
-      - name: Build attoc and execute static plus runtime checked newtype Wasm
+      - name: Build attoc and execute 13 compiled newtype guests
         shell: bash
         run: |
           set -euo pipefail
@@ -115,19 +121,9 @@ jobs:
           export ATTOC="$PWD/attolang-mirror/atto-source.rs/target/debug/attoc"
           node attolang-mirror/atto-source.rs/tests/newtype-scalar-guest.mjs
           node attolang-mirror/atto-source.rs/tests/newtype-runtime-guest.mjs
-      - name: Strict Clippy full crate including tests
+      - name: Strict Clippy using source CI pinned Rust toolchain 1.85.1
         shell: bash
         run: |
           set -euo pipefail
-          cargo clippy --manifest-path attolang-mirror/atto-source.rs/Cargo.toml --locked --offline --all-targets -- -D warnings
-      - name: Emit rustfmt-only proposal after source-exact tests
-        if: always()
-        shell: bash
-        run: |
-          set -euo pipefail
-          cargo fmt --manifest-path attolang-mirror/atto-source.rs/Cargo.toml --all
-          printf 'FORMATTED_NOMINAL_RUNTIME='
-          base64 -w0 attolang-mirror/atto-source.rs/src/newtype_runtime_guest.rs
-          printf '\nFORMATTED_NOMINAL_TEST='
-          base64 -w0 attolang-mirror/atto-source.rs/tests/newtype_runtime_guest.rs
-          printf '\n'
+          rustup toolchain install 1.85.1 --profile minimal --component clippy
+          cargo +1.85.1 clippy --manifest-path attolang-mirror/atto-source.rs/Cargo.toml --locked --offline --all-targets -- -D warnings
