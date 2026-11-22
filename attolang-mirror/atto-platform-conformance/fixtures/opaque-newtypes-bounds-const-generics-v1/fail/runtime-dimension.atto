@@ -1,0 +1,5 @@
+fnc runtime_dimension(usize n) -> i64 {
+  val Array<i64, n> values = Array.of(1,2,3,4);
+  return 42;
+}
+fnc main() -> i64 { return 42; }

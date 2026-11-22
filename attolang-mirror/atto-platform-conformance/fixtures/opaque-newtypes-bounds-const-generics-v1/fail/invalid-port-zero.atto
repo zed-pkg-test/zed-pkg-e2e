@@ -1,0 +1,7 @@
+define newtype Port(i64)
+  where value gte 1 and value lte 65535;
+end
+fnc main() -> i64 {
+  val Port invalid = Port.from_const(0);
+  return 42;
+}

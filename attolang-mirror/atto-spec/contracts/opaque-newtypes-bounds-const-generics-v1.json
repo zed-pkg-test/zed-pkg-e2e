@@ -1,0 +1,255 @@
+{
+  "schema": "atto.opaque-newtypes-bounds-const-generics.v1",
+  "version": 1,
+  "status": "TARGET_NOT_EXECUTED",
+  "owner": "atto-lang/atto-spec",
+  "evidence_policy": "Host/reference checks and fixture presence never certify guest/backend parity; require exact-head typecheck, emitted guest execution and layout/ABI evidence.",
+  "rules": {
+    "newtype": "fully qualified nominal declaration identity differs from base and every other declaration; no implicit conversion",
+    "construction": "checked try_from returns Result; from_const allowed only on exact statically provable value; no unchecked cast or raw publication",
+    "ranges": "closed signed-i64 intervals with exact-integer validation, no binary64 mediation, contradictions or unsolved where clauses",
+    "dimensions": "typed compile-time usize arguments, checked arithmetic, const-value specialization, profile-governed finite allocation",
+    "representation": "eligible scalar layout equals base size/alignment with no per-value metadata; type identity survives IR and external boundaries",
+    "incompatibility": "different nominal type or evaluated dimensions are not assignable even with the same byte representation"
+  },
+  "reference_profile": {
+    "signed_integer_bits": 64,
+    "usize_bits": 64,
+    "max_elements": "1048576",
+    "note": "Host model budget only, not a universal backend storage guarantee"
+  },
+  "nominal_cases": [
+    {
+      "id": "same-base-distinct-names",
+      "left": "pkg/UserId:i64",
+      "right": "pkg/OrderId:i64",
+      "compatible": false
+    },
+    {
+      "id": "same-name-distinct-modules",
+      "left": "pkgA/UserId:i64",
+      "right": "pkgB/UserId:i64",
+      "compatible": false
+    },
+    {
+      "id": "same-declaration-resolved-import",
+      "left": "pkg/UserId:i64",
+      "right": "pkg/UserId:i64",
+      "compatible": true
+    },
+    {
+      "id": "newtype-versus-raw-base",
+      "left": "pkg/UserId:i64",
+      "right": "i64",
+      "compatible": false
+    }
+  ],
+  "range_cases": [
+    {
+      "id": "port-low",
+      "lower": "1",
+      "upper": "65535",
+      "value": "1",
+      "valid": true
+    },
+    {
+      "id": "port-high",
+      "lower": "1",
+      "upper": "65535",
+      "value": "65535",
+      "valid": true
+    },
+    {
+      "id": "port-zero",
+      "lower": "1",
+      "upper": "65535",
+      "value": "0",
+      "valid": false
+    },
+    {
+      "id": "port-too-large",
+      "lower": "1",
+      "upper": "65535",
+      "value": "65536",
+      "valid": false
+    },
+    {
+      "id": "i64-low",
+      "lower": "-9223372036854775808",
+      "upper": "9223372036854775807",
+      "value": "-9223372036854775808",
+      "valid": true
+    },
+    {
+      "id": "i64-high",
+      "lower": "-9223372036854775808",
+      "upper": "9223372036854775807",
+      "value": "9223372036854775807",
+      "valid": true
+    },
+    {
+      "id": "i64-overflow",
+      "lower": "-9223372036854775808",
+      "upper": "9223372036854775807",
+      "value": "9223372036854775808",
+      "valid": false
+    },
+    {
+      "id": "i64-underflow",
+      "lower": "-9223372036854775808",
+      "upper": "9223372036854775807",
+      "value": "-9223372036854775809",
+      "valid": false
+    },
+    {
+      "id": "excluded-hole",
+      "lower": "1",
+      "upper": "5",
+      "excluded": [
+        "3"
+      ],
+      "value": "3",
+      "valid": false
+    },
+    {
+      "id": "excluded-neighbor",
+      "lower": "1",
+      "upper": "5",
+      "excluded": [
+        "3"
+      ],
+      "value": "4",
+      "valid": true
+    }
+  ],
+  "invalid_interval_cases": [
+    {
+      "id": "inverted",
+      "lower": "6",
+      "upper": "5",
+      "error": "E_RANGE_INVALID"
+    },
+    {
+      "id": "empty-after-hole",
+      "lower": "1",
+      "upper": "1",
+      "excluded": [
+        "1"
+      ],
+      "error": "E_RANGE_INVALID"
+    },
+    {
+      "id": "out-of-i64-bounds",
+      "lower": "1",
+      "upper": "9223372036854775808",
+      "error": "E_RANGE_INVALID"
+    }
+  ],
+  "dimension_cases": [
+    {
+      "id": "4-by-4",
+      "row": "4",
+      "column": "4",
+      "elements": "16"
+    },
+    {
+      "id": "2-by-8",
+      "row": "2",
+      "column": "8",
+      "elements": "16"
+    },
+    {
+      "id": "zero-row",
+      "row": "0",
+      "column": "4",
+      "elements": "0"
+    },
+    {
+      "id": "one-million",
+      "row": "1024",
+      "column": "1024",
+      "elements": "1048576"
+    },
+    {
+      "id": "negative-row",
+      "row": "-1",
+      "column": "4",
+      "error": "E_CONST_GENERIC_ARG"
+    },
+    {
+      "id": "usize-overflow",
+      "row": "18446744073709551615",
+      "column": "2",
+      "error": "E_CONST_OVERFLOW"
+    },
+    {
+      "id": "budget-overflow",
+      "row": "1025",
+      "column": "1024",
+      "error": "E_CONST_LAYOUT_BUDGET"
+    },
+    {
+      "id": "runtime-value",
+      "row": "runtime_n",
+      "column": "4",
+      "error": "E_CONST_GENERIC_ARG"
+    }
+  ],
+  "shape_cases": [
+    {
+      "id": "equal-shape",
+      "left": [
+        "f32",
+        "4",
+        "4"
+      ],
+      "right": [
+        "f32",
+        "4",
+        "4"
+      ],
+      "compatible": true
+    },
+    {
+      "id": "different-shape-equal-storage",
+      "left": [
+        "f32",
+        "4",
+        "4"
+      ],
+      "right": [
+        "f32",
+        "2",
+        "8"
+      ],
+      "compatible": false
+    },
+    {
+      "id": "different-element-type",
+      "left": [
+        "f32",
+        "4",
+        "4"
+      ],
+      "right": [
+        "i32",
+        "4",
+        "4"
+      ],
+      "compatible": false
+    }
+  ],
+  "backend_status": {
+    "java": "NOT_VERIFIED",
+    "llvm": "NOT_VERIFIED",
+    "net": "NOT_VERIFIED",
+    "wasm": "NOT_VERIFIED",
+    "forge": "NOT_VERIFIED",
+    "rs": "NOT_VERIFIED",
+    "js": "NOT_VERIFIED",
+    "cranelift": "NOT_VERIFIED",
+    "hdl": "NOT_VERIFIED",
+    "realtime": "NOT_VERIFIED",
+    "atto": "NOT_VERIFIED"
+  }
+}

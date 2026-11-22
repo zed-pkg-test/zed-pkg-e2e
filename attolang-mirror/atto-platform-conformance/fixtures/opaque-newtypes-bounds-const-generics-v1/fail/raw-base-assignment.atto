@@ -1,0 +1,5 @@
+define newtype UserId(i64);
+fnc main() -> i64 {
+  val UserId id = 7;
+  return 42;
+}

@@ -1,0 +1,12 @@
+define newtype Port(i64)
+  where value gte 1 and value lte 65535;
+end
+fnc check_port(i64 raw) -> Result<Port, RangeError> {
+  return Port.try_from(raw);
+}
+fnc main() -> i64 {
+  return match check_port(65536) over
+    on Err(_) -> 42,
+    on Ok(_) -> 0,
+  end;
+}

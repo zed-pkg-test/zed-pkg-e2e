@@ -1,0 +1,4 @@
+define struct Oversized as
+  data: Array<i64, 18446744073709551615 * 2>;
+end
+fnc main() -> i64 { return 42; }

@@ -1,0 +1,105 @@
+{
+  "schema": "atto.opaque-newtypes-bounds-const-generics.v1",
+  "version": 1,
+  "status": "TARGET_NOT_EXECUTED",
+  "specification": "atto-lang/atto-spec/language/opaque-newtypes-bounds-const-generics-v1.md",
+  "spec_contract": "atto-lang/atto-spec/contracts/opaque-newtypes-bounds-const-generics-v1.json",
+  "notes": "Each case is a target AttoLang source program. No fixture is admitted as a passed compiler/guest case until exact-head evidence exists. Pass cases require actual target guest execution; fail cases require a compiler diagnostic with no guest artifact.",
+  "cases": [
+    {
+      "id": "nominal-user-id",
+      "path": "fixtures/opaque-newtypes-bounds-const-generics-v1/pass/nominal-user-id.atto",
+      "kind": "PASS",
+      "expected_exit": 42,
+      "verification": "NOT_EXECUTED"
+    },
+    {
+      "id": "closed-port-boundaries",
+      "path": "fixtures/opaque-newtypes-bounds-const-generics-v1/pass/closed-port-boundaries.atto",
+      "kind": "PASS",
+      "expected_exit": 42,
+      "verification": "NOT_EXECUTED"
+    },
+    {
+      "id": "matrix-const-shape",
+      "path": "fixtures/opaque-newtypes-bounds-const-generics-v1/pass/matrix-const-shape.atto",
+      "kind": "PASS",
+      "expected_exit": 42,
+      "verification": "NOT_EXECUTED"
+    },
+    {
+      "id": "dynamic-port-try-from",
+      "path": "fixtures/opaque-newtypes-bounds-const-generics-v1/pass/dynamic-port-try-from.atto",
+      "kind": "PASS",
+      "expected_exit": 42,
+      "verification": "NOT_EXECUTED"
+    },
+    {
+      "id": "nominal-mix",
+      "path": "fixtures/opaque-newtypes-bounds-const-generics-v1/fail/nominal-mix.atto",
+      "kind": "REJECT",
+      "expected_error": "E_NEWTYPE_MISMATCH",
+      "verification": "NOT_EXECUTED"
+    },
+    {
+      "id": "raw-base-assignment",
+      "path": "fixtures/opaque-newtypes-bounds-const-generics-v1/fail/raw-base-assignment.atto",
+      "kind": "REJECT",
+      "expected_error": "E_NEWTYPE_CONSTRUCTION",
+      "verification": "NOT_EXECUTED"
+    },
+    {
+      "id": "invalid-port-zero",
+      "path": "fixtures/opaque-newtypes-bounds-const-generics-v1/fail/invalid-port-zero.atto",
+      "kind": "REJECT",
+      "expected_error": "E_RANGE_INVALID",
+      "verification": "NOT_EXECUTED"
+    },
+    {
+      "id": "empty-range",
+      "path": "fixtures/opaque-newtypes-bounds-const-generics-v1/fail/empty-range.atto",
+      "kind": "REJECT",
+      "expected_error": "E_RANGE_INVALID",
+      "verification": "NOT_EXECUTED"
+    },
+    {
+      "id": "unproven-predicate",
+      "path": "fixtures/opaque-newtypes-bounds-const-generics-v1/fail/unproven-predicate.atto",
+      "kind": "REJECT",
+      "expected_error": "E_RANGE_UNPROVEN",
+      "verification": "NOT_EXECUTED"
+    },
+    {
+      "id": "shape-mismatch",
+      "path": "fixtures/opaque-newtypes-bounds-const-generics-v1/fail/shape-mismatch.atto",
+      "kind": "REJECT",
+      "expected_error": "E_CONST_SHAPE_MISMATCH",
+      "verification": "NOT_EXECUTED"
+    },
+    {
+      "id": "runtime-dimension",
+      "path": "fixtures/opaque-newtypes-bounds-const-generics-v1/fail/runtime-dimension.atto",
+      "kind": "REJECT",
+      "expected_error": "E_CONST_GENERIC_ARG",
+      "verification": "NOT_EXECUTED"
+    },
+    {
+      "id": "dimension-overflow",
+      "path": "fixtures/opaque-newtypes-bounds-const-generics-v1/fail/dimension-overflow.atto",
+      "kind": "REJECT",
+      "expected_error": "E_CONST_OVERFLOW",
+      "verification": "NOT_EXECUTED"
+    }
+  ],
+  "backend_status": {
+    "java": "NOT_VERIFIED",
+    "llvm": "NOT_VERIFIED",
+    "net": "NOT_VERIFIED",
+    "wasm": "NOT_VERIFIED",
+    "forge": "NOT_VERIFIED",
+    "rs": "NOT_VERIFIED",
+    "js": "NOT_VERIFIED",
+    "cranelift": "NOT_VERIFIED",
+    "hdl": "NOT_VERIFIED"
+  }
+}
