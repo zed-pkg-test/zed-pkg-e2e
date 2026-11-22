@@ -127,7 +127,7 @@ fn unsafe_nominal_constructors_reject_without_a_guest_artifact() {
 }
 
 #[test]
-fn proof_is_bounded_and explicit_source_is_validated_before_emission() {
+fn proof_is_bounded_and_explicit_source_is_validated_before_emission() {
     let many = format!("{} pub fnc main(): int {{ return 42; }}",
         (0..70).map(|i| format!("define newtype T{i}(i64);")).collect::<Vec<_>>().join("\n"));
     expect_diagnostic(&many, "E_SOURCE_LIMIT");

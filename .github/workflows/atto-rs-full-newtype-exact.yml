@@ -91,7 +91,7 @@ jobs:
           test "$(git hash-object 'attolang-mirror/atto-source.rs/src/visibility_lower.rs')" = '19c67504b0e1b71d72ecb2626bb2670410eee509'
           test "$(git hash-object 'attolang-mirror/atto-source.rs/src/wasm.rs')" = 'be756f19707f62a0b4830417fef2f4b2ad82147d'
           test "$(git hash-object 'attolang-mirror/atto-source.rs/src/wasm/generator_runtime.rs')" = 'a66e48d8a46cdf6eb18aaae2f3942b82bc4165d1'
-          test "$(git hash-object 'attolang-mirror/atto-source.rs/tests/newtype_const_generic_admission.rs')" = 'a13cab649c01e4e4c0adfbe11355c21376ffd43b'
+          test "$(git hash-object 'attolang-mirror/atto-source.rs/tests/newtype_const_generic_admission.rs')" = '0e53a4ec9222c5334f4236046387b9029b3a3929'
       - name: Compile real browser compiler and execute 8 integration tests
         shell: bash
         run: |
