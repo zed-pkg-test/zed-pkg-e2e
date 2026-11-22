@@ -101,7 +101,7 @@ jobs:
           set -euo pipefail
           cargo test --manifest-path attolang-mirror/atto-source.rs/Cargo.toml --locked --offline --test newtype_const_generic_admission -- --nocapture
           cargo test --manifest-path attolang-mirror/atto-source.rs/Cargo.toml --locked --offline --test newtype_scalar_guest -- --nocapture
-          cargo test --manifest-path attolang-mirror/atto-source.rs/Cargo.toml --locked --offline --lib newtype_const_generic_admission -- --nocapture
+          cargo test --manifest-path attolang-mirror/atto-source.rs/Cargo.toml --locked --offline --lib -- --nocapture
       - name: Build native attoc and execute genuine guest Wasm regression
         shell: bash
         run: |
