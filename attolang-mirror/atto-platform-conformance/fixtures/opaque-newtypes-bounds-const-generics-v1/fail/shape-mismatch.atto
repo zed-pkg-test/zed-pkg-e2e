@@ -1,0 +1,8 @@
+define struct Matrix<T, const usize R, const usize C> as
+  data: Array<T, R * C>;
+end
+fnc accepts_4x4(Matrix<i64, 4, 4> value) -> void { }
+fnc mismatch(Matrix<i64, 2, 8> value) -> void {
+  accepts_4x4(value);
+}
+fnc main() -> i64 { return 42; }

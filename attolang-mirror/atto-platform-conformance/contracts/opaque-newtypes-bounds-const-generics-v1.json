@@ -1,0 +1,188 @@
+{
+  "schema": "atto.opaque-newtypes-bounds-const-generics.v1",
+  "version": 1,
+  "status": "TARGET_NOT_EXECUTED",
+  "specification": "atto-lang/atto-spec/language/opaque-newtypes-bounds-const-generics-v1.md",
+  "spec_contract": "atto-lang/atto-spec/contracts/opaque-newtypes-bounds-const-generics-v1.json",
+  "notes": "Each case is a target AttoLang source program. No fixture is admitted as a passed compiler/guest case until exact-head evidence exists. Pass cases require actual target guest execution; fail cases require a compiler diagnostic with no guest artifact.",
+  "cases": [
+    {
+      "id": "nominal-user-id",
+      "path": "fixtures/opaque-newtypes-bounds-const-generics-v1/pass/nominal-user-id.atto",
+      "kind": "PASS",
+      "expected_exit": 42,
+      "verification": "NOT_EXECUTED"
+    },
+    {
+      "id": "closed-port-boundaries",
+      "path": "fixtures/opaque-newtypes-bounds-const-generics-v1/pass/closed-port-boundaries.atto",
+      "kind": "PASS",
+      "expected_exit": 42,
+      "verification": "NOT_EXECUTED"
+    },
+    {
+      "id": "matrix-const-shape",
+      "path": "fixtures/opaque-newtypes-bounds-const-generics-v1/pass/matrix-const-shape.atto",
+      "kind": "PASS",
+      "expected_exit": 42,
+      "verification": "NOT_EXECUTED"
+    },
+    {
+      "id": "dynamic-port-try-from",
+      "path": "fixtures/opaque-newtypes-bounds-const-generics-v1/pass/dynamic-port-try-from.atto",
+      "kind": "PASS",
+      "expected_exit": 42,
+      "verification": "NOT_EXECUTED"
+    },
+    {
+      "id": "nominal-mix",
+      "path": "fixtures/opaque-newtypes-bounds-const-generics-v1/fail/nominal-mix.atto",
+      "kind": "REJECT",
+      "expected_error": "E_NEWTYPE_MISMATCH",
+      "verification": "NOT_EXECUTED"
+    },
+    {
+      "id": "raw-base-assignment",
+      "path": "fixtures/opaque-newtypes-bounds-const-generics-v1/fail/raw-base-assignment.atto",
+      "kind": "REJECT",
+      "expected_error": "E_NEWTYPE_CONSTRUCTION",
+      "verification": "NOT_EXECUTED"
+    },
+    {
+      "id": "invalid-port-zero",
+      "path": "fixtures/opaque-newtypes-bounds-const-generics-v1/fail/invalid-port-zero.atto",
+      "kind": "REJECT",
+      "expected_error": "E_RANGE_INVALID",
+      "verification": "NOT_EXECUTED"
+    },
+    {
+      "id": "empty-range",
+      "path": "fixtures/opaque-newtypes-bounds-const-generics-v1/fail/empty-range.atto",
+      "kind": "REJECT",
+      "expected_error": "E_RANGE_INVALID",
+      "verification": "NOT_EXECUTED"
+    },
+    {
+      "id": "unproven-predicate",
+      "path": "fixtures/opaque-newtypes-bounds-const-generics-v1/fail/unproven-predicate.atto",
+      "kind": "REJECT",
+      "expected_error": "E_RANGE_UNPROVEN",
+      "verification": "NOT_EXECUTED"
+    },
+    {
+      "id": "shape-mismatch",
+      "path": "fixtures/opaque-newtypes-bounds-const-generics-v1/fail/shape-mismatch.atto",
+      "kind": "REJECT",
+      "expected_error": "E_CONST_SHAPE_MISMATCH",
+      "verification": "NOT_EXECUTED"
+    },
+    {
+      "id": "runtime-dimension",
+      "path": "fixtures/opaque-newtypes-bounds-const-generics-v1/fail/runtime-dimension.atto",
+      "kind": "REJECT",
+      "expected_error": "E_CONST_GENERIC_ARG",
+      "verification": "NOT_EXECUTED"
+    },
+    {
+      "id": "dimension-overflow",
+      "path": "fixtures/opaque-newtypes-bounds-const-generics-v1/fail/dimension-overflow.atto",
+      "kind": "REJECT",
+      "expected_error": "E_CONST_OVERFLOW",
+      "verification": "NOT_EXECUTED"
+    }
+  ],
+  "backend_status": {
+    "java": "NOT_VERIFIED",
+    "llvm": "NOT_VERIFIED",
+    "net": "NOT_VERIFIED",
+    "wasm": "NOT_VERIFIED",
+    "forge": "NOT_VERIFIED",
+    "rs": "NOT_VERIFIED",
+    "js": "NOT_VERIFIED",
+    "cranelift": "NOT_VERIFIED",
+    "hdl": "NOT_VERIFIED"
+  },
+  "verified_subprofiles": [
+    {
+      "id": "rust-browser-private-i64-static-newtype-v0",
+      "status": "FOCUSED_EXECUTED",
+      "source_repo": "atto-lang/atto-source.rs",
+      "source_head": "ffcb86945c380b8e177408b1fc196c14b55df3bc",
+      "source_files_exact_sha_verified": 78,
+      "carrier_repo": "zed-pkg-test/zed-pkg-e2e",
+      "carrier_run_id": 44970145702,
+      "carrier_workflow_url": "https://github.com/zed-pkg-test/zed-pkg-e2e/actions/runs/44970145702",
+      "executed": {
+        "preflight_integration_passed": 8,
+        "newtype_guest_integration_passed": 5,
+        "module_unit_passed": 66,
+        "compiled_wasm_guest_passed": 3,
+        "compiler_negative_no_artifact_passed": 3,
+        "guest_imports": 0,
+        "guest_heap_allocation": false,
+        "total_rust_tests_passed": 79
+      },
+      "admitted": [
+        "private single-source signed-i64 nominal newtypes",
+        "checked compile-time from_const literals",
+        "immutable locals",
+        "typed source-local helper parameters/returns",
+        "explicit same-module to_base extraction"
+      ],
+      "excluded": [
+        "dynamic try_from and Result construction",
+        "public nominal ABI",
+        "modules/imports",
+        "actor/FFI/wire/serialization/hot reload",
+        "mutable newtypes",
+        "Array and Matrix const-generic physical storage"
+      ],
+      "note": "This receipt is for the Rust source-repo tests, not proof that every distinct fixture in this registry has executed or that full v1 backend parity is achieved.",
+      "compatibility_regression": "existing named Array layout=soa/aos/aosoa arguments and E_GENERIC_ORDER precedence remain unchanged; complete Rust library suite passed",
+      "source_ci_workflow": ".github/workflows/ci.yml (adds compiled newtype guest execution; source-org zero-step jobs are not evidence)"
+    },
+    {
+      "id": "rust-browser-private-i64-runtime-result-v0",
+      "status": "FOCUSED_EXECUTED",
+      "source_repo": "atto-lang/atto-source.rs",
+      "source_head": "ab108dc996f5a781e3ddb24923c0fecf01efb89a",
+      "carrier_repo": "zed-pkg-test/zed-pkg-e2e",
+      "carrier_run_id": 44973367883,
+      "carrier_workflow_url": "https://github.com/zed-pkg-test/zed-pkg-e2e/actions/runs/44973367883",
+      "source_files_exact_sha_verified": 81,
+      "executed": {
+        "full_library_unit_passed": 66,
+        "nominal_admission_integration_passed": 8,
+        "static_newtype_integration_passed": 5,
+        "runtime_newtype_integration_passed": 11,
+        "total_rust_tests_passed": 90,
+        "compiled_static_wasm_guests_passed": 3,
+        "compiled_runtime_wasm_guests_passed": 10,
+        "compiler_negative_no_artifact_passed": 7,
+        "native_wasm_guest_imports": 0,
+        "wasm_guest_panic_code": 0,
+        "rustfmt_new_files": "PASS",
+        "clippy_pinned_rust_1_85_1": "PASS"
+      },
+      "admission_scope": [
+        "private source-local i64 nominal newtypes",
+        "source-local Result<Newtype,RangeError> type identity checked before scalar lowering",
+        "signed runtime bounds checking inside actual Wasm",
+        "recoverable Err for out-of-range i64",
+        "exhaustive statement-form Ok/Err match with explicit Ok to_base",
+        "direct try_from and one-argument private checked helper functions",
+        "static high/low endpoint and full signed-i64 unbounded domain"
+      ],
+      "representation_limitations": [
+        "private Result<Newtype,RangeError> uses existing internal Result<int,string> tagged ADT representation",
+        "RangeError is represented internally as an inaccessible marker, not an Error-subclass instance",
+        "Result record uses existing guest allocation; scalar newtype payload remains i64",
+        "public or cross-module Result ABI, FFI, actor messaging and serialization not supported"
+      ],
+      "backend_parity": "NOT_VERIFIED",
+      "complete_v1_status": "TARGET_ONLY",
+      "source_ci_zero_step_run_id": 44973351794,
+      "notes": "Full shared fixture set and other compiler backends remain NOT_VERIFIED; this record describes only the source-local executed subset and must not promote full v1."
+    }
+  ]
+}

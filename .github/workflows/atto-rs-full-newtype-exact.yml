@@ -14,7 +14,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           persist-credentials: false
-      - name: Verify 81 exact source Git blob SHAs
+      - name: Verify 95 exact source plus conformance Git blob SHAs
         shell: bash
         run: |
           set -euo pipefail
@@ -99,6 +99,20 @@ jobs:
           test "$(git hash-object 'attolang-mirror/atto-source.rs/tests/newtype_const_generic_admission.rs')" = '27e4a7382f0334db9ab6552cf10086a934a71bf5'
           test "$(git hash-object 'attolang-mirror/atto-source.rs/tests/newtype_runtime_guest.rs')" = '78a0ff1409d05b35cbc3109a029a2b4617e0ab61'
           test "$(git hash-object 'attolang-mirror/atto-source.rs/tests/newtype_scalar_guest.rs')" = '7c326058a1e448e74f10b4ee873e398f24d23074'
+          test "$(git hash-object 'attolang-mirror/atto-platform-conformance/contracts/opaque-newtypes-bounds-const-generics-v1.json')" = '83104f13aef91c634bb93826bc5d95506ae49083'
+          test "$(git hash-object 'attolang-mirror/atto-platform-conformance/fixtures/opaque-newtypes-bounds-const-generics-v1/fail/dimension-overflow.atto')" = 'dc3434cb7b4dc4311903315f5bb841986b74c2aa'
+          test "$(git hash-object 'attolang-mirror/atto-platform-conformance/fixtures/opaque-newtypes-bounds-const-generics-v1/fail/empty-range.atto')" = 'dd08da49aebca08ef14d44a890301ca3a6bac829'
+          test "$(git hash-object 'attolang-mirror/atto-platform-conformance/fixtures/opaque-newtypes-bounds-const-generics-v1/fail/invalid-port-zero.atto')" = '494197a2cd5a67b5dc3d32ec94631c52edaeb6d1'
+          test "$(git hash-object 'attolang-mirror/atto-platform-conformance/fixtures/opaque-newtypes-bounds-const-generics-v1/fail/nominal-mix.atto')" = 'e83bf4a108681e2736b4ad3f3267e2890f808dd2'
+          test "$(git hash-object 'attolang-mirror/atto-platform-conformance/fixtures/opaque-newtypes-bounds-const-generics-v1/fail/raw-base-assignment.atto')" = 'd13ffc2f5443737fb51780738e8a153545b6b96b'
+          test "$(git hash-object 'attolang-mirror/atto-platform-conformance/fixtures/opaque-newtypes-bounds-const-generics-v1/fail/runtime-dimension.atto')" = '6d515ad0bef8f424b4d86807cac496a85863b9a5'
+          test "$(git hash-object 'attolang-mirror/atto-platform-conformance/fixtures/opaque-newtypes-bounds-const-generics-v1/fail/shape-mismatch.atto')" = '0f734d38b7af61c789d5f36c886a13abd36cb122'
+          test "$(git hash-object 'attolang-mirror/atto-platform-conformance/fixtures/opaque-newtypes-bounds-const-generics-v1/fail/unproven-predicate.atto')" = '83602e1a242154cbdd8837ed49c6b4e4a4ce13d9'
+          test "$(git hash-object 'attolang-mirror/atto-platform-conformance/fixtures/opaque-newtypes-bounds-const-generics-v1/pass/closed-port-boundaries.atto')" = '7b6ea598fc051fb7e008ae5269d9b21ba58203fd'
+          test "$(git hash-object 'attolang-mirror/atto-platform-conformance/fixtures/opaque-newtypes-bounds-const-generics-v1/pass/dynamic-port-try-from.atto')" = '83c118659d1b498f6d33119439587d95f074e2fc'
+          test "$(git hash-object 'attolang-mirror/atto-platform-conformance/fixtures/opaque-newtypes-bounds-const-generics-v1/pass/matrix-const-shape.atto')" = '46d24f8a08fe02f350cfe7418ea422532b89c205'
+          test "$(git hash-object 'attolang-mirror/atto-platform-conformance/fixtures/opaque-newtypes-bounds-const-generics-v1/pass/nominal-user-id.atto')" = '14b9aad4bd9bfba8b1f6a77f7f03fe3b5c0896cc'
+          test "$(git hash-object 'attolang-mirror/atto-platform-conformance/test/opaque-newtypes-bounds-const-generics.test.mjs')" = '125e0f6d19d919ff62175e70c497a9ae4f995354'
       - name: Check rustfmt of new nominal runtime module and tests
         shell: bash
         run: |
@@ -127,3 +141,8 @@ jobs:
           set -euo pipefail
           rustup toolchain install 1.85.1 --profile minimal --component clippy
           cargo +1.85.1 clippy --manifest-path attolang-mirror/atto-source.rs/Cargo.toml --locked --offline --all-targets -- -D warnings
+      - name: Host-only shared newtype conformance registry schema and fixture audit
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --test attolang-mirror/atto-platform-conformance/test/opaque-newtypes-bounds-const-generics.test.mjs

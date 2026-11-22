@@ -1,0 +1,7 @@
+define newtype UserId(i64);
+define newtype OrderId(i64);
+fnc accept_user(UserId id) -> i64 { return 42; }
+fnc main() -> i64 {
+  val UserId id = UserId.from_const(7);
+  return accept_user(id);
+}

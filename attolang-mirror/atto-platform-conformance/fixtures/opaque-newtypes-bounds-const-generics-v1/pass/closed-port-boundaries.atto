@@ -1,0 +1,8 @@
+define newtype Port(i64)
+  where value gte 1 and value lte 65535;
+end
+fnc main() -> i64 {
+  val Port low = Port.from_const(1);
+  val Port high = Port.from_const(65535);
+  return 42;
+}

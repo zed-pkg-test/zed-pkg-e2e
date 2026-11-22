@@ -1,0 +1,4 @@
+define newtype Broken(i64)
+  where value gte 10 and value lte 9;
+end
+fnc main() -> i64 { return 42; }

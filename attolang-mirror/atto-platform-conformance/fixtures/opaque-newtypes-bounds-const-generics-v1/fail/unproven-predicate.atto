@@ -1,0 +1,4 @@
+define newtype Prime(i64)
+  where is_prime(value);
+end
+fnc main() -> i64 { return 42; }
