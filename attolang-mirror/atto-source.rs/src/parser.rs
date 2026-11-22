@@ -454,6 +454,20 @@ impl Parser {
         ) || self.word_at(n).is_some_and(|w| UNSUPPORTED_TYPES.contains(&w) || UNLOWERED_OWNERSHIP_TYPES.contains(&w))
     }
 
+    /// Parser-internal identity for generic argument interning. Type::Named
+    /// indexes SOURCE OCCURRENCES, not distinct nominal declarations; two
+    /// occurrences with the same spelling in this module are one type name.
+    /// Final module-qualified identity is still checked independently.
+    fn same_generic_arg(&self, a: Type, b: Type) -> bool {
+        match (a, b) {
+            (Type::Named(i), Type::Named(j)) => {
+                self.type_names.get(i as usize).map(|x| &x.0)
+                    == self.type_names.get(j as usize).map(|x| &x.0)
+            }
+            _ => a == b,
+        }
+    }
+
     fn parse_type(&mut self) -> R<Type> {
         let pos = self.pos();
         let name = match self.peek() {
@@ -555,7 +569,8 @@ impl Parser {
                 } else {
                     // Intern full generic arguments in the PRODUCTION AST.
                     // Checking and ABI admission remain separate phases.
-                    let at = self.generic_results.iter().position(|r| r.ok == good && r.err == bad);
+                    let at = self.generic_results.iter().position(|r|
+                        self.same_generic_arg(r.ok, good) && self.same_generic_arg(r.err, bad));
                     let id = match at {
                         Some(i) => i as u32,
                         None => {
