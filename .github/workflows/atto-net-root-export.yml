@@ -1,0 +1,81 @@
+name: Atto NET root export exact NativeAOT
+on:
+  push:
+    branches: [ci/atto-net-root-export-20261126]
+permissions: {}
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - backend: net
+            head: '86f0f07f3e3f8c7afcbd5c3eba9b07792053d9d2'
+            tree: 'daf1e6410978a239c6d776be665ff0caa3d7caa0'
+    env:
+      BACKEND: ${{ matrix.backend }}
+      SOURCE_HEAD: ${{ matrix.head }}
+      SOURCE_TREE: ${{ matrix.tree }}
+    steps:
+      - name: Bind exact public source
+        run: |
+          set -euo pipefail
+          git init "$RUNNER_TEMP/source"
+          cd "$RUNNER_TEMP/source"
+          git -c credential.helper= fetch --no-tags --depth=1 "https://github.com/atto-lang/atto-source.${BACKEND}.git" "$SOURCE_HEAD"
+          git checkout --detach FETCH_HEAD
+          test "$(git rev-parse HEAD)" = "$SOURCE_HEAD"
+          test "$(git rev-parse HEAD^{tree})" = "$SOURCE_TREE"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: actions/setup-dotnet@v4
+        if: matrix.backend == 'net'
+        with:
+          dotnet-version: '10.0.x'
+      - name: JS guard regression and complete tests
+        if: matrix.backend == 'js'
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP/source"
+          node --test tests/guard-condition-list-adversarial.test.mjs
+          npm test
+      - name: Wasm visibility profile and complete tests
+        if: matrix.backend == 'wasm'
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP/source"
+          node --test tests/visibility-profile-entry.test.mjs
+          npm test
+      - name: NET compiler CLI and native guest
+        if: matrix.backend == 'net'
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP/source"
+          dotnet --version
+          node --test tests/declarative-export-native.test.mjs tests/declarative-export-trailing-boundary.test.mjs
+          bash scripts/publish-linux.sh tests/fixtures/declarative-exports/export-duplicate.atto artifacts/atto-export
+          compiler=artifacts/compiler/linux-x64/oresnet
+          guest=artifacts/atto-export/linux-x64/oreslang-app
+          test -x "$compiler"
+          test -x "$guest"
+          test "$("$guest")" = 42
+          mkdir -p artifacts/atto-export/negative
+          out=artifacts/atto-export/negative/denied.dll
+          set +e
+          "$compiler" compile tests/fixtures/declarative-exports/export-pkg-main-unsupported.atto --out "$out" > artifacts/atto-export/negative/stdout 2> artifacts/atto-export/negative/stderr
+          rc=$?
+          set -e
+          test "$rc" -gt 0
+          test "$rc" -lt 126
+          test ! -e "$out"
+          grep -F EXPORT_PACKAGE_LINKER_UNSUPPORTED artifacts/atto-export/negative/stderr
+      - name: Tracked source unchanged
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP/source"
+          test "$(git rev-parse HEAD^{tree})" = "$SOURCE_TREE"
+          git diff --exit-code
+          git diff --cached --exit-code
