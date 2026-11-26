@@ -1,0 +1,73 @@
+name: Atto Java actual memory and generic collection guests
+on:
+  push:
+    branches: ['ci/atto-java-memory-vec-20261126']
+permissions: {}
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - head: 9bc8cbc097ed9120476bea4385ac2079456997b6
+            tree: 3a18a34c911516cac1c505a981dbe60efd8a36b9
+            profile: vec
+          - head: 9884cc1180dd3317923612a8592e46d630cf354c
+            tree: f5df4ec0db99b44f1568875f1a7cb10c2e036183
+            profile: memory
+    steps:
+      - name: Bind exact public source
+        env:
+          SOURCE_HEAD: ${{ matrix.head }}
+          SOURCE_TREE: ${{ matrix.tree }}
+          GIT_TERMINAL_PROMPT: '0'
+        run: |
+          set -euo pipefail
+          git init source
+          cd source
+          git -c credential.helper= -c http.extraheader= fetch --no-tags --depth=1 https://github.com/atto-lang/atto-source.java.git "$SOURCE_HEAD"
+          git checkout --detach FETCH_HEAD
+          test "$(git rev-parse HEAD)" = "$SOURCE_HEAD"
+          test "$(git rev-parse HEAD^{tree})" = "$SOURCE_TREE"
+      - name: Source-only Vec controls
+        if: matrix.profile == 'vec'
+        working-directory: source
+        run: node --test tests/alloc-collections-source-contract.test.mjs
+      - name: Original memory vector inventory
+        if: matrix.profile == 'memory'
+        working-directory: source
+        run: node --test tests/core-memory-policy-source.test.mjs tests/core-types-source.test.mjs tests/core-types-matrix-source.test.mjs
+      - uses: actions/setup-java@dded0888837ed1f317902acf8a20df0ad188d165
+        with:
+          distribution: graalvm
+          java-version: '25'
+      - name: Execute unchanged generic collection guest
+        if: matrix.profile == 'vec'
+        working-directory: source
+        run: |
+          set -euo pipefail
+          mvn -B -ntp -Dtest=AttoAllocGenericSourceGuestTest -DfailIfNoTests=true test
+          python3 - <<'PY'
+          import xml.etree.ElementTree as E
+          root=E.parse('target/surefire-reports/TEST-dev.oreslang.AttoAllocGenericSourceGuestTest.xml').getroot()
+          assert int(root.attrib['tests']) == 1
+          assert all(int(root.attrib.get(k,'0')) == 0 for k in ('failures','errors','skipped'))
+          PY
+      - name: Execute all 63 linked memory boundary vectors and regressions
+        if: matrix.profile == 'memory'
+        working-directory: source
+        run: |
+          set -euo pipefail
+          mvn -B -ntp -Dtest=CoreMemoryPolicyGuestTest -DfailIfNoTests=true test
+          python3 - <<'PY'
+          import xml.etree.ElementTree as E
+          root=E.parse('target/surefire-reports/TEST-dev.oreslang.CoreMemoryPolicyGuestTest.xml').getroot()
+          assert any(c.attrib.get('name')=='allOriginalMemoryPolicyVectorsExecuteAsLinkedAttoGuests' for c in root.findall('testcase'))
+          assert all(int(root.attrib.get(k,'0')) == 0 for k in ('failures','errors','skipped'))
+          print(root.attrib)
+          PY
+      - name: Tracked source unchanged
+        working-directory: source
+        run: git diff --exit-code HEAD
