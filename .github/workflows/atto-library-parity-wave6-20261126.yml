@@ -1,0 +1,126 @@
+name: Atto 11 compiler library source audit and Java integration
+on:
+  push:
+    branches: ['ci/atto-library-parity-wave6-20261126']
+permissions: {}
+jobs:
+  audit:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - repo: atto-source.java
+            head: 07389fc5ef183ef2c3ed5d91fac2a0e4bbedcfeb
+            tree: 8839458abe7772f8aa107f03856334b427ba40c7
+            profile: source
+          - repo: atto-source.llvm
+            head: 4a75d3760071f686003766d3624b909eb8eb3251
+            tree: ddb967005590bd79758227f61e58c47451112242
+            profile: source
+          - repo: atto-source.net
+            head: 44380154c460fd133b78211009c2595ce062dd34
+            tree: 1c045a30078b0b6e85ffaaeae5b5d268d20bf01f
+            profile: source
+          - repo: atto-source.forge
+            head: 93e92742468a325e4e8dcdf0a5a5b4984f4e7ff6
+            tree: 37dddfd5b07c46ba3ef769bfc6d54dc9fdb1dc38
+            profile: source
+          - repo: atto-source.rs
+            head: 7a2e4e4d55f1ffeb155a6c1988454d9efaeee497
+            tree: c401d020cf128cf26774e442ff574701211a2259
+            profile: source
+          - repo: atto-source.wasm
+            head: b385d85b9b57a8774e9daeef02764705b6a1b8a4
+            tree: 4d674623781ef2b45f0805f045f1aae6e341748d
+            profile: source
+          - repo: atto-source.js
+            head: 43b3c3f422f25ec5707c06c1de645d32e4d0dc37
+            tree: 3f3760cd875898dfc77023f92dd94e8dad93ab20
+            profile: source
+          - repo: atto-source.cranelift
+            head: e066eb945a4fa28badcb14a264f1ebd9077d1575
+            tree: c9a41a6760e1717334da22a66c6485c426e8f296
+            profile: source
+          - repo: atto-source.hdl
+            head: 5d12340f5b6415242b2654d95ac888e30c0eb890
+            tree: 38bfe9cc80719e5b3efb2fe253082be637d5ada3
+            profile: source
+          - repo: atto-source.realtime
+            head: 4e695abf2da703bb7c800dc05a2dd22f04da6cb7
+            tree: 3590639c6f92fb3b73826cdb70d324a94d6270ac
+            profile: seed
+          - repo: atto-source.atto
+            head: c9f9b2164f4f33b4d394d21de3c7de507a6061c1
+            tree: d24b80ad91f7ab325610d6dae660e0636842a652
+            profile: seed
+          - repo: atto-source.java
+            head: d5e34dd8ed5df227b8f4530f40bbfc519a3511f3
+            tree: e3bb94687a1ca0dddd76105d60c14ac899a86d15
+            profile: java-bitset
+          - repo: atto-source.java
+            head: f3f2e4f054db26d730537969d81990adee167f7e
+            tree: c8f1efc63043157217ff9f63932b352868102025
+            profile: java-guard
+    steps:
+      - name: Bind exact public commit and tree
+        env:
+          SOURCE_REPO: ${{ matrix.repo }}
+          SOURCE_HEAD: ${{ matrix.head }}
+          SOURCE_TREE: ${{ matrix.tree }}
+          GIT_TERMINAL_PROMPT: '0'
+        run: |
+          set -euo pipefail
+          git init source
+          cd source
+          git -c credential.helper= -c http.extraheader= fetch --no-tags --depth=1 "https://github.com/atto-lang/$SOURCE_REPO.git" "$SOURCE_HEAD"
+          git checkout --detach FETCH_HEAD
+          test "$(git rev-parse HEAD)" = "$SOURCE_HEAD"
+          test "$(git rev-parse HEAD^{tree})" = "$SOURCE_TREE"
+          git log -1 --format='%H %T'
+      - name: Shared core and allocation source contract tests (not guest proof)
+        if: matrix.profile == 'source'
+        working-directory: source
+        run: |
+          set -euo pipefail
+          node --test tests/alloc-collections-source-contract.test.mjs tests/core-memory-policy-source.test.mjs tests/core-types-matrix-source.test.mjs tests/core-types-source.test.mjs
+      - name: Seed and real-time core source oracle (not guest proof)
+        if: matrix.profile == 'seed'
+        working-directory: source
+        run: python3 tests/test_core_math_hash_cell_source.py
+      - uses: actions/setup-java@dded0888837ed1f317902acf8a20df0ad188d165
+        if: startsWith(matrix.profile, 'java-')
+        with:
+          distribution: graalvm
+          java-version: '25'
+      - name: Java updated bitset real guest
+        if: matrix.profile == 'java-bitset'
+        working-directory: source
+        run: |
+          set -euo pipefail
+          mvn -B -ntp -Dtest=AttoAllocCollectionsGuestTest -DfailIfNoTests=true test
+          python3 - <<'PY'
+          import xml.etree.ElementTree as E
+          root=E.parse('target/surefire-reports/TEST-dev.oreslang.AttoAllocCollectionsGuestTest.xml').getroot()
+          assert int(root.attrib['tests']) >= 8
+          assert all(int(root.attrib.get(k,'0')) == 0 for k in ('failures','errors','skipped'))
+          print(root.attrib)
+          PY
+      - name: Java updated JUnit guard and real full guest corpus
+        if: matrix.profile == 'java-guard'
+        working-directory: source
+        run: |
+          set -euo pipefail
+          mvn -B -ntp -Dtest=AttoLibrariesV1Test -DfailIfNoTests=true test
+          python3 - <<'PY'
+          import xml.etree.ElementTree as E
+          root=E.parse('target/surefire-reports/TEST-dev.oreslang.AttoLibrariesV1Test.xml').getroot()
+          assert int(root.attrib['tests']) >= 18
+          assert all(int(root.attrib.get(k,'0')) == 0 for k in ('failures','errors','skipped'))
+          assert any('corpusGuardRejectsEveryMissingCaseAndInvalidOutcome' == c.attrib.get('name') for c in root.findall('testcase'))
+          print(root.attrib)
+          PY
+      - name: Verify tracked source unchanged
+        working-directory: source
+        run: git diff --exit-code HEAD
