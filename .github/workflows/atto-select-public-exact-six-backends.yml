@@ -1,0 +1,98 @@
+name: Atto public exact-tree select lifecycle verification
+on:
+  push:
+    branches:
+      - ci/atto-select-public-exact-six-backends-20261126
+  workflow_dispatch:
+permissions: {}
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      max-parallel: 2
+      matrix:
+        include:
+          - backend: rs
+            head: '913512c1e3d47eaf30a2a643857ea4e76ad45284'
+            tree: 'd135f70c008335f7bf4625888b42484dfa9e69c5'
+          - backend: cranelift
+            head: '346a0d20ad57c259e1e69605c34caa1aa32ea951'
+            tree: 'cc52f3dd06baff96f519ec7ec3944735858286af'
+          - backend: net
+            head: 'e5ce8509061803f19cf1489d3d91dee878895499'
+            tree: '2488bee133e30ca9fbdcf4fb880cecaa301a4ee1'
+          - backend: java
+            head: '822270fc0bc8b625d19208f0d249e03fc7df2fa3'
+            tree: 'c11df0f90e7cf7cb6784cb29613ea1098f4f08cb'
+          - backend: js
+            head: 'b11df1a0cc5a17218b40eab863f66d55833d8e80'
+            tree: 'af6fc629b0e18007ffbb34bca303981b4ad813f4'
+          - backend: forge
+            head: '0603b64bc72bf1512a4ffaa0da98ca60bc2a358c'
+            tree: '8647272c031c0b978e9978b03b6d00ce2ef3dcf7'
+    steps:
+      - name: Anonymous public checkout and exact tree identity
+        env:
+          BACKEND: ${{ matrix.backend }}
+          HEAD_SHA: ${{ matrix.head }}
+          TREE_SHA: ${{ matrix.tree }}
+        run: |
+          set -euo pipefail
+          export GIT_TERMINAL_PROMPT=0
+          git init source
+          git -C source -c credential.helper= fetch --depth=1 "https://github.com/atto-lang/atto-source.$BACKEND.git" "$HEAD_SHA"
+          git -C source checkout --detach FETCH_HEAD
+          test "$(git -C source rev-parse HEAD)" = "$HEAD_SHA"
+          test "$(git -C source rev-parse HEAD^{tree})" = "$TREE_SHA"
+          test -z "$(git -C source status --porcelain)"
+          git -C source rev-parse HEAD HEAD^{tree}
+      - name: Execute scoped backend verification
+        working-directory: source
+        env:
+          BACKEND: ${{ matrix.backend }}
+          HEAD_SHA: ${{ matrix.head }}
+          TREE_SHA: ${{ matrix.tree }}
+        run: |
+          set -euo pipefail
+          case "$BACKEND" in
+            rs)
+              # Actual compiler and compiled guests; Node and Chrome must exist.
+              bash scripts/verify-select-plans-exact-head.sh "$HEAD_SHA"
+              ;;
+            cranelift)
+              # Host-only standalone test module.
+              rustc --version
+              rustc --edition=2021 --test -D warnings src/select_continuation_fence.rs -o /tmp/cranelift-fence
+              /tmp/cranelift-fence --test-threads=1
+              ;;
+            net)
+              # NativeAOT host probe; not compiled Atto guest.
+              dotnet --info
+              dotnet publish verification/Ores.Net.SelectProbe/Ores.Net.SelectProbe.csproj -c Release -r linux-x64 -o /tmp/net-select
+              /tmp/net-select/Ores.Net.SelectProbe
+              ;;
+            java)
+              # Compile and run the targeted JUnit tests on the full source tree.
+              java -version
+              mvn -B -ntp -Dtest=ActorContinuationLedgerTest,ActorContinuationLedgerIntegrationTest,ActorCodeImageContinuationV1Test test
+              ;;
+            js)
+              # Host-runtime Node tests only.
+              node --version
+              node --test tests/select-continuation-execution-lease.test.mjs tests/select-continuation-lifecycle-stress.test.mjs
+              ;;
+            forge)
+              # Exact native host regression, not compiled Atto guest.
+              g++ -std=c++20 -O2 -pthread -Wall -Wextra -Werror -I. verification/select_continuation_lease_host.cpp -o /tmp/forge-fence
+              /tmp/forge-fence
+              g++ -std=c++20 -O1 -g -pthread -fsanitize=address,undefined -fno-omit-frame-pointer -I. verification/select_continuation_lease_host.cpp -o /tmp/forge-fence-san
+              /tmp/forge-fence-san
+              ;;
+            *) exit 2 ;;
+          esac
+          test "$(git rev-parse HEAD)" = "$HEAD_SHA"
+          test "$(git rev-parse HEAD^{tree})" = "$TREE_SHA"
+          git diff --exit-code HEAD
+          printf 'PASS backend=%s head=%s tree=%s\n' "$BACKEND" "$HEAD_SHA" "$TREE_SHA"
