@@ -1,0 +1,36 @@
+name: Atto LLVM checked u64 linker retest
+on:
+  push:
+    branches: [ci/atto-u64-wasm-linker-20261126]
+permissions: {}
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Bind public exact source
+        run: |
+          set -euo pipefail
+          git init "$RUNNER_TEMP/source"
+          cd "$RUNNER_TEMP/source"
+          git -c credential.helper= fetch --no-tags --depth=1 https://github.com/atto-lang/atto-source.llvm.git c51a52c494b10ffcf2718e853a1c167423add6a0
+          git checkout --detach FETCH_HEAD
+          test "$(git rev-parse HEAD)" = c51a52c494b10ffcf2718e853a1c167423add6a0
+          test "$(git rev-parse HEAD^{tree})" = 81552bac5309a3f1a8b2b64d7ea9bec4375b86dd
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install freestanding Wasm linker
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y lld
+          wasm-ld --version
+          clang --version
+      - name: Real native and Wasm guests
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP/source"
+          ulimit -c 0
+          node --test tests/checked_u64_native_wasm.test.mjs
+          git diff --exit-code
+          git diff --cached --exit-code
