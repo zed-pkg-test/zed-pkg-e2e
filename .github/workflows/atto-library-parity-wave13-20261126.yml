@@ -1,0 +1,56 @@
+name: Atto exact integrated JS and CLR library regressions
+on:
+  push:
+    branches: ['ci/atto-library-parity-wave13-20261126']
+permissions: {}
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - repo: atto-source.js
+            head: 67bf3ebccc20d2140a90883f5b8aeb20e5ebe6c2
+            tree: 0cbe1ad920151964c8bd21a46c53825fbaba089a
+            profile: js
+          - repo: atto-source.net
+            head: f3f0eabc4874290b59524efec0c7826e1718b97d
+            tree: a33d960d02f4472c2a0137bafe6c26c4747ea2fa
+            profile: net
+    steps:
+      - name: Bind exact public commit and tree
+        env:
+          SOURCE_REPO: ${{ matrix.repo }}
+          SOURCE_HEAD: ${{ matrix.head }}
+          SOURCE_TREE: ${{ matrix.tree }}
+        run: |
+          set -euo pipefail
+          git init source
+          cd source
+          GIT_TERMINAL_PROMPT=0 git -c credential.helper= -c http.extraheader= fetch --no-tags --depth=1 "https://github.com/atto-lang/$SOURCE_REPO.git" "$SOURCE_HEAD"
+          git checkout --detach FETCH_HEAD
+          test "$(git rev-parse HEAD)" = "$SOURCE_HEAD"
+          test "$(git rev-parse HEAD^{tree})" = "$SOURCE_TREE"
+      - name: JS actual arena and terminal guest suites
+        if: matrix.profile == 'js'
+        working-directory: source
+        run: |
+          set -euo pipefail
+          node --test tests/alloc-arena-remaining-source.test.mjs tests/terminal-expect-v6.test.mjs
+          npm test
+      - uses: actions/setup-dotnet@v4
+        if: matrix.profile == 'net'
+        with:
+          dotnet-version: '10.0.x'
+      - name: CLR actual embedded library identity and guest regressions
+        if: matrix.profile == 'net'
+        working-directory: source
+        run: |
+          set -euo pipefail
+          dotnet run -c Release --project verification/Ores.Net.Tests | tee "$RUNNER_TEMP/net-test.log"
+          grep -F 'ATTO_LIBRARIES_V1 net guest_passed=3 executed=3 rejected=7 unsupported=7 failed=0' "$RUNNER_TEMP/net-test.log"
+      - name: Tracked source unchanged
+        working-directory: source
+        run: git diff --exit-code HEAD
