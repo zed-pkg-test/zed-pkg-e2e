@@ -1,0 +1,29 @@
+name: Atto actual CLR scalar arena source parity
+on:
+  push:
+    branches: ['ci/atto-net-arena-remaining-20261126']
+permissions: {}
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Exact public source and tree
+        run: |
+          set -euo pipefail
+          git init source
+          cd source
+          GIT_TERMINAL_PROMPT=0 git -c credential.helper= -c http.extraheader= fetch --no-tags --depth=1 https://github.com/atto-lang/atto-source.net.git 85e57522abfb4db10821d1c94bf02f7a1c34dd9d
+          git checkout --detach FETCH_HEAD
+          test "$(git rev-parse HEAD)" = 85e57522abfb4db10821d1c94bf02f7a1c34dd9d
+          test "$(git rev-parse HEAD^{tree})" = 8406206121bbf58868e542d10b7b9536fa37d9a1
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - name: Full CLR suite and actual linked Atto arena boundary guests
+        working-directory: source
+        run: |
+          set -euo pipefail
+          dotnet run -c Release --project verification/Ores.Net.Tests | tee "$RUNNER_TEMP/net-test.log"
+          grep -F 'ATTO_ARENA_REMAINING_CIL: 169 boundary pairs, projected shared guest; canonical selector NOT_EXECUTED' "$RUNNER_TEMP/net-test.log"
+          git diff --exit-code HEAD
