@@ -1,0 +1,70 @@
+name: Atto exact CLR corpus, Wasm ByteBuffer and Cranelift integration
+on:
+  push:
+    branches: ['ci/atto-library-parity-wave11-20261126']
+permissions: {}
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - repo: atto-source.net
+            head: 5ef28d6c963aa56f5193862be9f0a87ededd4f60
+            tree: 5cac1f619fa078cd81a73dbb4131b867be2171e2
+            profile: net
+          - repo: atto-source.wasm
+            head: 26aee69c938c5d7c5548c06eb5921ad04f997313
+            tree: 82ecf113cd7e3ebfa22921acdcc46550187a0bd3
+            profile: wasm
+          - repo: atto-source.cranelift
+            head: aad6e391a6a4a25cbf46e2c29325e139a1834ed5
+            tree: d9c349566076e5f49f86080c00b894fa51c4e028
+            profile: cranelift
+    steps:
+      - name: Bind exact public commit and tree
+        env:
+          SOURCE_REPO: ${{ matrix.repo }}
+          SOURCE_HEAD: ${{ matrix.head }}
+          SOURCE_TREE: ${{ matrix.tree }}
+          GIT_TERMINAL_PROMPT: '0'
+        run: |
+          set -euo pipefail
+          git init source
+          cd source
+          git -c credential.helper= -c http.extraheader= fetch --no-tags --depth=1 "https://github.com/atto-lang/$SOURCE_REPO.git" "$SOURCE_HEAD"
+          git checkout --detach FETCH_HEAD
+          test "$(git rev-parse HEAD)" = "$SOURCE_HEAD"
+          test "$(git rev-parse HEAD^{tree})" = "$SOURCE_TREE"
+      - uses: actions/setup-dotnet@v4
+        if: matrix.profile == 'net'
+        with:
+          dotnet-version: '10.0.x'
+      - name: Real CLR linked CIL guest and complete regression suite
+        if: matrix.profile == 'net'
+        working-directory: source
+        run: |
+          set -euo pipefail
+          dotnet run -c Release --project verification/Ores.Net.Tests | tee "$RUNNER_TEMP/net-test.log"
+          grep -E 'ATTO_LIBRARIES_V1 net passed=[0-9]+ executed=[3-9][0-9]* rejected=[7-9][0-9]* unsupported=[0-9]+ failed=0' "$RUNNER_TEMP/net-test.log"
+      - name: Wasm actual import-free ByteBuffer guests and runtime regressions
+        if: matrix.profile == 'wasm'
+        working-directory: source
+        run: |
+          set -euo pipefail
+          node --test tests/actor-arena-byte-buffer-v1.test.mjs tests/byte-buffer-guest-v1-real.test.mjs
+          npm test
+      - name: Cranelift locked native guest regression and lint
+        if: matrix.profile == 'cranelift'
+        working-directory: source
+        run: |
+          set -euo pipefail
+          rustup toolchain install 1.99.1 --profile minimal --component rustfmt --component clippy
+          cargo +1.99.1 fmt --all -- --check
+          cargo +1.99.1 test --locked --all-targets
+          cargo +1.99.1 clippy --locked --all-targets -- -D warnings
+      - name: Tracked source unchanged
+        working-directory: source
+        run: git diff --exit-code HEAD
