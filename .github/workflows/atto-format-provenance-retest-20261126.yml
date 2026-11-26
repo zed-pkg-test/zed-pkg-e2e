@@ -27,5 +27,5 @@ jobs:
         working-directory: source
         run: |
           set -euo pipefail
-          npm test
+          node --test tests/*.test.mjs
           git diff --exit-code HEAD
