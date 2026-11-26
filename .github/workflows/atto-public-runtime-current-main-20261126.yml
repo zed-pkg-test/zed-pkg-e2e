@@ -1,0 +1,91 @@
+name: Atto current-tree actor runtime follow-up
+on:
+  push:
+    branches: ['ci/atto-public-runtime-current-main-20261126']
+permissions: {}
+jobs:
+  admission:
+    runs-on: ubuntu-24.04
+    steps:
+      - run: |
+          set -euo pipefail
+          node --version
+          node -e 'setTimeout(()=>console.log("source-free timer admission"),0)'
+  test:
+    needs: admission
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - repo: atto-source.wasm
+            head: 999d8e760282b72db277c27a0bb7a160bd0fca9d
+            tree: 55fb95b66c3ac5f18f19e4acd42b6071d11b4868
+            profile: wasm
+          - repo: atto-source.java
+            head: 633764306ffe744c58f4765f758d5856f3fbfd48
+            tree: 8b55e64c9fa9f857ffdb3256b6c4ec84ba30bf92
+            profile: java
+          - repo: atto-source.cranelift
+            head: eeb7bb328462974a949c479f4fe9c78a982541bc
+            tree: 785823e6cf6a436ae3610b5066db4ec7ab144700
+            profile: cranelift
+          - repo: atto-lang.github.io
+            head: cf9574ff7da75ff0f061cecb8c63db90b9c7cca9
+            tree: c9beaa0954786c2e24c78018c78ab1985bec12ba
+            profile: site
+    steps:
+      - name: Fetch immutable public source without credentials
+        env:
+          SOURCE_REPO: ${{ matrix.repo }}
+          SOURCE_HEAD: ${{ matrix.head }}
+          SOURCE_TREE: ${{ matrix.tree }}
+          GIT_TERMINAL_PROMPT: '0'
+        run: |
+          set -euo pipefail
+          git init source
+          cd source
+          git -c credential.helper= -c http.extraheader= fetch --no-tags --depth=1 "https://github.com/atto-lang/$SOURCE_REPO.git" "$SOURCE_HEAD"
+          git checkout --detach FETCH_HEAD
+          test "$(git rev-parse HEAD)" = "$SOURCE_HEAD"
+          test "$(git rev-parse HEAD^{tree})" = "$SOURCE_TREE"
+          git diff --exit-code HEAD
+          git log -1 --format='%H %T'
+      - name: Wasm reconciled head focused frames and continuation tests
+        if: matrix.profile == 'wasm'
+        working-directory: source
+        run: |
+          set -euo pipefail
+          node --test tests/actor-frame-event-loop-integration.test.mjs tests/actor-frame-bytes.test.mjs tests/actor-frame-stacks.test.mjs tests/actor-frame-stack-primordials.test.mjs tests/actor-arena.test.mjs tests/pinned-continuation-gate.test.mjs
+      - uses: graalvm/setup-graalvm@27b360dbb857524eaf0b4c4cef364d38e5b4f173
+        if: matrix.profile == 'java'
+        with:
+          java-version: '25'
+          distribution: 'graalvm'
+          github-token: ''
+      - name: Java compiled guest reactor and scheduler regressions
+        if: matrix.profile == 'java'
+        working-directory: source
+        run: |
+          set -euo pipefail
+          mvn -B -ntp -Dores.runtime.carriers=native -Dtest=AttoNioReactorStressGuestTest,SuspendsAwaitExecutionContextGuestTest,ContinuationCarrierGuestTest,OresSchedulerControlStarvationTest,OresSchedulerContinuationLocalityTest,ActorHeapIncarnationTest,ActorContinuationLedgerIntegrationTest test
+      - name: Cranelift explicit compiler denial and admitted synchronous actors
+        if: matrix.profile == 'cranelift'
+        working-directory: source
+        run: |
+          set -euo pipefail
+          rustup update stable --no-self-update
+          cargo +stable test --locked --test continuation_admission --test actor_sync_admission --test actor_lifecycle_ready_native_denial
+      - name: Full playground Node and browser smoke
+        if: matrix.profile == 'site'
+        working-directory: source/play
+        run: |
+          set -euo pipefail
+          npm test
+          export CHROME_BIN="$(command -v google-chrome || command -v chromium)"
+          test -x "$CHROME_BIN"
+          npm run test:browser
+      - name: Require tracked tree unchanged
+        working-directory: source
+        run: git diff --exit-code HEAD
