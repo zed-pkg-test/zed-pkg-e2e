@@ -1,0 +1,31 @@
+name: Atto formatter provenance exact main reconciliation
+on:
+  push:
+    branches: ['ci/atto-format-provenance-retest-20261126']
+permissions: {}
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Bind exact public source
+        run: |
+          set -euo pipefail
+          git init source
+          cd source
+          GIT_TERMINAL_PROMPT=0 git -c credential.helper= -c http.extraheader= fetch --no-tags --depth=1 https://github.com/atto-lang/atto-format.git 48c9e34f8e1e6a57bc411d3112a63b0cf6907ded
+          git checkout --detach FETCH_HEAD
+          test "$(git rev-parse HEAD)" = 48c9e34f8e1e6a57bc411d3112a63b0cf6907ded
+          test "$(git rev-parse HEAD^{tree})" = b57e81b85fe27a3513b4e7d76b77342d70a8ee7c
+      - name: Rust formatter and visibility regression
+        working-directory: source
+        run: |
+          set -euo pipefail
+          cargo test --locked --test export_visibility_provenance
+          cargo test --locked --all-targets
+      - name: JavaScript formatter suite
+        working-directory: source
+        run: |
+          set -euo pipefail
+          npm test
+          git diff --exit-code HEAD
