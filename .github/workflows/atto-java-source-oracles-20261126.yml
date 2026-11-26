@@ -1,0 +1,63 @@
+name: Atto Java Vec and core types source oracle repair
+on:
+  push:
+    branches: ['ci/atto-java-source-oracles-20261126']
+permissions: {}
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - head: 70dcfaeca6a25f29415596fb23d90acecb81f31b
+            tree: 4dd2cf3ef88295fbc1aeb6679412be4373033c87
+            profile: vec
+          - head: b14b4ee2bb9262d4fa986d46130770b4c0702a0f
+            tree: 2cdfdf4b1f8ea620d7fb98c73f2661848b5fb2ed
+            profile: types
+    steps:
+      - name: Bind exact public commit and tree
+        env:
+          SOURCE_HEAD: ${{ matrix.head }}
+          SOURCE_TREE: ${{ matrix.tree }}
+          GIT_TERMINAL_PROMPT: '0'
+        run: |
+          set -euo pipefail
+          git init source
+          cd source
+          git -c credential.helper= -c http.extraheader= fetch --no-tags --depth=1 https://github.com/atto-lang/atto-source.java.git "$SOURCE_HEAD"
+          git checkout --detach FETCH_HEAD
+          test "$(git rev-parse HEAD)" = "$SOURCE_HEAD"
+          test "$(git rev-parse HEAD^{tree})" = "$SOURCE_TREE"
+          git log -1 --format='%H %T'
+      - name: Vec native source contract only
+        if: matrix.profile == 'vec'
+        working-directory: source
+        run: node --test tests/alloc-collections-source-contract.test.mjs
+      - name: Scalar source oracles with negative controls
+        if: matrix.profile == 'types'
+        working-directory: source
+        run: node --test tests/core-types-source.test.mjs tests/core-types-matrix-source.test.mjs
+      - uses: actions/setup-java@dded0888837ed1f317902acf8a20df0ad188d165
+        if: matrix.profile == 'types'
+        with:
+          distribution: graalvm
+          java-version: '25'
+      - name: Real Java scalar linked guest tests
+        if: matrix.profile == 'types'
+        working-directory: source
+        run: |
+          set -euo pipefail
+          mvn -B -ntp -Dtest=CoreTypesGuestTest -DfailIfNoTests=true test
+          python3 - <<'PY'
+          import xml.etree.ElementTree as E
+          root=E.parse('target/surefire-reports/TEST-dev.oreslang.CoreTypesGuestTest.xml').getroot()
+          assert int(root.attrib['tests']) > 0
+          assert all(int(root.attrib.get(k,'0')) == 0 for k in ('failures','errors','skipped'))
+          print(root.attrib)
+          PY
+      - name: Tracked source unchanged
+        working-directory: source
+        run: git diff --exit-code HEAD
