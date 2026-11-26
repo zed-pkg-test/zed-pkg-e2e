@@ -1,0 +1,39 @@
+name: Atto Rust checked shift generator regression
+on:
+  push:
+    branches: [ci/atto-rust-shift-generator-20261126]
+permissions: {}
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - name: Bind exact public source
+        run: |
+          set -euo pipefail
+          git init "$RUNNER_TEMP/source"
+          cd "$RUNNER_TEMP/source"
+          git -c credential.helper= fetch --no-tags --depth=1 https://github.com/atto-lang/atto-source.rs.git d40fba9a56f7086f5aaa09b48b87bf3ac983bcf1
+          git checkout --detach FETCH_HEAD
+          test "$(git rev-parse HEAD)" = d40fba9a56f7086f5aaa09b48b87bf3ac983bcf1
+          test "$(git rev-parse HEAD^{tree})" = 40dad58387644ff6cf11ccd5d2d83039440f8c6f
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Compile actual native compiler and exercise shifts
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP/source"
+          cargo build --locked --release --bin attoc
+          ATTOC="$PWD/target/release/attoc" node tests/checked-shift-distance.mjs
+      - name: Full Rust regression and actual dual-compiler generator guests
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP/source"
+          cargo test --locked --all-targets
+          rustup target add wasm32-unknown-unknown
+          cargo rustc --locked --release --lib --target wasm32-unknown-unknown --crate-type cdylib -- -C link-arg=--max-memory=67108864
+          ATTOC="$PWD/target/release/attoc" node tests/generator-execution.mjs
+          ATTOC="$PWD/target/release/attoc" node tests/conformance.mjs
+          git diff --exit-code
+          git diff --cached --exit-code
