@@ -1,0 +1,24 @@
+name: Exact Forge raw Future native guests
+on: [push]
+permissions: {}
+jobs:
+  native:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - name: Verify immutable public source without API requests
+        run: |
+          set -euo pipefail
+          git init source
+          GIT_TERMINAL_PROMPT=0 git -C source -c credential.helper= -c http.extraHeader= fetch --no-tags --depth=1 https://github.com/atto-lang/atto-source.forge.git 716f0953e96157b39fd9e5a3a36269da8ff33621
+          git -C source checkout --detach FETCH_HEAD
+          test "$(git -C source rev-parse HEAD)" = 716f0953e96157b39fd9e5a3a36269da8ff33621
+          test "$(git -C source rev-parse HEAD^{tree})" = bf9b39e712f78da59a4ac9d1e050c30c601b21e4
+          test "$(git -C source write-tree)" = bf9b39e712f78da59a4ac9d1e050c30c601b21e4
+      - name: Build Forge and execute actual native guests
+        working-directory: source
+        run: |
+          set -euo pipefail
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+          cmake --build build --target oresforge --parallel 2
+          bash verification/test-counted-ready-shared-native.sh build/oresforge contracts/counted-ready-v1
