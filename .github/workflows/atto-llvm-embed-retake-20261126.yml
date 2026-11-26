@@ -1,0 +1,42 @@
+name: LLVM exact integrated manifest production configure and library guests
+on:
+  push:
+    branches: ['ci/atto-llvm-embed-retake-20261126']
+permissions: {}
+jobs:
+  manifest:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - name: Bind exact public LLVM tree
+        run: |
+          set -euo pipefail
+          git init source
+          cd source
+          GIT_TERMINAL_PROMPT=0 git -c credential.helper= -c http.extraheader= fetch --no-tags --depth=1 https://github.com/atto-lang/atto-source.llvm.git e3333cd33f06a16627b638827ad2c371000bd924
+          git checkout --detach FETCH_HEAD
+          test "$(git rev-parse HEAD)" = e3333cd33f06a16627b638827ad2c371000bd924
+          test "$(git rev-parse HEAD^{tree})" = e2baac0685237016ee4c14a60de41efff5128d64
+      - name: Actual manifest controls and production configure
+        working-directory: source
+        run: |
+          set -euo pipefail
+          bash tests/atto_library_embed_admission.sh
+          sudo apt-get update
+          sudo apt-get install -y build-essential cmake clang llvm-dev
+          cmake -S . -B "$RUNNER_TEMP/llvm" -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON
+          test -s "$RUNNER_TEMP/llvm/generated/oreslang/frontend/GeneratedAttoLibraryTable.inc"
+          sha256sum "$RUNNER_TEMP/llvm/generated/oreslang/frontend/GeneratedAttoLibraryTable.inc"
+      - name: Native LLVM compiler and corpus
+        working-directory: source
+        run: |
+          set -euo pipefail
+          cmake --build "$RUNNER_TEMP/llvm" --parallel 2 --target oreslang-llvmc
+          python3 tests/atto_libraries_v1.py --compiler "$RUNNER_TEMP/llvm/oreslang-llvmc" --clang "$(command -v clang)"
+      - name: Separate policy allocation guest regression
+        working-directory: source
+        run: python3 tests/atto_alloc_guest.py --compiler "$RUNNER_TEMP/llvm/oreslang-llvmc" --clang "$(command -v clang)"
+      - name: Verify tracked source unchanged
+        working-directory: source
+        if: always()
+        run: git diff --exit-code HEAD
