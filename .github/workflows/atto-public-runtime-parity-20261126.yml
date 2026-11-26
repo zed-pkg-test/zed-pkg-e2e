@@ -1,0 +1,117 @@
+name: Atto public browser and runtime parity exact-head
+on:
+  push:
+    branches: ['ci/atto-public-runtime-parity-20261126']
+permissions: {}
+jobs:
+  admission:
+    runs-on: ubuntu-24.04
+    steps:
+      - run: |
+          set -euo pipefail
+          node --version
+          c++ --version
+          node -e 'setTimeout(()=>console.log("source-free event-loop admission"),0)'
+  parity:
+    needs: admission
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - repo: atto-lang.github.io
+            head: cf9574ff7da75ff0f061cecb8c63db90b9c7cca9
+            tree: c9beaa0954786c2e24c78018c78ab1985bec12ba
+            profile: browser
+          - repo: atto-source.js
+            head: 7f9657e2154a1fbb33325fea014dd3fec6c03cca
+            tree: ff9d71deb7dcf32bbc9313947ff5dcb02bd39054
+            profile: js
+          - repo: atto-source.rs
+            head: 78fcf29034a4f93e100e6abb1c1ae873052d3539
+            tree: 81ed8aa27f504e6eca4d0c8915ec305f40052ddd
+            profile: rust
+          - repo: atto-source.net
+            head: ee2ed4c3a6b960cb3799192893ebf405cce9d4c3
+            tree: 0221219596b8e7afb65b8fe69ee27d354dcb984e
+            profile: net
+          - repo: atto-source.forge
+            head: 99d77b22e20f322bd08f85f28223c358655b595d
+            tree: b9f6a129e77108e6ccaa631e9cba9b6850ac79a7
+            profile: forge
+    steps:
+      - name: Fetch exact public tree without credentials
+        env:
+          SOURCE_REPO: ${{ matrix.repo }}
+          SOURCE_HEAD: ${{ matrix.head }}
+          SOURCE_TREE: ${{ matrix.tree }}
+          GIT_TERMINAL_PROMPT: '0'
+        run: |
+          set -euo pipefail
+          git init source
+          cd source
+          git -c credential.helper= -c http.extraheader= fetch --no-tags --depth=1 "https://github.com/atto-lang/$SOURCE_REPO.git" "$SOURCE_HEAD"
+          git checkout --detach FETCH_HEAD
+          test "$(git rev-parse HEAD)" = "$SOURCE_HEAD"
+          test "$(git rev-parse HEAD^{tree})" = "$SOURCE_TREE"
+          git diff --exit-code HEAD
+          git log -1 --format='%H %T'
+      - name: Real Chromium playground and pinned Wasm compiler
+        if: matrix.profile == 'browser'
+        working-directory: source/play
+        run: |
+          set -euo pipefail
+          export CHROME_BIN="$(command -v google-chrome || command -v chromium)"
+          test -x "$CHROME_BIN"
+          npm run test:e2e
+      - name: JS worker event-loop and continuation admission
+        if: matrix.profile == 'js'
+        working-directory: source
+        run: |
+          set -euo pipefail
+          node --test tests/worker-control-loop.test.mjs tests/worker-control-loop-node.test.mjs tests/task-future-host-v1.test.mjs tests/worker-completion-capability-v1.test.mjs tests/wasm-jspi-control-bridge-v1.test.mjs
+      - name: Rust async v2 native compiler tests and Wasm compiler build
+        if: matrix.profile == 'rust'
+        working-directory: source
+        run: |
+          set -euo pipefail
+          rustup toolchain install 1.85.1 --profile minimal
+          rustup target add wasm32-unknown-unknown --toolchain 1.85.1
+          cargo +1.85.1 test --locked --test v2_actor_bang_guest --test v2_actor_channel_pipe --test v2_actor_ready_guest --test v2_actor_rpipe_guest --test v2_canonical_pipe_conformance --test v2_channel_stdlib_source --test v2_fallback_regressions --test v2_scoped_resources
+          cargo +1.85.1 build --locked --release --target wasm32-unknown-unknown --lib
+      - name: Execute Rust-compiled Wasm guests in Chromium
+        if: matrix.profile == 'rust'
+        working-directory: source
+        run: |
+          set -euo pipefail
+          export CHROME_BIN="$(command -v google-chrome || command -v chromium)"
+          test -x "$CHROME_BIN"
+          node tests/browser-e2e.mjs
+      - uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9
+        if: matrix.profile == 'net'
+        with:
+          dotnet-version: '10.0.x'
+      - name: NET actor supervisor CONTROL and managed await frames
+        if: matrix.profile == 'net'
+        working-directory: source
+        run: |
+          set -euo pipefail
+          dotnet run --project verification/Ores.Net.Tests/Ores.Net.Tests.csproj -c Release -- --supervisor-terminal-host-only | tee "$RUNNER_TEMP/net-host.log"
+          grep -Fx NET_SUPERVISOR_TERMINAL_RESERVATION_HOST_TESTS_PASS "$RUNNER_TEMP/net-host.log"
+          grep -Fx NET_SUPERVISOR_DISPATCH_PRIORITY_HOST_TESTS_PASS "$RUNNER_TEMP/net-host.log"
+          grep -Fx NET_VERIFIED_ACTOR_AWAIT_FRAME_TESTS_PASS "$RUNNER_TEMP/net-host.log"
+          grep -Fx NET_TWO_AWAIT_ACTOR_FRAMES_TESTS_PASS "$RUNNER_TEMP/net-host.log"
+          grep -Fx NET_CAPTURED_ACTOR_TASKS_TESTS_PASS "$RUNNER_TEMP/net-host.log"
+      - name: Forge native actor frames and queued delivery
+        if: matrix.profile == 'forge'
+        working-directory: source
+        run: |
+          set -euo pipefail
+          cmake -S . -B "$RUNNER_TEMP/forge" -DCMAKE_BUILD_TYPE=Debug
+          cmake --build "$RUNNER_TEMP/forge" --target oresforge_actor_compiled_source_tests oresforge_actor_queued_delivery_tests oresforge_actor_stackless_tests oresforge_actor_frames_tests oresforge_scalar_actor_frames_tests oresforge_actor_incarnation_memory_v1 --parallel 2
+          ctest --test-dir "$RUNNER_TEMP/forge" --output-on-failure -R '^(forge_actor_compiled_source_handler|forge_actor_queued_mailbox_incarnation|oresforge_actor_stackless_host|oresforge_actor_private_frames_host|oresforge_actor_heap_frame_bridge_host|oresforge_actor_incarnation_memory_v1_host)$' | tee "$RUNNER_TEMP/forge.log"
+          grep -F '100% tests passed' "$RUNNER_TEMP/forge.log"
+      - name: Require tracked source unchanged
+        working-directory: source
+        run: git diff --exit-code HEAD
