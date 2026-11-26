@@ -1,0 +1,36 @@
+name: Atto bootstrap seed on merged ownership compiler
+on:
+  push:
+    branches: ['ci/atto-bootstrap-current-stage0-20261126']
+permissions: {}
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - name: Bind exact public seed and stage0 commits
+        run: |
+          set -euo pipefail
+          fetch_exact() {
+            git init "$1"
+            git -C "$1" -c credential.helper= -c http.extraheader= fetch --no-tags --depth=1 "https://github.com/atto-lang/$2.git" "$3"
+            git -C "$1" checkout --detach FETCH_HEAD
+            test "$(git -C "$1" rev-parse HEAD)" = "$3"
+            test "$(git -C "$1" rev-parse HEAD^{tree})" = "$4"
+          }
+          export GIT_TERMINAL_PROMPT=0
+          fetch_exact seed atto-source.atto b731b42e3e769e0c8cc2b2693e2274b15fc35cca 1476a6c858607e0d43bea52e4f902c700fed49b5
+          fetch_exact stage0 atto-source.rs 2f23fb89417d9cc8331fb6c81999090aca969796 1a4f9d32b49a608a48a4aa89023a6da5b217d67e
+      - name: Build merged Stage-0 compiler and verify transfer semantics
+        working-directory: stage0
+        run: |
+          set -euo pipefail
+          cargo test --locked --test move_take_equivalence
+          cargo build --locked --bin attoc
+      - name: Execute native Atto seed compiled to Wasm
+        working-directory: seed
+        run: |
+          set -euo pipefail
+          node tests/suspension-effect-bootstrap-guest.mjs "$PWD/../stage0/target/debug/attoc"
+          git diff --exit-code HEAD
+          git -C ../stage0 diff --exit-code HEAD
