@@ -1,0 +1,52 @@
+name: Atto public exact-head export shift and bootstrap
+on:
+  pull_request:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  rust:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Verify public exact head and changed blobs
+        shell: bash
+        run: |
+          git init -q source
+          git -C source remote add origin https://github.com/atto-lang/atto-source.rs.git
+          git -C source fetch --no-tags --depth=1 origin ed00c62aa577bea01c61d65e9a9e226ab793c3ea
+          git -C source checkout --detach FETCH_HEAD
+          test "$(git -C source rev-parse HEAD)" = "ed00c62aa577bea01c61d65e9a9e226ab793c3ea"
+          git -C source rev-parse 'HEAD^{tree}'
+          test "$(git -C source hash-object src/check.rs)" = "4ae1f2e42ad604bd411859cc8a7ff56f1ab8a542"
+          test "$(git -C source hash-object src/wasm.rs)" = "8415f8752a09230fb483ce4e7abb8007c8011259"
+          test "$(git -C source hash-object tests/checked-shift-distance.mjs)" = "e80a93ab44b7df8676b87c92289890f231b79b76"
+          test "$(git -C source hash-object src/wasm/generator_runtime.rs)" = "d51d3e6c595af20a077cd4eab428d793e7973df1"
+          test "$(git -C source hash-object tests/bitwise_ops.rs)" = "40e04e4879321bb3fff2d1c72c32a3d6af72c5e7"
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '22'
+      - name: Build native compiler and execute shift guests
+        working-directory: source
+        run: |
+          cargo build --locked --bin attoc
+          ATTOC="$PWD/target/debug/attoc" node tests/checked-shift-distance.mjs
+      - name: Rust regression
+        if: always()
+        working-directory: source
+        run: cargo test --locked --no-fail-fast
+      - name: Verify public self-host seed and changed blobs
+        if: always()
+        shell: bash
+        run: |
+          git init -q seed
+          git -C seed remote add origin https://github.com/atto-lang/atto-source.atto.git
+          git -C seed fetch --no-tags --depth=1 origin b731b42e3e769e0c8cc2b2693e2274b15fc35cca
+          git -C seed checkout --detach FETCH_HEAD
+          test "$(git -C seed rev-parse HEAD)" = "b731b42e3e769e0c8cc2b2693e2274b15fc35cca"
+          git -C seed rev-parse 'HEAD^{tree}'
+          test "$(git -C seed hash-object src/suspension_effect_token.atto)" = "8ed884d396129f770ac0a3d6e50b0fbd284c5c19"
+          test "$(git -C seed hash-object tests/suspension-effect-bootstrap-guest.mjs)" = "7dfa277730fc0b562bfcb711f90f4f06a32bbb70"
+      - name: Execute native Atto seed as real Wasm
+        if: always()
+        run: node seed/tests/suspension-effect-bootstrap-guest.mjs "$PWD/source/target/debug/attoc"
