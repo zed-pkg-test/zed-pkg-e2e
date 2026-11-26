@@ -1,0 +1,46 @@
+name: Rust select exact formatted head verification
+on:
+  push:
+    branches:
+      - ci/atto-rust-select-9fc8efa-20261126
+  workflow_dispatch:
+permissions: {}
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        scope: [strict, targeted]
+    steps:
+      - name: Exact public source checkout
+        run: |
+          set -euo pipefail
+          export GIT_TERMINAL_PROMPT=0
+          git init source
+          git -C source -c credential.helper= fetch --depth=1 https://github.com/atto-lang/atto-source.rs.git 9fc8efaebb725c641c0e71f84044f977ace83ebd
+          git -C source checkout --detach FETCH_HEAD
+          test "$(git -C source rev-parse HEAD)" = "9fc8efaebb725c641c0e71f84044f977ace83ebd"
+          test "$(git -C source rev-parse HEAD^{tree})" = "ea9cb25f4bf7c187f63891294a32abf9c27128b7"
+      - name: Strict full verification
+        if: matrix.scope == 'strict'
+        working-directory: source
+        run: bash scripts/verify-select-plans-exact-head.sh 9fc8efaebb725c641c0e71f84044f977ace83ebd
+      - name: Targeted compiler and Node guest diagnostics (not a full gate)
+        if: matrix.scope == 'targeted'
+        working-directory: source
+        run: |
+          set -euo pipefail
+          rustup toolchain install 1.85.1 --profile minimal --target wasm32-unknown-unknown
+          cargo +1.85.1 test --locked --test v2_select_plans
+          cargo +1.85.1 build --locked --bin attoc
+          node tests/node-v2-select-plans-guest.mjs
+      - name: Check exact unchanged tree
+        if: always()
+        working-directory: source
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "9fc8efaebb725c641c0e71f84044f977ace83ebd"
+          test "$(git rev-parse HEAD^{tree})" = "ea9cb25f4bf7c187f63891294a32abf9c27128b7"
+          git diff --exit-code HEAD
