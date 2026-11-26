@@ -1,0 +1,133 @@
+name: Atto transfer guest differential and baseline regression
+on:
+  push:
+    branches: ['ci/atto-move-baseline-cranelift-retest-20261126']
+permissions: {}
+jobs:
+  rust:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - profile: alias
+            head: 2d49a9ba4e2de12b34ca9461050925c57c594f1b
+            tree: b6cd7aacb652d82268d8eb74b19dfb883dc8c62b
+          - profile: main
+            head: a038b8d738447ba7251aae19ed8efd0fba8eced1
+            tree: c4336ee3ff819b2165b96c81bb66002505f8cba6
+    steps:
+      - name: Bind exact source tree
+        env:
+          HEAD_SHA: ${{ matrix.head }}
+          TREE_SHA: ${{ matrix.tree }}
+        run: |
+          set -euo pipefail
+          git init source
+          cd source
+          GIT_TERMINAL_PROMPT=0 git -c credential.helper= -c http.extraheader= fetch --no-tags --depth=1 https://github.com/atto-lang/atto-source.rs.git "$HEAD_SHA"
+          git checkout --detach FETCH_HEAD
+          test "$(git rev-parse HEAD)" = "$HEAD_SHA"
+          test "$(git rev-parse HEAD^{tree})" = "$TREE_SHA"
+      - name: Build native and Wasm compilers
+        if: matrix.profile == 'alias'
+        working-directory: source
+        run: |
+          set -euo pipefail
+          rustup toolchain install stable --profile minimal --target wasm32-unknown-unknown
+          cargo +stable test --locked --test move_take_equivalence
+          cargo +stable build --locked --bin attoc
+          cargo +stable build --locked --release --lib --target wasm32-unknown-unknown
+      - name: Execute both exact compiled guest variants and compare native and browser output
+        if: matrix.profile == 'alias'
+        working-directory: source
+        run: |
+          set -euo pipefail
+          node --input-type=module <<'NODE'
+          import assert from 'node:assert/strict';
+          import { readFileSync, writeFileSync, mkdtempSync, rmSync, existsSync } from 'node:fs';
+          import { spawnSync } from 'node:child_process';
+          import { tmpdir } from 'node:os';
+          import { join } from 'node:path';
+          const compilerModule = new WebAssembly.Module(readFileSync('target/wasm32-unknown-unknown/release/atto_compiler.wasm'));
+          assert.deepEqual(WebAssembly.Module.imports(compilerModule), []);
+          const api = new WebAssembly.Instance(compilerModule, {}).exports;
+          assert.equal(api.abi_version(), 2);
+          const dir = mkdtempSync(join(tmpdir(), 'atto-transfer-'));
+          const variants = [
+            ['pass/move-bang-owned-class.atto', null],
+            ['fail/move-bang-use-after-transfer.atto', 'E_MOVED'],
+            ['fail/move-bang-active-loan.atto', 'E_BORROW'],
+          ];
+          try {
+            for (const [path, expected] of variants) {
+              const orig = readFileSync('tests/fixtures/' + path, 'utf8');
+              const outputs = [];
+              for (const [idx, source] of [orig, orig.replaceAll('move! ', 'take! ')].entries()) {
+                const src = join(dir, 'input.atto'), dst = join(dir, 'guest.wasm');
+                rmSync(dst, {force:true}); writeFileSync(src, source);
+                const native = spawnSync('target/debug/attoc', [src, '-o', dst], {encoding:'utf8',timeout:30000});
+                assert.ifError(native.error);
+                const bytes = new TextEncoder().encode(source);
+                assert.ok(bytes.length <= api.input_capacity());
+                new Uint8Array(api.memory.buffer, api.input_ptr(), bytes.length).set(bytes);
+                const rc = api.compile(bytes.length);
+                if (expected) {
+                  assert.ok(native.status > 0 && native.status < 128 && native.signal === null);
+                  assert.ok(native.stderr.includes(expected), native.stderr);
+                  assert.ok(!existsSync(dst));
+                  assert.notEqual(rc, 0);
+                  assert.equal(api.result_length(), 0);
+                  const memory = new Uint8Array(api.memory.buffer);
+                  let end = api.error_ptr(); while (memory[end]) end++;
+                  assert.ok(new TextDecoder().decode(memory.subarray(api.error_ptr(),end)).includes(expected));
+                } else {
+                  assert.equal(native.status, 0, native.stderr);
+                  assert.equal(rc, 0);
+                  const wasm = readFileSync(dst);
+                  const browser = Buffer.from(new Uint8Array(api.memory.buffer, api.result_ptr(), api.result_length()));
+                  assert.deepEqual(wasm, browser);
+                  const m = new WebAssembly.Module(wasm);
+                  const imports = { atto: {} };
+                  for (const imp of WebAssembly.Module.imports(m)) {
+                    assert.equal(imp.module,'atto'); assert.equal(imp.kind,'function');
+                    assert.ok(['print_i64','print_bool','print_f64','print_str','print_newline','actor_spawn','actor_send','state_register','state_enter','state_leave'].includes(imp.name));
+                    imports.atto[imp.name] = () => { throw Error('unexpected host effect'); };
+                  }
+                  const guest = new WebAssembly.Instance(m,imports).exports;
+                  assert.equal(guest.main(),42n); assert.equal(guest.panic_code.value,0);
+                  outputs.push(wasm);
+                }
+              }
+              if (!expected) assert.deepEqual(outputs[0],outputs[1]);
+              console.log('TRANSFER_GUEST',path,expected || '42', 'both spellings');
+            }
+          } finally {rmSync(dir,{recursive:true,force:true});}
+          NODE
+      - name: Exact long-chain regression on candidate and main
+        if: always()
+        working-directory: source
+        run: cargo +stable test --locked --test fixtures long_operator_and_elif_chains_fail_closed_instead_of_overflowing -- --exact
+  cranelift:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - name: Bind exact public candidate
+        run: |
+          set -euo pipefail
+          git init source
+          cd source
+          GIT_TERMINAL_PROMPT=0 git -c credential.helper= -c http.extraheader= fetch --no-tags --depth=1 https://github.com/atto-lang/atto-source.cranelift.git b36bb8a8b9ab055e00e2b04e7d901105f5d78054
+          git checkout --detach FETCH_HEAD
+          test "$(git rev-parse HEAD)" = b36bb8a8b9ab055e00e2b04e7d901105f5d78054
+          test "$(git rev-parse HEAD^{tree})" = 563b20e0d5bcab61a28796b595e507f517bdac7e
+      - name: Native full tests, split operator controls, strict lint
+        working-directory: source
+        run: |
+          set -euo pipefail
+          rustup toolchain install 1.99.1 --profile minimal --component rustfmt --component clippy
+          cargo +1.99.1 fmt --all -- --check
+          cargo +1.99.1 test --locked --all-targets
+          cargo +1.99.1 clippy --locked --all-targets -- -D warnings
+          git diff --exit-code HEAD
