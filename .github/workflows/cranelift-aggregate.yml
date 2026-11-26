@@ -1,0 +1,29 @@
+name: Cranelift exact named aggregate scalar execution and object emission
+on:
+  push:
+    branches: ['ci/cranelift-aggregate-aot-e3f1f5f-20261126']
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Verify exact public source
+        run: |
+          set -euo pipefail
+          git init source
+          git -C source -c credential.helper= fetch --depth=1 https://github.com/atto-lang/atto-source.cranelift.git e3f1f5fdbb08b2a82cc6a3b126bbeb30537724e0
+          git -C source checkout --detach FETCH_HEAD
+          test "$(git -C source rev-parse HEAD)" = e3f1f5fdbb08b2a82cc6a3b126bbeb30537724e0
+          test "$(git -C source rev-parse 'HEAD^{tree}')" = 04df4abb215d53200fadc903e359b9c8a54556a6
+      - name: Run repository-pinned compiler and aggregate guest tests
+        working-directory: source
+        run: |
+          set -euo pipefail
+          cargo test --locked --test named_aggregate_aot_allocations -- --nocapture
+          cargo test --locked --test named_aggregate_guest -- --nocapture
+          cargo test --locked --all-targets
+          cargo build --locked --release
+          sha256sum target/release/orescranelift
+          echo "Named aggregate AOT object harness and separate JIT tests are distinct scopes."
