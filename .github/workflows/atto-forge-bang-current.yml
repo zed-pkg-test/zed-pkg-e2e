@@ -1,0 +1,42 @@
+name: Forge current bang admission and native regression
+on:
+  push:
+    branches: ['ci/atto-forge-bang-current-20261126']
+permissions: {}
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - cc: gcc
+            cxx: g++
+          - cc: clang
+            cxx: clang++
+    steps:
+      - name: Bind exact public commit and tree
+        run: |
+          set -euo pipefail
+          git init source
+          GIT_TERMINAL_PROMPT=0 git -C source -c credential.helper= -c http.extraheader= fetch --no-tags --depth=1 https://github.com/atto-lang/atto-source.forge.git c41efb47283e747f5ca717cc51b1ed31368a0a3e
+          git -C source checkout --detach FETCH_HEAD
+          test "$(git -C source rev-parse HEAD)" = c41efb47283e747f5ca717cc51b1ed31368a0a3e
+          test "$(git -C source rev-parse HEAD^{tree})" = 9ea4ff39df75adc8fe18f71dafcedbbe75ee5abb
+      - name: Build and execute focused native regressions
+        env:
+          CC: ${{ matrix.cc }}
+          CXX: ${{ matrix.cxx }}
+        run: |
+          set -euo pipefail
+          cmake -S source -B build -DBUILD_TESTING=ON -DCMAKE_BUILD_TYPE=Debug
+          cmake --build build --target oresforge_source_control_admission_test oresforge_legacy_operator_grammar -j2
+          ./build/oresforge_source_control_admission_test
+          ./build/oresforge_legacy_operator_grammar
+      - name: Complete native compiler suite
+        run: |
+          set -euo pipefail
+          cmake --build build -j2
+          ctest --test-dir build --output-on-failure --no-tests=error
+          git -C source diff --exit-code HEAD
