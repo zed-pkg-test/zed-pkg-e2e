@@ -1,0 +1,55 @@
+name: Atto integrated Rust corpus and Cranelift full native regressions
+on:
+  push:
+    branches: ['ci/atto-library-parity-wave15-20261126']
+permissions: {}
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - repo: atto-source.rs
+            head: 661aa79f1b576a3bc0b934c2f4e3a389e8ce2a35
+            tree: 68b15b95476b92226a2916a0fbeec1d9ae6a400d
+            profile: rust
+          - repo: atto-source.cranelift
+            head: 2d9064d1f87f81bf2c795c365dae5a005b2d7eeb
+            tree: 117bb04a15bcce51ab93b9ad2ee71ae0f531d14b
+            profile: cranelift
+    steps:
+      - name: Bind exact public commit and tree
+        env:
+          SOURCE_REPO: ${{ matrix.repo }}
+          SOURCE_HEAD: ${{ matrix.head }}
+          SOURCE_TREE: ${{ matrix.tree }}
+        run: |
+          set -euo pipefail
+          git init source
+          cd source
+          GIT_TERMINAL_PROMPT=0 git -c credential.helper= -c http.extraheader= fetch --no-tags --depth=1 "https://github.com/atto-lang/$SOURCE_REPO.git" "$SOURCE_HEAD"
+          git checkout --detach FETCH_HEAD
+          test "$(git rev-parse HEAD)" = "$SOURCE_HEAD"
+          test "$(git rev-parse HEAD^{tree})" = "$SOURCE_TREE"
+      - name: Rust host controls and actual library guest execution
+        if: matrix.profile == 'rust'
+        working-directory: source
+        run: |
+          set -euo pipefail
+          node --test tests/atto_libraries_harness.test.mjs
+          cargo build --locked --release --bin attoc
+          node tests/atto_libraries.mjs target/release/attoc
+      - name: Cranelift format native JIT and object regression
+        if: matrix.profile == 'cranelift'
+        working-directory: source
+        run: |
+          set -euo pipefail
+          rustup toolchain install 1.99.1 --profile minimal --component rustfmt --component clippy
+          cargo +1.99.1 fmt --all -- --check
+          cargo +1.99.1 test --locked --all-targets
+          cargo +1.99.1 clippy --locked --all-targets -- -D warnings
+      - name: Tracked source unchanged
+        working-directory: source
+        run: git diff --exit-code HEAD
