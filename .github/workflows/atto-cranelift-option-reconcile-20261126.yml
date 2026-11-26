@@ -1,0 +1,28 @@
+name: Cranelift reconciled Option formatting and native guests
+on:
+  push:
+    branches: ['ci/atto-cranelift-option-reconcile-20261126']
+permissions: {}
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - name: Bind exact public head and tree
+        run: |
+          set -euo pipefail
+          git init source
+          cd source
+          GIT_TERMINAL_PROMPT=0 git -c credential.helper= -c http.extraheader= fetch --no-tags --depth=1 https://github.com/atto-lang/atto-source.cranelift.git 7bad3361dedf4bf3d4f0d04cf80c1081bae81c16
+          git checkout --detach FETCH_HEAD
+          test "$(git rev-parse HEAD)" = 7bad3361dedf4bf3d4f0d04cf80c1081bae81c16
+          test "$(git rev-parse HEAD^{tree})" = 833066e2ff9f3e6593be8ed710b3a03b3bcf797c
+      - name: Full locked native JIT and object regression with formatting
+        working-directory: source
+        run: |
+          set -euo pipefail
+          rustup toolchain install 1.99.1 --profile minimal --component rustfmt --component clippy
+          cargo +1.99.1 fmt --all -- --check
+          cargo +1.99.1 test --locked --all-targets
+          cargo +1.99.1 clippy --locked --all-targets -- -D warnings
+          git diff --exit-code HEAD
