@@ -1,0 +1,37 @@
+name: Reconciled LLVM epoll current-main regression
+on:
+  push:
+    branches: ['ci/atto-llvm-epoll-reconciled-20261126']
+permissions: {}
+jobs:
+  admission:
+    runs-on: ubuntu-24.04
+    steps:
+      - run: |
+          set -euo pipefail
+          cc --version
+          c++ --version
+  epoll:
+    needs: admission
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Verify exact public source and native epoll lifecycle
+        run: |
+          set -euo pipefail
+          export GIT_TERMINAL_PROMPT=0
+          git init source
+          cd source
+          git -c credential.helper= -c http.extraheader= fetch --no-tags --depth=1 https://github.com/atto-lang/atto-source.llvm.git 1b7eb1be5703c993e1476939d3058de1f337bef8
+          git checkout --detach FETCH_HEAD
+          test "$(git rev-parse HEAD)" = 1b7eb1be5703c993e1476939d3058de1f337bef8
+          test "$(git rev-parse HEAD^{tree})" = f718f59ba6d2ecce69a4e704514918958afa2f47
+          git log -1 --format='%H %T'
+          rt=src/main/cpp/oreslang/runtime
+          out="$(mktemp -d)"
+          for unit in NativeExecutionContextStore NativeContinuationStore NativeAwaitTraceBridge; do
+            cc -std=c11 -D_POSIX_C_SOURCE=200809L -g -O1 -fsanitize=address,undefined -fno-omit-frame-pointer -pthread -Isrc/main/cpp -c "$rt/$unit.c" -o "$out/$unit.o"
+          done
+          c++ -std=c++17 -g -O1 -fsanitize=address,undefined -fno-omit-frame-pointer -pthread -Isrc/main/cpp tests/async_io_epoll_continuation_test.cpp "$out/"*.o -o "$out/regression"
+          ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=halt_on_error=1 timeout 60 "$out/regression"
+          git diff --exit-code HEAD
