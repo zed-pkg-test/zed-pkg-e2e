@@ -1,0 +1,104 @@
+name: Atto public exact-head export shift and bootstrap
+on:
+  pull_request:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  js:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Verify public exact head and changed blobs
+        shell: bash
+        run: |
+          git init -q source
+          git -C source remote add origin https://github.com/atto-lang/atto-source.js.git
+          git -C source fetch --no-tags --depth=1 origin 24675427528759552f36e87d4bcaab889556fc47
+          git -C source checkout --detach FETCH_HEAD
+          test "$(git -C source rev-parse HEAD)" = "24675427528759552f36e87d4bcaab889556fc47"
+          git -C source rev-parse 'HEAD^{tree}'
+          test "$(git -C source hash-object src/compiler.mjs)" = "30e6102d9b25c1940a03740eb96f36c86155eeab"
+          test "$(git -C source hash-object src/program-v2.mjs)" = "cf38c5d85f68bc21bb985922131182bbdf0575da"
+          test "$(git -C source hash-object tests/declarative-exports.test.mjs)" = "7ce8bb985bd4331899d6499403821daa3d85dca4"
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '22'
+      - name: Focused generated ESM regression
+        working-directory: source
+        run: node --test tests/declarative-exports.test.mjs
+      - name: Full Node regression
+        working-directory: source
+        run: npm test
+  rust:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Verify public exact head and changed blobs
+        shell: bash
+        run: |
+          git init -q source
+          git -C source remote add origin https://github.com/atto-lang/atto-source.rs.git
+          git -C source fetch --no-tags --depth=1 origin b46a6f12b190ac8d58417c35efc75c924efd2603
+          git -C source checkout --detach FETCH_HEAD
+          test "$(git -C source rev-parse HEAD)" = "b46a6f12b190ac8d58417c35efc75c924efd2603"
+          git -C source rev-parse 'HEAD^{tree}'
+          test "$(git -C source hash-object src/check.rs)" = "4ae1f2e42ad604bd411859cc8a7ff56f1ab8a542"
+          test "$(git -C source hash-object src/wasm.rs)" = "8415f8752a09230fb483ce4e7abb8007c8011259"
+          test "$(git -C source hash-object tests/checked-shift-distance.mjs)" = "e80a93ab44b7df8676b87c92289890f231b79b76"
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '22'
+      - name: Build native compiler and execute shift guests
+        working-directory: source
+        run: |
+          cargo build --locked --bin attoc
+          ATTOC="$PWD/target/debug/attoc" node tests/checked-shift-distance.mjs
+      - name: Rust regression
+        working-directory: source
+        run: cargo test --locked
+      - name: Verify public self-host seed and changed blobs
+        if: always()
+        shell: bash
+        run: |
+          git init -q seed
+          git -C seed remote add origin https://github.com/atto-lang/atto-source.atto.git
+          git -C seed fetch --no-tags --depth=1 origin b731b42e3e769e0c8cc2b2693e2274b15fc35cca
+          git -C seed checkout --detach FETCH_HEAD
+          test "$(git -C seed rev-parse HEAD)" = "b731b42e3e769e0c8cc2b2693e2274b15fc35cca"
+          git -C seed rev-parse 'HEAD^{tree}'
+          test "$(git -C seed hash-object src/suspension_effect_token.atto)" = "8ed884d396129f770ac0a3d6e50b0fbd284c5c19"
+          test "$(git -C seed hash-object tests/suspension-effect-bootstrap-guest.mjs)" = "7dfa277730fc0b562bfcb711f90f4f06a32bbb70"
+      - name: Execute native Atto seed as real Wasm
+        if: always()
+        run: node seed/tests/suspension-effect-bootstrap-guest.mjs "$PWD/source/target/debug/attoc"
+  cranelift:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Verify public exact head and changed blob
+        shell: bash
+        run: |
+          git init -q source
+          git -C source remote add origin https://github.com/atto-lang/atto-source.cranelift.git
+          git -C source fetch --no-tags --depth=1 origin 541f6629e5662965321d4bd06272fc26b2c429b7
+          git -C source checkout --detach FETCH_HEAD
+          test "$(git -C source rev-parse HEAD)" = "541f6629e5662965321d4bd06272fc26b2c429b7"
+          git -C source rev-parse 'HEAD^{tree}'
+          test "$(git -C source hash-object src/select_continuation_fence.rs)" = "5a9c955f9b22c89f8a45c07b3301a95f8d0cfed6"
+      - name: Execute standalone lease tests
+        working-directory: source
+        run: |
+          rustc --edition=2021 -D warnings --test src/select_continuation_fence.rs -o /tmp/atto-fence
+          /tmp/atto-fence
+      - name: Native compiler regression
+        working-directory: source
+        run: cargo test --locked --all-targets
+      - name: Formatting check
+        if: always()
+        working-directory: source
+        run: cargo fmt --all -- --check
+      - name: Strict lint check
+        if: always()
+        working-directory: source
+        run: cargo clippy --locked --all-targets -- -D warnings
