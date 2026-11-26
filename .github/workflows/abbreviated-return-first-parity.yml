@@ -1,0 +1,93 @@
+name: Seven annotated return-first callable forms exact source parity
+on:
+  push:
+    branches: ['ci/abbreviated-return-first-parity-20261126']
+permissions:
+  contents: read
+jobs:
+  rust:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - name: Verify public Rust exact source
+        run: |
+          set -euo pipefail
+          git init source
+          git -C source -c credential.helper= fetch --depth=1 https://github.com/atto-lang/atto-source.rs.git c2f11feb74645971eee8637d6771b677ab4b56ea
+          git -C source checkout --detach FETCH_HEAD
+          test "$(git -C source rev-parse HEAD)" = c2f11feb74645971eee8637d6771b677ab4b56ea
+          test "$(git -C source rev-parse 'HEAD^{tree}')" = c379a705bfdbb31ef1e8668b775cd47940927f79
+      - name: Build native and browser compiler and execute typed proof tests
+        working-directory: source
+        run: |
+          set -euo pipefail
+          rustup toolchain install 1.85.1 --profile minimal --target wasm32-unknown-unknown
+          cargo +1.85.1 test --locked --test allocation_guarantees_v1
+          cargo +1.85.1 build --locked --release --bin attoc
+          cargo +1.85.1 rustc --locked --release --lib --target wasm32-unknown-unknown --crate-type cdylib -- -C link-arg=--max-memory=67108864
+      - name: Execute seven actual scalar guests through both compilers
+        working-directory: source
+        run: |
+          node --input-type=module <<'JS'
+          import fs from 'node:fs';
+          import assert from 'node:assert/strict';
+          import {execFileSync} from 'node:child_process';
+          const api=new WebAssembly.Instance(new WebAssembly.Module(fs.readFileSync('target/wasm32-unknown-unknown/release/atto_compiler.wasm')),{}).exports;
+          const headers=['define fnc int • process(int data)','define fnc int <- process(int data)','define fnc process(int data) -> int','define fnc process(int data): int','define fnc process(int data) : int ->','define int <- process(int data)','int <- process(int data)'];
+          for(const marker of ['','@nocopy\n','@noalloc\n','@noalloc\n@nocopy\n']){
+            let reference;
+            for(const h of headers){
+              const src=marker+h+' { return data; }\npub fnc main():int { return process(42); }';
+              fs.writeFileSync('/tmp/abbreviated.atto',src);
+              const native=execFileSync('target/release/attoc',['/tmp/abbreviated.atto']);
+              const input=new TextEncoder().encode(src);
+              new Uint8Array(api.memory.buffer,api.input_ptr(),input.length).set(input);
+              assert.equal(api.compile(input.length),0);
+              const browser=Buffer.from(new Uint8Array(api.memory.buffer,api.result_ptr(),api.result_length()));
+              assert.deepEqual(native,browser);
+              reference??=native;
+              assert.deepEqual(native,reference);
+              assert.equal(new WebAssembly.Instance(new WebAssembly.Module(native),{}).exports.main(),42n);
+              console.log('PASS '+JSON.stringify(marker)+' '+h);
+            }
+          }
+          JS
+      - name: Full Cargo regression
+        working-directory: source
+        run: cargo +1.85.1 test --locked
+  js:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Verify public JavaScript exact source
+        run: |
+          set -euo pipefail
+          git init source
+          git -C source -c credential.helper= fetch --depth=1 https://github.com/atto-lang/atto-source.js.git 463ccdb83c6da4d7f0002a665a10a823c9620ff9
+          git -C source checkout --detach FETCH_HEAD
+          test "$(git -C source rev-parse HEAD)" = 463ccdb83c6da4d7f0002a665a10a823c9620ff9
+          test "$(git -C source rev-parse 'HEAD^{tree}')" = e4cae0a7c1eeb013b5ad42b6f4447f2c8daa10c2
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: 22
+      - name: Focused emitted ESM and full regression
+        working-directory: source
+        run: |
+          set -euo pipefail
+          node --test tests/scalar-allocation-guarantees-v1.test.mjs tests/ownership-bang-admission.test.mjs
+          npm test
+  contract:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Verify exact public conformance source
+        run: |
+          set -euo pipefail
+          git init source
+          git -C source -c credential.helper= fetch --depth=1 https://github.com/atto-lang/atto-platform-conformance.git 63a9031dc6fd9868f4255b2bd55db4895b62e226
+          git -C source checkout --detach FETCH_HEAD
+          test "$(git -C source rev-parse HEAD)" = 63a9031dc6fd9868f4255b2bd55db4895b62e226
+          test "$(git -C source rev-parse 'HEAD^{tree}')" = 699401bc08c593384fa2021a1cbe7ac692377884
+      - name: Structural targets only
+        working-directory: source
+        run: node --test tests/noalloc-nocopy-guarantees-v1.test.mjs tests/default-allocation-copy-parity-v1.test.mjs tests/default-allocation-receipt-v1.test.mjs
