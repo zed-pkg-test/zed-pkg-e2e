@@ -1,0 +1,101 @@
+name: Atto integrated ownership and HDL qualification
+on:
+  push:
+    branches: [ci/atto-parity-ownership-20261126-batch3]
+permissions: {}
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - backend: rs
+            head: '966155095c49678c36631231eee5eccfd347e2ae'
+            tree: '1a4f9d32b49a608a48a4aa89023a6da5b217d67e'
+          - backend: js
+            head: 'ab7517e1147cb7efba9df706e7b68c33df4cd0e8'
+            tree: 'aac8e172c3726e35cd33ffa79fbee7605d1d21c9'
+          - backend: hdl
+            head: 'c19fed113545782f85d8774add3cfdabe53ac632'
+            tree: 'be77838ddf0c204f0724e1247e7ddac9b2afcc3c'
+    env:
+      BACKEND: ${{ matrix.backend }}
+      SOURCE_HEAD: ${{ matrix.head }}
+      SOURCE_TREE: ${{ matrix.tree }}
+    steps:
+      - name: Bind exact public source
+        run: |
+          set -euo pipefail
+          git init "$RUNNER_TEMP/source"
+          cd "$RUNNER_TEMP/source"
+          git -c credential.helper= fetch --no-tags --depth=1 "https://github.com/atto-lang/atto-source.${BACKEND}.git" "$SOURCE_HEAD"
+          git checkout --detach FETCH_HEAD
+          test "$(git rev-parse HEAD)" = "$SOURCE_HEAD"
+          test "$(git rev-parse HEAD^{tree})" = "$SOURCE_TREE"
+      - name: Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install Icarus Verilog
+        if: matrix.backend == 'hdl'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y iverilog
+          iverilog -V
+      - name: HDL focused and full simulation regression
+        if: matrix.backend == 'hdl'
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP/source"
+          node --test tests/suspension-alias-counted-profile.test.mjs
+          npm test
+      - name: JS focused and full integrated regression
+        if: matrix.backend == 'js'
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP/source"
+          node --test tests/actor-compressed32.test.mjs tests/scalar-allocation-guarantees-v1.test.mjs
+          npm test
+      - name: Rust focused checks and real Wasm guest equivalence
+        if: matrix.backend == 'rs'
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP/source"
+          cargo test --locked --test move_take_equivalence
+          cargo build --locked --bin attoc
+          cp tests/fixtures/pass/move-bang-owned-class.atto "$RUNNER_TEMP/move.atto"
+          sed 's/move! /take! /g' "$RUNNER_TEMP/move.atto" > "$RUNNER_TEMP/take.atto"
+          for spelling in move take; do
+            target/debug/attoc "$RUNNER_TEMP/$spelling.atto" -o "$RUNNER_TEMP/$spelling.wasm"
+          done
+          cmp "$RUNNER_TEMP/move.wasm" "$RUNNER_TEMP/take.wasm"
+          node --input-type=module - "$RUNNER_TEMP/move.wasm" "$RUNNER_TEMP/take.wasm" <<'JS'
+          import assert from 'node:assert/strict';
+          import {readFileSync} from 'node:fs';
+          for (const path of process.argv.slice(2)) {
+            const module = new WebAssembly.Module(readFileSync(path));
+            const atto = Object.fromEntries(['print_i64','print_bool','print_f64','print_str','print_newline','actor_spawn','actor_send'].map(n => [n,()=>{throw Error('unexpected guest import '+n)}]));
+            for (const binding of WebAssembly.Module.imports(module)) assert.ok(binding.module==='atto' && Object.hasOwn(atto,binding.name));
+            const guest = new WebAssembly.Instance(module,{atto});
+            assert.equal(guest.exports.main(),42n);
+            assert.equal(guest.exports.panic_code.value,0);
+            console.log('PASS real transfer guest',path);
+          }
+          JS
+      - name: Rust full regressions and browser compiler build
+        if: matrix.backend == 'rs'
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP/source"
+          cargo test --locked --all-targets
+          rustup target add wasm32-unknown-unknown
+          cargo build --locked --release --target wasm32-unknown-unknown --lib
+      - name: Source identity unchanged
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP/source"
+          test "$(git rev-parse HEAD^{tree})" = "$SOURCE_TREE"
+          git diff --exit-code
+          git diff --cached --exit-code
