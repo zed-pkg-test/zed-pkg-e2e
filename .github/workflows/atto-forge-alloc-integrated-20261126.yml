@@ -1,0 +1,27 @@
+name: Forge integrated closed allocation actual native regression
+on:
+  push:
+    branches: ['ci/atto-forge-alloc-integrated-20261126']
+permissions: {}
+jobs:
+  native:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - name: Bind exact public head and tree
+        run: |
+          set -euo pipefail
+          git init source
+          cd source
+          GIT_TERMINAL_PROMPT=0 git -c credential.helper= -c http.extraheader= fetch --no-tags --depth=1 https://github.com/atto-lang/atto-source.forge.git 0e1190829b8e5a5003b1404688fa3a4f8ea30687
+          git checkout --detach FETCH_HEAD
+          test "$(git rev-parse HEAD)" = 0e1190829b8e5a5003b1404688fa3a4f8ea30687
+          test "$(git rev-parse HEAD^{tree})" = 240006d331b1e44b6dc1e60b12a77dc756414da3
+      - name: Full native build and regressions
+        working-directory: source
+        run: |
+          set -euo pipefail
+          cmake -S . -B "$RUNNER_TEMP/forge" -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON
+          cmake --build "$RUNNER_TEMP/forge" -j2
+          ctest --test-dir "$RUNNER_TEMP/forge" --output-on-failure --no-tests=error
+          git diff --exit-code HEAD
