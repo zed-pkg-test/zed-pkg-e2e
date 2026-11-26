@@ -1,0 +1,130 @@
+name: Atto exact public lifecycle parity batch 2
+on:
+  pull_request:
+    branches: [main]
+permissions: {}
+jobs:
+  cranelift-main:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Verify exact public source identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          export GIT_TERMINAL_PROMPT=0 GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null
+          git init source
+          git -C source -c credential.helper= -c http.extraHeader= fetch --no-tags --depth=1 https://github.com/atto-lang/atto-source.cranelift.git 30070a11f419e3f15e570a9f5c08855381335e5b
+          git -C source -c core.hooksPath=/dev/null checkout --detach FETCH_HEAD
+          test "$(git -C source rev-parse HEAD)" = 30070a11f419e3f15e570a9f5c08855381335e5b
+          test "$(git -C source write-tree)" = "$(git -C source rev-parse 'HEAD^{tree}')"
+          test "$(git -C source hash-object Cargo.toml)" = 85b988fab947c1f3dec0d9c00e414695778cf425
+          git -C source diff --exit-code HEAD
+          git -C source rev-parse HEAD 'HEAD^{tree}'
+      - name: Execute scoped compiler or runtime checks
+        shell: bash
+        working-directory: source
+        run: |
+          set -euo pipefail
+          cargo fmt --all -- --check
+          cargo clippy --all-targets --locked -- -D warnings
+          cargo test --all-targets --locked
+  cranelift-lease:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Verify exact public source identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          export GIT_TERMINAL_PROMPT=0 GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null
+          git init source
+          git -C source -c credential.helper= -c http.extraHeader= fetch --no-tags --depth=1 https://github.com/atto-lang/atto-source.cranelift.git 541f6629e5662965321d4bd06272fc26b2c429b7
+          git -C source -c core.hooksPath=/dev/null checkout --detach FETCH_HEAD
+          test "$(git -C source rev-parse HEAD)" = 541f6629e5662965321d4bd06272fc26b2c429b7
+          test "$(git -C source write-tree)" = "$(git -C source rev-parse 'HEAD^{tree}')"
+          test "$(git -C source hash-object Cargo.toml)" = 85b988fab947c1f3dec0d9c00e414695778cf425
+          git -C source diff --exit-code HEAD
+          git -C source rev-parse HEAD 'HEAD^{tree}'
+      - name: Execute scoped compiler or runtime checks
+        shell: bash
+        working-directory: source
+        run: |
+          set -euo pipefail
+          cargo test --all-targets --locked
+          cargo fmt --all -- --check
+          cargo clippy --all-targets --locked -- -D warnings
+  rust-shifts:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Verify exact public source identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          export GIT_TERMINAL_PROMPT=0 GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null
+          git init source
+          git -C source -c credential.helper= -c http.extraHeader= fetch --no-tags --depth=1 https://github.com/atto-lang/atto-source.rs.git d40fba9a56f7086f5aaa09b48b87bf3ac983bcf1
+          git -C source -c core.hooksPath=/dev/null checkout --detach FETCH_HEAD
+          test "$(git -C source rev-parse HEAD)" = d40fba9a56f7086f5aaa09b48b87bf3ac983bcf1
+          test "$(git -C source write-tree)" = "$(git -C source rev-parse 'HEAD^{tree}')"
+          test "$(git -C source hash-object tests/checked-shift-distance.mjs)" = e80a93ab44b7df8676b87c92289890f231b79b76
+          git -C source diff --exit-code HEAD
+          git -C source rev-parse HEAD 'HEAD^{tree}'
+      - name: Execute scoped compiler or runtime checks
+        shell: bash
+        working-directory: source
+        run: |
+          set -euo pipefail
+          cargo build --locked --bin attoc
+          ATTOC="$PWD/target/debug/attoc" node tests/checked-shift-distance.mjs
+          cargo test --locked --all-targets
+  wasm-worker-host:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Verify exact public source identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          export GIT_TERMINAL_PROMPT=0 GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null
+          git init source
+          git -C source -c credential.helper= -c http.extraHeader= fetch --no-tags --depth=1 https://github.com/atto-lang/atto-source.wasm.git e39c5f34d14c0d4009eb4b1b532949ce27cdeb87
+          git -C source -c core.hooksPath=/dev/null checkout --detach FETCH_HEAD
+          test "$(git -C source rev-parse HEAD)" = e39c5f34d14c0d4009eb4b1b532949ce27cdeb87
+          test "$(git -C source write-tree)" = "$(git -C source rev-parse 'HEAD^{tree}')"
+          test "$(git -C source hash-object package.json)" = 0a01e1e269278dad5cf0382abb416b9274b5f0b5
+          git -C source diff --exit-code HEAD
+          git -C source rev-parse HEAD 'HEAD^{tree}'
+      - name: Execute scoped compiler or runtime checks
+        shell: bash
+        working-directory: source
+        run: |
+          set -euo pipefail
+          node --version
+          npm run test:managed-pooled-actors
+          npm test
+  net-arena-host:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Verify exact public source identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          export GIT_TERMINAL_PROMPT=0 GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null
+          git init source
+          git -C source -c credential.helper= -c http.extraHeader= fetch --no-tags --depth=1 https://github.com/atto-lang/atto-source.net.git fe3a9a5f13c6fd70b11fb2c43a8818ceb35635d2
+          git -C source -c core.hooksPath=/dev/null checkout --detach FETCH_HEAD
+          test "$(git -C source rev-parse HEAD)" = fe3a9a5f13c6fd70b11fb2c43a8818ceb35635d2
+          test "$(git -C source write-tree)" = "$(git -C source rev-parse 'HEAD^{tree}')"
+          test "$(git -C source hash-object verification/Ores.Net.Tests/Ores.Net.Tests.csproj)" = 21965242d483f00abb36928969e5726dfc85849e
+          git -C source diff --exit-code HEAD
+          git -C source rev-parse HEAD 'HEAD^{tree}'
+      - name: Execute scoped compiler or runtime checks
+        shell: bash
+        working-directory: source
+        run: |
+          set -euo pipefail
+          dotnet --info
+          dotnet run --project verification/Ores.Net.Tests/Ores.Net.Tests.csproj -c Release
