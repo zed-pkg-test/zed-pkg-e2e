@@ -1,0 +1,64 @@
+name: Atto owned factory transfer and Cranelift strict lint retest
+on:
+  push:
+    branches: ['ci/atto-library-parity-wave16-20261126']
+permissions: {}
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - repo: atto-source.llvm
+            head: b5c792500a7ca90a1a721740a22c7bd46863ea29
+            tree: c85c5b6d2a744f84782e0b3a39aefbd34d70b1c0
+            profile: llvm
+          - repo: atto-source.cranelift
+            head: 3089eee9d505e71222b3de3eb6703d248a20672b
+            tree: 0aad340ad37acdb3a56dd70fc42fe78355f9f367
+            profile: cranelift
+    steps:
+      - name: Bind exact public commit and tree
+        env:
+          SOURCE_REPO: ${{ matrix.repo }}
+          SOURCE_HEAD: ${{ matrix.head }}
+          SOURCE_TREE: ${{ matrix.tree }}
+        run: |
+          set -euo pipefail
+          git init source
+          cd source
+          GIT_TERMINAL_PROMPT=0 git -c credential.helper= -c http.extraheader= fetch --no-tags --depth=1 "https://github.com/atto-lang/$SOURCE_REPO.git" "$SOURCE_HEAD"
+          git checkout --detach FETCH_HEAD
+          test "$(git rev-parse HEAD)" = "$SOURCE_HEAD"
+          test "$(git rev-parse HEAD^{tree})" = "$SOURCE_TREE"
+      - name: LLVM compiler build and baseline corpus
+        if: matrix.profile == 'llvm'
+        working-directory: source
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y build-essential cmake clang llvm-dev
+          cmake -S . -B "$RUNNER_TEMP/llvm" -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON
+          cmake --build "$RUNNER_TEMP/llvm" --parallel 2 --target oreslang-llvmc
+          python3 tests/atto_libraries_v1.py --compiler "$RUNNER_TEMP/llvm/oreslang-llvmc" --clang "$(command -v clang)"
+      - name: Native direct factory transfer and original allocator fixtures
+        if: matrix.profile == 'llvm'
+        working-directory: source
+        run: |
+          set -euo pipefail
+          python3 tests/native_owned_factory_take.py --compiler "$RUNNER_TEMP/llvm/oreslang-llvmc" --clang "$(command -v clang)"
+          python3 tests/atto_alloc_guest.py --compiler "$RUNNER_TEMP/llvm/oreslang-llvmc" --clang "$(command -v clang)"
+      - name: Cranelift formatting native JIT object and strict lint
+        if: matrix.profile == 'cranelift'
+        working-directory: source
+        run: |
+          set -euo pipefail
+          rustup toolchain install 1.99.1 --profile minimal --component rustfmt --component clippy
+          cargo +1.99.1 fmt --all -- --check
+          cargo +1.99.1 test --locked --all-targets
+          cargo +1.99.1 clippy --locked --all-targets -- -D warnings
+      - name: Tracked source unchanged
+        working-directory: source
+        run: git diff --exit-code HEAD
