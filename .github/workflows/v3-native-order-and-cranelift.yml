@@ -13,11 +13,11 @@ jobs:
       matrix:
         include:
           - repo: atto-source.net
-            sha: 13bb832ad3c78800bd2a72928b0a4ad202adc13d
-            tree: a55d71035c36e2bfe7866f26f54f7bc6b09bf67a
+            sha: dc9a7a816518be21d7f1db0ead943251176e44fc
+            tree: 60123e2bc97282ebdb9f0b2137735b5438440f66
           - repo: atto-source.cranelift
-            sha: b36bb8a8b9ab055e00e2b04e7d901105f5d78054
-            tree: 563b20e0d5bcab61a28796b595e507f517bdac7e
+            sha: 051897d80e1b3f767201ac4d226424c1278e19fb
+            tree: 1aac75d50cb2c9bf9f1b8b41684399a886d15a99
     env:
       SOURCE_REPO: ${{ matrix.repo }}
       SOURCE_SHA: ${{ matrix.sha }}
