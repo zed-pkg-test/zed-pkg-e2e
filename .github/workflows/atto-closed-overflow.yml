@@ -1,0 +1,77 @@
+name: Atto exact public hosted arithmetic qualification
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened]
+permissions: {}
+jobs:
+  overflow:
+    if: github.head_ref == 'ci/atto-closed-overflow-20261126'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Verify exact public LLVM source
+        shell: bash
+        run: |
+          set -euo pipefail
+          git init source
+          GIT_TERMINAL_PROMPT=0 git -C source -c credential.helper= -c http.extraHeader= fetch --depth=1 https://github.com/atto-lang/atto-source.llvm.git 0bb5a340d9d79bcf95fc546b19c1b210aae6504d
+          git -C source checkout --detach FETCH_HEAD
+          test "$(git -C source rev-parse HEAD)" = 0bb5a340d9d79bcf95fc546b19c1b210aae6504d
+          git -C source log -1 --format='%H %T'
+          test -z "$(git -C source status --porcelain)"
+          test "$(git -C source hash-object src/main/cpp/oreslang/backend/LlvmCodegen.cpp)" = 247141d9d25b4a0937aa3f7f35ec927e7bb9e0c6
+          test "$(git -C source hash-object src/main/cpp/oreslang/types/NativeNumericErrorAbi.hpp)" = 38b570851a1a246f4e26f6bfeb0c7ab48de479e2
+      - name: Build production LLVM compiler and AOT auditor
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y llvm-18-dev clang-18 cmake ninja-build
+          cmake -S source -B build -G Ninja -DBUILD_TESTING=OFF -DCMAKE_BUILD_TYPE=Release -DLLVM_DIR="$(llvm-config-18 --cmakedir)" -DCMAKE_C_COMPILER=clang-18 -DCMAKE_CXX_COMPILER=clang++-18
+          cmake --build build --target oreslang-llvmc --parallel 2
+          rustc --edition=2021 -D warnings source/scripts/audit_no_gc_ir.rs -o build/oreslang-no-gc-ir-audit
+      - name: Require recoverable overflow and successful result in real native guests
+        shell: bash
+        run: |
+          set -euo pipefail
+          for name in add sub mul neg nested_overflow success; do
+            fixture="source/tests/fixtures/trap-arithmetic-$name.atto"
+            build/oreslang-llvmc "$fixture" > "$name.ll"
+            grep -F 'trap.arithmetic.err' "$name.ll"
+            grep -F '65537' "$name.ll"
+            for level in 0 2; do
+              ORESLANG_LLVMC="$PWD/build/oreslang-llvmc" ORES_NO_GC_IR_AUDIT="$PWD/build/oreslang-no-gc-ir-audit" ORESLANG_LLVM_AOT_OPT_LEVEL="$level" CLANG=clang-18 bash source/scripts/compile-aot.sh "$fixture" "$PWD/guest-$name-O$level"
+              status=0
+              "./guest-$name-O$level" > guest.out 2> guest.err || status=$?
+              test "$status" = 42
+              test ! -s guest.out
+              test ! -s guest.err
+              echo "REAL_HOSTED_TRAP_OVERFLOW_PASS $name O$level"
+            done
+          done
+      - name: Preserve ordinary terminal overflow and nominal Result regression
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash source/scripts/test-trap-int-aot.sh "$PWD/build/oreslang-llvmc" clang-18 "$PWD/build/oreslang-no-gc-ir-audit" "$PWD/source/tests/fixtures/trap-int-native42.atto" "$PWD/source/tests/fixtures/trap-int-overflow-terminal.atto" "$PWD/source/scripts/compile-aot.sh"
+          for name in ok err nested; do
+            for level in 0 2; do
+              ORESLANG_LLVMC="$PWD/build/oreslang-llvmc" ORES_NO_GC_IR_AUDIT="$PWD/build/oreslang-no-gc-ir-audit" ORESLANG_LLVM_AOT_OPT_LEVEL="$level" CLANG=clang-18 bash source/scripts/compile-aot.sh "source/tests/fixtures/trap-result-idempotent-$name.atto" "$PWD/result-$name-O$level"
+              status=0
+              "./result-$name-O$level" || status=$?
+              test "$status" = 42
+            done
+          done
+          for name in option wrong-type scalar; do
+            status=0
+            build/oreslang-llvmc "source/tests/fixtures/trap-result-idempotent-$name-reject.atto" > reject.ll 2> reject.err || status=$?
+            test "$status" -gt 0
+            test "$status" -lt 128
+            test ! -s reject.ll
+            case "$name" in
+              option) grep -F 'native trap Option payload requires checked nested ownership ABI' reject.err;;
+              wrong-type) grep -F 'native trap existing Result type does not match expected Result' reject.err;;
+              scalar) grep -F 'native trap operand unsupported: only pure integer literals and checked arithmetic are lowered, or existing Result values' reject.err;;
+            esac
+          done
