@@ -1,0 +1,82 @@
+name: Atto public runtime exact-head regression
+on:
+  push:
+    branches: ['ci/atto-public-runtime-20261126']
+permissions: {}
+jobs:
+  admission:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Source-free toolchain and timer admission
+        run: |
+          set -euo pipefail
+          node --version
+          cc --version
+          node -e 'setTimeout(()=>{console.log("source-free timer passed")},0)'
+  runtime:
+    needs: admission
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - repo: atto-lang.github.io
+            head: cf9574ff7da75ff0f061cecb8c63db90b9c7cca9
+            tree: c9beaa0954786c2e24c78018c78ab1985bec12ba
+            profile: playground
+          - repo: atto-source.wasm
+            head: aa3d20340275ac23bc77a7cc8148891901d41c76
+            tree: b7bc02b7873ed384b4adc30f689288facb90a7d4
+            profile: wasm
+          - repo: atto-source.llvm
+            head: 5fad0dca7086fabce721b2c1f01cedc157616ebe
+            tree: f68cb39976c2a75d882470e77229121a99731e3e
+            profile: llvm
+    steps:
+      - name: Fetch immutable PUBLIC source without credentials
+        env:
+          SOURCE_REPO: ${{ matrix.repo }}
+          SOURCE_HEAD: ${{ matrix.head }}
+          SOURCE_TREE: ${{ matrix.tree }}
+          GIT_TERMINAL_PROMPT: '0'
+        run: |
+          set -euo pipefail
+          git init source
+          cd source
+          git -c credential.helper= -c http.extraheader= fetch --no-tags --depth=1 "https://github.com/atto-lang/$SOURCE_REPO.git" "$SOURCE_HEAD"
+          git checkout --detach FETCH_HEAD
+          test "$(git rev-parse HEAD)" = "$SOURCE_HEAD"
+          test "$(git rev-parse HEAD^{tree})" = "$SOURCE_TREE"
+          git diff --exit-code HEAD
+          git log -1 --format='%H %T'
+      - name: Playground actual pinned compiler and Wasm actors
+        if: matrix.profile == 'playground'
+        working-directory: source/play
+        run: |
+          set -euo pipefail
+          node --version
+          node --test tests/actor-event-loop-progress.test.mjs tests/actor-host.test.mjs tests/actor-wasm32-isolation.test.mjs
+      - name: Wasm host actor frame and continuation tests
+        if: matrix.profile == 'wasm'
+        working-directory: source
+        run: |
+          set -euo pipefail
+          node --version
+          node --test tests/actor-frame-event-loop-integration.test.mjs tests/actor-frame-stacks.test.mjs tests/actor-arena.test.mjs tests/pinned-continuation-gate.test.mjs
+      - name: LLVM real epoll native regression with sanitizers
+        if: matrix.profile == 'llvm'
+        working-directory: source
+        run: |
+          set -euo pipefail
+          rt=src/main/cpp/oreslang/runtime
+          out="$(mktemp -d)"
+          for unit in NativeExecutionContextStore NativeContinuationStore NativeAwaitTraceBridge; do
+            cc -std=c11 -D_POSIX_C_SOURCE=200809L -g -O1 -fsanitize=address,undefined -fno-omit-frame-pointer -pthread -Isrc/main/cpp -c "$rt/$unit.c" -o "$out/$unit.o"
+          done
+          c++ -std=c++17 -g -O1 -fsanitize=address,undefined -fno-omit-frame-pointer -pthread -Isrc/main/cpp tests/async_io_epoll_continuation_test.cpp "$out/"*.o -o "$out/regression"
+          ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=halt_on_error=1 timeout 60 "$out/regression"
+      - name: Require source tree unchanged
+        working-directory: source
+        run: git diff --exit-code HEAD
