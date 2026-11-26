@@ -1,0 +1,97 @@
+name: Atto library guard and compiler parity wave 3
+on:
+  push:
+    branches: ['ci/atto-library-wave3-20261126']
+permissions: {}
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - repo: atto-common-source
+            head: da48e8e11e9c889a32d0b65ce1d4698abb870d12
+            tree: 7f81b93c2634db83504e9e958740e00c9418e4f1
+            profile: common
+          - repo: atto-platform-conformance
+            head: 5cb84ec3801e88a3b2bd3506a8fb69234321a956
+            tree: fbc98a5b74b1e6f9e1f2c8c54ccd6503393f2e38
+            profile: evidence
+          - repo: atto-platform-conformance
+            head: f20dee36184477af5b3fbac6ef6d52a6010f3d31
+            tree: bc846a19d3d39d4aac856e4790defe28b03d8d19
+            profile: unwrap
+          - repo: atto-platform-conformance
+            head: 54a6d25fa7ecb9ef26105eee3e9c2a1a4ed35c12
+            tree: f10490ecdd452526f591b4951a17ac12b067d6be
+            profile: allocation
+          - repo: atto-source.rs
+            head: e60fb78593e205d7e39b85bc6f1648565e5b3768
+            tree: a2db45e161ec8e317e22a02fd098bd91fec23a0e
+            profile: rust
+          - repo: atto-source.llvm
+            head: f1963876bddd700ab41c78059de72a4b2bd2e726
+            tree: 02bdce1a279f5e27338a89202ddf90efe35c9986
+            profile: llvm
+    steps:
+      - name: Bind public exact head and tree
+        env:
+          SOURCE_REPO: ${{ matrix.repo }}
+          SOURCE_HEAD: ${{ matrix.head }}
+          SOURCE_TREE: ${{ matrix.tree }}
+          GIT_TERMINAL_PROMPT: '0'
+        run: |
+          set -euo pipefail
+          git init source
+          cd source
+          git -c credential.helper= -c http.extraheader= fetch --no-tags --depth=1 "https://github.com/atto-lang/$SOURCE_REPO.git" "$SOURCE_HEAD"
+          git checkout --detach FETCH_HEAD
+          test "$(git rev-parse HEAD)" = "$SOURCE_HEAD"
+          test "$(git rev-parse HEAD^{tree})" = "$SOURCE_TREE"
+          git log -1 --format='%H %T'
+      - name: Common structural tests
+        if: matrix.profile == 'common'
+        working-directory: source
+        run: |
+          set -euo pipefail
+          node --test tests/library-layers.test.mjs tests/canonical-stdlib-bytes.test.mjs tests/byte_buffer_source_contract.test.mjs tests/alloc_core_std_source.test.mjs
+          node src/library-layers.mjs .
+      - name: Exact run evidence classifier controls
+        if: matrix.profile == 'evidence'
+        working-directory: source
+        run: node --test tests/atto-library-run-evidence-v1.test.mjs
+      - name: Checked unwrap source integrity
+        if: matrix.profile == 'unwrap'
+        working-directory: source
+        run: |
+          set -euo pipefail
+          node --test tests/checked-unwrap-v6-integrity.test.mjs
+          node bin/verify-checked-unwrap-v6.mjs
+      - name: Allocation and copy target registry controls
+        if: matrix.profile == 'allocation'
+        working-directory: source
+        run: node --test tests/default-allocation-copy-parity-v1.test.mjs tests/default-allocation-receipt-v1.test.mjs
+      - name: Rust native compiler and Wasm corpus
+        if: matrix.profile == 'rust'
+        working-directory: source
+        run: |
+          set -euo pipefail
+          node --test tests/atto_libraries_harness.test.mjs
+          cargo build --locked --release --bin attoc
+          node tests/atto_libraries.mjs target/release/attoc
+      - name: LLVM native compiler and corpus
+        if: matrix.profile == 'llvm'
+        working-directory: source
+        run: |
+          set -euo pipefail
+          python3 tests/test_atto_library_case_guard.py
+          sudo apt-get update
+          sudo apt-get install -y build-essential cmake clang llvm-dev
+          cmake -S . -B "$RUNNER_TEMP/llvm" -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON
+          cmake --build "$RUNNER_TEMP/llvm" --parallel 2 --target oreslang-llvmc
+          python3 tests/atto_libraries_v1.py --compiler "$RUNNER_TEMP/llvm/oreslang-llvmc" --clang "$(command -v clang)"
+      - name: Tracked source unchanged
+        working-directory: source
+        run: git diff --exit-code HEAD
