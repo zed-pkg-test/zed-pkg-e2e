@@ -1,0 +1,146 @@
+name: Atto exact public shift and frontend parity qualification
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened]
+permissions: {}
+jobs:
+  shift-flow:
+    if: github.head_ref == 'ci/atto-shift-proof-and-admission-20261126'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - name: Verify exact public compiler source
+        shell: bash
+        run: |
+          set -euo pipefail
+          git init source
+          GIT_TERMINAL_PROMPT=0 git -C source -c credential.helper= -c http.extraHeader= fetch --depth=1 https://github.com/atto-lang/atto-source.llvm.git f138594dc8779a6f5427b8387194e52dda318d8e
+          git -C source checkout --detach FETCH_HEAD
+          test "$(git -C source rev-parse HEAD)" = f138594dc8779a6f5427b8387194e52dda318d8e
+          git -C source log -1 --format='%H %T'
+          test -z "$(git -C source status --porcelain)"
+          test "$(git -C source hash-object tests/formal/checked-shift/check_shift.py)" = a3dc5d425b6d4666c4d8eaed2242d0fe6bbb1fc8
+          test "$(git -C source hash-object tests/formal/checked-shift/test_shift.py)" = 4513625af395245f0dad02a1204a06dd07bea412
+      - name: Build production LLVM compiler and AOT auditor
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y llvm-18-dev clang-18 cmake ninja-build
+          cmake -S source -B build -G Ninja -DBUILD_TESTING=OFF -DCMAKE_BUILD_TYPE=Release -DLLVM_DIR="$(llvm-config-18 --cmakedir)" -DCMAKE_C_COMPILER=clang-18 -DCMAKE_CXX_COMPILER=clang++-18
+          cmake --build build --target oreslang-llvmc --parallel 2
+          rustc --edition=2021 -D warnings source/scripts/audit_no_gc_ir.rs -o build/oreslang-no-gc-ir-audit
+      - name: Validate actual emitted shift IR and execute audited guest
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m venv proof-env
+          proof-env/bin/pip install --only-binary=:all: llvmlite==0.47.0
+          proof-env/bin/python source/tests/formal/checked-shift/test_shift.py
+          cat > shift.atto <<'ATTO'
+          pub fnc left_shift(int a, int n): int { return a <<< n; }
+          pub fnc right_shift(int a, int n): int { return a >>> n; }
+          pub fnc sign_shift(int a, int n): int { return a ashr n; }
+          pub fnc main(): int { return left_shift(8, 2) + right_shift(32, 2) + sign_shift(-8, 1) + 6; }
+          ATTO
+          build/oreslang-llvmc shift.atto > actual.ll
+          cat actual.ll
+          for pair in 'left_shift shl' 'right_shift lshr' 'sign_shift ashr'; do
+            read -r symbol op <<< "$pair"
+            proof-env/bin/python source/tests/formal/checked-shift/check_shift.py actual.ll "$symbol" "$op"
+          done
+          for level in 0 2; do
+            ORESLANG_LLVMC="$PWD/build/oreslang-llvmc" ORES_NO_GC_IR_AUDIT="$PWD/build/oreslang-no-gc-ir-audit" ORESLANG_LLVM_AOT_OPT_LEVEL="$level" CLANG=clang-18 bash source/scripts/compile-aot.sh shift.atto "$PWD/shift-O$level"
+            status=0
+            "./shift-O$level" || status=$?
+            test "$status" = 42
+            echo "REAL_ATTO_SHIFT_GUEST_PASS O$level exit=$status"
+          done
+      - name: Require computed negative and oversized distances to trap
+        shell: bash
+        run: |
+          set -euo pipefail
+          ulimit -c 0
+          for op in '<<<' '>>>' 'ashr'; do
+            for count in '(63 + 1)' '(0 - 1)'; do
+              printf 'pub fnc sh(int a, int n): int { return a %s n; }\npub fnc main(): int { return sh(1, %s); }\n' "$op" "$count" > invalid.atto
+              for level in 0 2; do
+                ORESLANG_LLVMC="$PWD/build/oreslang-llvmc" ORES_NO_GC_IR_AUDIT="$PWD/build/oreslang-no-gc-ir-audit" ORESLANG_LLVM_AOT_OPT_LEVEL="$level" CLANG=clang-18 bash source/scripts/compile-aot.sh invalid.atto "$PWD/invalid-O$level"
+                status=0
+                "./invalid-O$level" || status=$?
+                test "$status" -eq 132
+                echo "REAL_ATTO_SHIFT_TRAP_PASS $op $count O$level"
+              done
+            done
+          done
+  frontend:
+    if: github.head_ref == 'ci/atto-shift-proof-and-admission-20261126'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - repo: atto-format
+            sha: 555f5f223d5661e1b52deb3b5572606f2ac18ed3
+            gate: format-visibility
+          - repo: atto-format
+            sha: 37b425c2815c7c7e4f382fe3cf3f06b63de8189e
+            gate: format-suspension
+          - repo: atto-source.rs
+            sha: 530bd6c27b6dcd36362035e996ab021186d2aaf6
+            gate: rust-suspension
+          - repo: atto-source.realtime
+            sha: 65984b8fb1214e46c8dbac8023bc82301e9792c2
+            gate: counted-suspension
+          - repo: atto-source.hdl
+            sha: c19fed113545782f85d8774add3cfdabe53ac632
+            gate: counted-suspension
+          - repo: atto-source.forge
+            sha: 1239afb1c4bf58fa0ef7691c151a826bce40f8a4
+            gate: forge-suspension
+    steps:
+      - name: Verify exact public source
+        shell: bash
+        env:
+          REPO: ${{ matrix.repo }}
+          SHA: ${{ matrix.sha }}
+        run: |
+          set -euo pipefail
+          git init source
+          GIT_TERMINAL_PROMPT=0 git -C source -c credential.helper= -c http.extraHeader= fetch --depth=1 "https://github.com/atto-lang/$REPO.git" "$SHA"
+          git -C source checkout --detach FETCH_HEAD
+          test "$(git -C source rev-parse HEAD)" = "$SHA"
+          git -C source log -1 --format='%H %T'
+          test -z "$(git -C source status --porcelain)"
+      - name: Execute source-owned targeted gates
+        shell: bash
+        working-directory: source
+        env:
+          GATE: ${{ matrix.gate }}
+        run: |
+          set -euo pipefail
+          case "$GATE" in
+            format-visibility)
+              cargo test --locked --test export_visibility_provenance
+              ;;
+            format-suspension)
+              node --test tests/callable-headers.test.mjs
+              cargo test --locked --test formatter
+              ;;
+            rust-suspension)
+              cargo test --locked --lib
+              cargo test --locked --test actor_persistence_frontend
+              ;;
+            counted-suspension)
+              node --test tests/suspension-alias-counted-profile.test.mjs
+              ;;
+            forge-suspension)
+              cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug
+              cmake --build build --target scalar_parser_test scalar_lexer_test --parallel 2
+              ctest --test-dir build --output-on-failure -R '^scalar_(parser|lexer)_test$'
+              ;;
+            *) exit 1;;
+          esac
+          echo "EXACT_SOURCE_GATE_PASS $GATE"
