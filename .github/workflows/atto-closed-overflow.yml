@@ -15,9 +15,9 @@ jobs:
         run: |
           set -euo pipefail
           git init source
-          GIT_TERMINAL_PROMPT=0 git -C source -c credential.helper= -c http.extraHeader= fetch --depth=1 https://github.com/atto-lang/atto-source.llvm.git 0bb5a340d9d79bcf95fc546b19c1b210aae6504d
+          GIT_TERMINAL_PROMPT=0 git -C source -c credential.helper= -c http.extraHeader= fetch --depth=1 https://github.com/atto-lang/atto-source.llvm.git 8d2f4606be01a10b271a59efd21448aff3a4cccf
           git -C source checkout --detach FETCH_HEAD
-          test "$(git -C source rev-parse HEAD)" = 0bb5a340d9d79bcf95fc546b19c1b210aae6504d
+          test "$(git -C source rev-parse HEAD)" = 8d2f4606be01a10b271a59efd21448aff3a4cccf
           git -C source log -1 --format='%H %T'
           test -z "$(git -C source status --porcelain)"
           test "$(git -C source hash-object src/main/cpp/oreslang/backend/LlvmCodegen.cpp)" = 247141d9d25b4a0937aa3f7f35ec927e7bb9e0c6
@@ -35,7 +35,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          for name in add sub mul neg nested_overflow success; do
+          for name in add sub mul neg nested_overflow success bare-fallback; do
             fixture="source/tests/fixtures/trap-arithmetic-$name.atto"
             build/oreslang-llvmc "$fixture" > "$name.ll"
             grep -F 'trap.arithmetic.err' "$name.ll"
@@ -44,7 +44,9 @@ jobs:
               ORESLANG_LLVMC="$PWD/build/oreslang-llvmc" ORES_NO_GC_IR_AUDIT="$PWD/build/oreslang-no-gc-ir-audit" ORESLANG_LLVM_AOT_OPT_LEVEL="$level" CLANG=clang-18 bash source/scripts/compile-aot.sh "$fixture" "$PWD/guest-$name-O$level"
               status=0
               "./guest-$name-O$level" > guest.out 2> guest.err || status=$?
-              test "$status" = 42
+              expected=42
+              if [[ "$name" == bare-fallback ]]; then expected=7; fi
+              test "$status" = "$expected"
               test ! -s guest.out
               test ! -s guest.err
               echo "REAL_HOSTED_TRAP_OVERFLOW_PASS $name O$level"
