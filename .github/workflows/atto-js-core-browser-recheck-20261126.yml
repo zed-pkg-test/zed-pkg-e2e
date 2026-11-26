@@ -1,0 +1,28 @@
+name: Atto JS exact-head real browser core retry
+on:
+  push:
+    branches: ['ci/atto-js-core-browser-recheck-20261126']
+permissions: {}
+jobs:
+  browser:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout and bind public exact head and tree
+        run: |
+          set -euo pipefail
+          git init source
+          cd source
+          git -c credential.helper= -c http.extraheader= fetch --no-tags --depth=1 https://github.com/atto-lang/atto-source.js.git 1dc4804340a2a4609e564be66def1b633e1d33a0
+          git checkout --detach FETCH_HEAD
+          test "$(git rev-parse HEAD)" = 1dc4804340a2a4609e564be66def1b633e1d33a0
+          test "$(git rev-parse HEAD^{tree})" = 745e02dc1f2311795ef832e704d54db7334c6936
+      - name: Verify Chromium and execute actual core browser smoke
+        working-directory: source
+        run: |
+          set -euo pipefail
+          export CHROME_BIN="$(command -v google-chrome || command -v chromium)"
+          test -x "$CHROME_BIN"
+          "$CHROME_BIN" --version
+          npm run test:core-browser
+          git diff --exit-code HEAD
