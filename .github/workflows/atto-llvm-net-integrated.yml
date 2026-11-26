@@ -1,0 +1,120 @@
+name: Atto integrated arithmetic and export qualification
+on:
+  push:
+    branches: [ci/atto-llvm-net-integrated-20261126]
+permissions: {}
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - backend: llvm
+            pr: '1016'
+            head: '69ca160d9fb26a46a7e5ca3913b5e29d697653c5'
+            tree: 'e5ea1dabdcc4d715c21c3576b4f452fcd091bd1f'
+          - backend: llvm
+            pr: '1008'
+            head: '7041eaf67fc1c7a165b66a0c418d9519dd524eb5'
+            tree: 'a0a4f12158c970de2811b9385a9eec55982b691b'
+          - backend: net
+            pr: '348'
+            head: '8752dffc008538a3485b708918fbfb415270b895'
+            tree: 'daf1e6410978a239c6d776be665ff0caa3d7caa0'
+    env:
+      BACKEND: ${{ matrix.backend }}
+      SOURCE_HEAD: ${{ matrix.head }}
+      SOURCE_TREE: ${{ matrix.tree }}
+    steps:
+      - name: Bind exact public source
+        run: |
+          set -euo pipefail
+          git init source
+          git -C source -c credential.helper= fetch --no-tags --depth=1 "https://github.com/atto-lang/atto-source.${BACKEND}.git" "$SOURCE_HEAD"
+          git -C source checkout --detach FETCH_HEAD
+          test "$(git -C source rev-parse HEAD)" = "$SOURCE_HEAD"
+          test "$(git -C source rev-parse HEAD^{tree})" = "$SOURCE_TREE"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: actions/setup-dotnet@v4
+        if: matrix.backend == 'net'
+        with:
+          dotnet-version: '10.0.x'
+      - name: LLVM actual compiler and hosted overflow recovery
+        if: matrix.pr == '1016'
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y llvm-18-dev clang-18 cmake ninja-build
+          cmake -S source -B build -G Ninja -DBUILD_TESTING=OFF -DCMAKE_BUILD_TYPE=Release -DLLVM_DIR="$(llvm-config-18 --cmakedir)" -DCMAKE_C_COMPILER=clang-18 -DCMAKE_CXX_COMPILER=clang++-18
+          cmake --build build --target oreslang-llvmc --parallel 2
+          rustc --edition=2021 -D warnings source/scripts/audit_no_gc_ir.rs -o build/oreslang-no-gc-ir-audit
+          for name in add sub mul neg nested_overflow success bare-fallback; do
+            fixture="source/tests/fixtures/trap-arithmetic-$name.atto"
+            build/oreslang-llvmc "$fixture" > "$name.ll"
+            grep -F 'trap.arithmetic.err' "$name.ll"
+            grep -F '65537' "$name.ll"
+            for level in 0 2; do
+              ORESLANG_LLVMC="$PWD/build/oreslang-llvmc" ORES_NO_GC_IR_AUDIT="$PWD/build/oreslang-no-gc-ir-audit" ORESLANG_LLVM_AOT_OPT_LEVEL="$level" CLANG=clang-18 bash source/scripts/compile-aot.sh "$fixture" "$PWD/guest-$name-O$level"
+              status=0
+              "./guest-$name-O$level" > guest.out 2> guest.err || status=$?
+              expected=42
+              if [[ "$name" == bare-fallback ]]; then expected=7; fi
+              test "$status" = "$expected"
+              test ! -s guest.out
+              test ! -s guest.err
+            done
+          done
+          bash source/scripts/test-trap-int-aot.sh "$PWD/build/oreslang-llvmc" clang-18 "$PWD/build/oreslang-no-gc-ir-audit" "$PWD/source/tests/fixtures/trap-int-native42.atto" "$PWD/source/tests/fixtures/trap-int-overflow-terminal.atto" "$PWD/source/scripts/compile-aot.sh"
+          for name in ok err nested; do
+            for level in 0 2; do
+              ORESLANG_LLVMC="$PWD/build/oreslang-llvmc" ORES_NO_GC_IR_AUDIT="$PWD/build/oreslang-no-gc-ir-audit" ORESLANG_LLVM_AOT_OPT_LEVEL="$level" CLANG=clang-18 bash source/scripts/compile-aot.sh "source/tests/fixtures/trap-result-idempotent-$name.atto" "$PWD/result-$name-O$level"
+              status=0
+              "./result-$name-O$level" || status=$?
+              test "$status" = 42
+            done
+          done
+          for name in option wrong-type scalar; do
+            status=0
+            build/oreslang-llvmc "source/tests/fixtures/trap-result-idempotent-$name-reject.atto" > reject.ll 2> reject.err || status=$?
+            test "$status" -gt 0
+            test "$status" -lt 126
+            test ! -s reject.ll
+            case "$name" in
+              option) grep -F 'native trap Option payload requires checked nested ownership ABI' reject.err;;
+              wrong-type) grep -F 'native trap existing Result type does not match expected Result' reject.err;;
+              scalar) grep -F 'native trap operand unsupported: only pure integer literals and checked arithmetic are lowered, or existing Result values' reject.err;;
+            esac
+          done
+      - name: LLVM checked u64 native and Wasm guest suite
+        if: matrix.pr == '1008'
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y lld
+          wasm-ld --version
+          cd source
+          ulimit -c 0
+          node --test tests/checked_u64_native_wasm.test.mjs
+      - name: NET checked export CLI and NativeAOT
+        if: matrix.pr == '348'
+        run: |
+          set -euo pipefail
+          cd source
+          dotnet --version
+          node --test tests/declarative-export-native.test.mjs tests/declarative-export-trailing-boundary.test.mjs
+          bash scripts/publish-linux.sh tests/fixtures/declarative-exports/export-duplicate.atto artifacts/atto-export
+          compiler=artifacts/compiler/linux-x64/oresnet
+          guest=artifacts/atto-export/linux-x64/oreslang-app
+          test -x "$compiler"
+          test -x "$guest"
+          test "$("$guest")" = 42
+      - name: Tracked source unchanged
+        run: |
+          set -euo pipefail
+          test "$(git -C source rev-parse HEAD^{tree})" = "$SOURCE_TREE"
+          git -C source diff --exit-code
+          git -C source diff --cached --exit-code
