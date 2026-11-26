@@ -176,7 +176,7 @@ jobs:
     timeout-minutes: 15
     env:
       GIT_TERMINAL_PROMPT: '0'
-      SOURCE_SHA: b24d157951913cdb25dec0d1aab13f914ce27d2e
+      SOURCE_SHA: c07fcd35c8cb8f21bc0243e4638d8b1c70842ad9
     steps:
       - name: Verify exact public JS compiler source
         shell: bash
@@ -188,10 +188,12 @@ jobs:
           test "$(git -C source rev-parse HEAD)" = "$SOURCE_SHA"
           git -C source log -1 --format='%H %T'
           test -z "$(git -C source status --porcelain)"
-          test "$(git -C source hash-object src/program-v2.mjs)" = c676063e413a21fd4b43f6afad36405dda4858ca
-          test "$(git -C source hash-object src/program-ir-v2.mjs)" = 03fcc4b98445cb48c4c9fb4dbac311a9f12e711f
+          test "$(git -C source hash-object src/program-v2.mjs)" = 4b24c629a44ad186bd2f6efcdf34cae9218a0be6
+          test "$(git -C source hash-object src/program-ir-v2.mjs)" = 05762c3d6dacecfb5b5b8a071cae550e3fc4a4bf
           test "$(git -C source hash-object src/transpile-worker.mjs)" = 0fb97f5cf2734c6420fa590bc6fe1435ad913d4b
           test "$(git -C source hash-object tests/checked-ashr-parity.test.mjs)" = 0daa382f5b3790755dd5aaffeb22de824c040a58
+          test "$(git -C source rev-parse 'HEAD^{tree}')" = 96ee8d4f5c44b037c3ca12c3de50328c8409fdc4
+          test "$(git -C source hash-object tests/terminal-expect-v6.test.mjs)" = d4054e61a1178fc13caa27117a8ce26db4bd5d7d
       - name: Execute actual generated ESM and Worker guest suite
         shell: bash
         working-directory: source
@@ -205,4 +207,4 @@ jobs:
         working-directory: source
         run: |
           set -euo pipefail
-          node --test tests/named-integer-operations.test.mjs tests/java-canonical-worker-operators.test.mjs tests/java-checked-quotient-trap.test.mjs tests/current-main-numeric-integration.test.mjs
+          node --test tests/named-integer-operations.test.mjs tests/java-canonical-worker-operators.test.mjs tests/java-checked-quotient-trap.test.mjs tests/current-main-numeric-integration.test.mjs tests/terminal-expect-v6.test.mjs
