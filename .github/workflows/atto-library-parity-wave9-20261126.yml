@@ -1,0 +1,84 @@
+name: Atto library parity wave 9 native and manifest regressions
+on:
+  push:
+    branches: ['ci/atto-library-parity-wave9-20261126']
+permissions: {}
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - repo: atto-source.llvm
+            head: 94a58f5e32304f02593aa82728bc3813139faa51
+            tree: ea6ed41b79bce7e17fe391949fd3b60715dc0d43
+            profile: embed
+          - repo: atto-source.cranelift
+            head: e5e265f0b46262a2c452345916a472b767ae0d40
+            tree: 369bd51c5271220d01ebb92927015ddc210a9f0b
+            profile: cranelift
+          - repo: atto-source.realtime
+            head: af7b797303e3d4faf696692118ef538cf9887a47
+            tree: dcd2c545fecd7ee0de8b70c7a5337f30c9b0636c
+            profile: realtime
+          - repo: atto-source.forge
+            head: 87f445b97a11fc848c8f898490b11500476ed82b
+            tree: a26a2c5ee51518359767f07cc07973a7a341bfcd
+            profile: forge
+          - repo: atto-source.rs
+            head: 9edd74785bd160998bc28183662b15e593d82a76
+            tree: d8cc4a0ef046d96082170a6a63a6cad8e7f16b98
+            profile: rust
+    steps:
+      - name: Bind exact public commit and tree
+        env:
+          SOURCE_REPO: ${{ matrix.repo }}
+          SOURCE_HEAD: ${{ matrix.head }}
+          SOURCE_TREE: ${{ matrix.tree }}
+          GIT_TERMINAL_PROMPT: '0'
+        run: |
+          set -euo pipefail
+          git init source
+          cd source
+          git -c credential.helper= -c http.extraheader= fetch --no-tags --depth=1 "https://github.com/atto-lang/$SOURCE_REPO.git" "$SOURCE_HEAD"
+          git checkout --detach FETCH_HEAD
+          test "$(git rev-parse HEAD)" = "$SOURCE_HEAD"
+          test "$(git rev-parse HEAD^{tree})" = "$SOURCE_TREE"
+      - name: LLVM actual CMake manifest regression controls
+        if: matrix.profile == 'embed'
+        working-directory: source
+        run: bash tests/atto_library_embed_admission.sh
+      - name: Cranelift canonical formatting native JIT and object regressions
+        if: matrix.profile == 'cranelift'
+        working-directory: source
+        run: |
+          set -euo pipefail
+          rustup toolchain install 1.99.1 --profile minimal --component rustfmt --component clippy
+          cargo +1.99.1 fmt --all -- --check
+          cargo +1.99.1 test --locked --all-targets
+          cargo +1.99.1 clippy --locked --all-targets -- -D warnings
+      - name: Real-time generated C and restricted scalar admission
+        if: matrix.profile == 'realtime'
+        working-directory: source
+        run: node --test tests/strict_closed_scalar.test.mjs tests/checked_unwrap_native.test.mjs tests/checked_debit_closed_profile.test.mjs
+      - name: Forge actual native compiler and CTest
+        if: matrix.profile == 'forge'
+        working-directory: source
+        run: |
+          set -euo pipefail
+          cmake -S . -B "$RUNNER_TEMP/forge" -DCMAKE_BUILD_TYPE=Release
+          cmake --build "$RUNNER_TEMP/forge" -j2
+          ctest --test-dir "$RUNNER_TEMP/forge" --output-on-failure --no-tests=error
+      - name: Rust compiler admission and real Wasm corpus
+        if: matrix.profile == 'rust'
+        working-directory: source
+        run: |
+          set -euo pipefail
+          cargo test --locked --test allocation_guarantees_v1
+          cargo build --locked --release --bin attoc
+          node tests/atto_libraries.mjs target/release/attoc
+      - name: Verify tracked source unchanged
+        working-directory: source
+        run: git diff --exit-code HEAD
