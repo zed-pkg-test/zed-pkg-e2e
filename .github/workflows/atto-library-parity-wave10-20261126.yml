@@ -1,0 +1,151 @@
+name: Atto library parity wave 10 exact compiler and shared obligations
+on:
+  push:
+    branches: ['ci/atto-library-parity-wave10-20261126']
+permissions: {}
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - repo: atto-source.llvm
+            head: e3333cd33f06a16627b638827ad2c371000bd924
+            tree: e2baac0685237016ee4c14a60de41efff5128d64
+            profile: llvm
+          - repo: atto-source.cranelift
+            head: c5932f02a51ef2860d0a5a29deb5a604093b5c03
+            tree: 38574bc5e676240a5d173fdaf95bc871a15d4d43
+            profile: cranelift
+          - repo: atto-source.js
+            head: 6f2cacfc15b7645572e549e41389292de48f3489
+            tree: a8bd3cacf655e43b10b52fc74ac0651aeea09d63
+            profile: js
+          - repo: atto-platform-conformance
+            head: 3002a8b682b0d91c9852ab8fff5c50d19c9d50c6
+            tree: c7515470be4ba18dabf8f7774dc12090fc26cbdd
+            profile: contract
+          - repo: atto-source.rs
+            head: 9edd74785bd160998bc28183662b15e593d82a76
+            tree: d8cc4a0ef046d96082170a6a63a6cad8e7f16b98
+            profile: rust
+          - repo: atto-source.hdl
+            head: 418e828b741dfaed1fae3e0acb5db84a4d4f300e
+            tree: c1ff4518ecdbe7d453f1f05a12cedf50ff304834
+            profile: hdl
+          - repo: atto-source.atto
+            head: 62ee6369c21a98392d39ae61245fd56f182bdf90
+            tree: 37ed1cb077eb18a7901d8c772e47b84205bcab03
+            profile: seed
+    steps:
+      - name: Bind exact public commit and tree
+        env:
+          SOURCE_REPO: ${{ matrix.repo }}
+          SOURCE_HEAD: ${{ matrix.head }}
+          SOURCE_TREE: ${{ matrix.tree }}
+          GIT_TERMINAL_PROMPT: '0'
+        run: |
+          set -euo pipefail
+          git init source
+          cd source
+          git -c credential.helper= -c http.extraheader= fetch --no-tags --depth=1 "https://github.com/atto-lang/$SOURCE_REPO.git" "$SOURCE_HEAD"
+          git checkout --detach FETCH_HEAD
+          test "$(git rev-parse HEAD)" = "$SOURCE_HEAD"
+          test "$(git rev-parse HEAD^{tree})" = "$SOURCE_TREE"
+      - name: LLVM actual CMake manifest and configured production library
+        if: matrix.profile == 'llvm'
+        working-directory: source
+        run: |
+          set -euo pipefail
+          bash tests/atto_library_embed_admission.sh
+          sudo apt-get update
+          sudo apt-get install -y build-essential cmake clang llvm-dev
+          cmake -S . -B "$RUNNER_TEMP/llvm" -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON
+          test -s "$RUNNER_TEMP/llvm/oreslang/frontend/GeneratedAttoLibraryTable.inc"
+      - name: LLVM full native library and separate alloc admission
+        if: matrix.profile == 'llvm'
+        working-directory: source
+        run: |
+          set -euo pipefail
+          cmake --build "$RUNNER_TEMP/llvm" --parallel 2 --target oreslang-llvmc
+          python3 tests/atto_libraries_v1.py --compiler "$RUNNER_TEMP/llvm/oreslang-llvmc" --clang "$(command -v clang)"
+          python3 tests/atto_alloc_guest.py --compiler "$RUNNER_TEMP/llvm/oreslang-llvmc" --clang "$(command -v clang)"
+      - name: Cranelift locked formatting native JIT and object regressions
+        if: matrix.profile == 'cranelift'
+        working-directory: source
+        run: |
+          set -euo pipefail
+          rustup toolchain install 1.99.1 --profile minimal --component rustfmt --component clippy
+          cargo +1.99.1 fmt --all -- --check
+          cargo +1.99.1 test --locked --all-targets
+          cargo +1.99.1 clippy --locked --all-targets -- -D warnings
+      - name: JS terminal expect exact guest and regressions
+        if: matrix.profile == 'js'
+        working-directory: source
+        run: |
+          set -euo pipefail
+          node --test tests/terminal-expect-v6.test.mjs
+          npm test
+      - name: Shared eleven-backend obligation registry only
+        if: matrix.profile == 'contract'
+        working-directory: source
+        run: node --test tests/noalloc-nocopy-guarantees-v1.test.mjs
+      - name: Rust real annotated scalar Wasm guests and library corpus
+        if: matrix.profile == 'rust'
+        working-directory: source
+        run: |
+          set -euo pipefail
+          cargo test --locked --test allocation_guarantees_v1
+          cargo build --locked --release --bin attoc
+          node tests/atto_libraries.mjs target/release/attoc
+          node --input-type=module <<'JS'
+          import assert from 'node:assert/strict';
+          import {writeFileSync,readFileSync,mkdtempSync,rmSync} from 'node:fs';
+          import {tmpdir} from 'node:os';
+          import {join,resolve} from 'node:path';
+          import {spawnSync} from 'node:child_process';
+          const compiler=resolve('target/release/attoc'), dir=mkdtempSync(join(tmpdir(),'atto-annotated-'));
+          const headers=['define fnc int • forward(int x)','define fnc int <- forward(int x)','define fnc forward(int x) -> int','define fnc forward(int x): int','define fnc forward(int x): int ->'];
+          const sources=headers.map(h=>'@noalloc\n@nocopy\n'+h+' { return x; }\npub fnc main(): int { return forward(42); }');
+          sources.push('@noalloc\n@nocopy\nfnc forward(x:int):int { return leaf(x); }\nfnc leaf(x:int):int { return x; }\npub fnc main():int { return forward(42); }');
+          try { for (const [i,source] of sources.entries()) {
+            const input=join(dir,i+'.atto'), output=join(dir,i+'.wasm');
+            writeFileSync(input,source);
+            const r=spawnSync(compiler,[input,'-o',output],{encoding:'utf8',timeout:120000});
+            assert.equal(r.status,0,r.stderr); assert.equal(r.signal,null);
+            const module=new WebAssembly.Module(readFileSync(output));
+            assert.deepEqual(WebAssembly.Module.imports(module),[]);
+            const instance=new WebAssembly.Instance(module,{});
+            assert.equal(Number(instance.exports.main()),42);
+            console.log('ANNOTATED_GUEST_PASS',i);
+          }} finally {rmSync(dir,{recursive:true,force:true});}
+          JS
+      - name: HDL actual RTL and native source profile regressions
+        if: matrix.profile == 'hdl'
+        working-directory: source
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y iverilog
+          npm test
+      - name: Atto-authored stage-zero proof kernel actual native guest
+        if: matrix.profile == 'seed'
+        working-directory: source
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y build-essential cmake clang llvm-dev
+          git init "$RUNNER_TEMP/bootstrap-source"
+          git -C "$RUNNER_TEMP/bootstrap-source" -c credential.helper= -c http.extraheader= fetch --no-tags --depth=1 https://github.com/atto-lang/atto-source.llvm.git 4a75d3760071f686003766d3624b909eb8eb3251
+          git -C "$RUNNER_TEMP/bootstrap-source" checkout --detach FETCH_HEAD
+          test "$(git -C "$RUNNER_TEMP/bootstrap-source" rev-parse HEAD)" = 4a75d3760071f686003766d3624b909eb8eb3251
+          test "$(git -C "$RUNNER_TEMP/bootstrap-source" rev-parse HEAD^{tree})" = ddb967005590bd79758227f61e58c47451112242
+          cmake -S "$RUNNER_TEMP/bootstrap-source" -B "$RUNNER_TEMP/bootstrap" -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON
+          cmake --build "$RUNNER_TEMP/bootstrap" --parallel 2 --target oreslang-llvmc
+          compiler="$RUNNER_TEMP/bootstrap/oreslang-llvmc"
+          node scripts/verify-strict-i64-interval-native.mjs "$compiler" "$(sha256sum "$compiler" | cut -d ' ' -f 1)" src/strict_i64_interval.atto a450b1ab4e6eb0658929c3d2bb83bf017b601f92 "$(command -v clang)"
+      - name: Tracked source unchanged
+        working-directory: source
+        run: git diff --exit-code HEAD
