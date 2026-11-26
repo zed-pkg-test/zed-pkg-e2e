@@ -1,0 +1,41 @@
+name: Atto LLVM immutable handle and transfer alias
+on:
+  push:
+    branches: ['ci/atto-llvm-handle-transfer-20261126']
+permissions: {}
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - name: Bind exact public source commit and tree
+        run: |
+          set -euo pipefail
+          git init source
+          cd source
+          GIT_TERMINAL_PROMPT=0 git -c credential.helper= -c http.extraheader= fetch --no-tags --depth=1 https://github.com/atto-lang/atto-source.llvm.git 418a6b03c609fd1541e6ca4ad4fd35e59f95e73b
+          git checkout --detach FETCH_HEAD
+          test "$(git rev-parse HEAD)" = 418a6b03c609fd1541e6ca4ad4fd35e59f95e73b
+          test "$(git rev-parse HEAD^{tree})" = b69239c9ba9a19cbeb87154ee75a90b3406c2f48
+      - name: Build actual compiler
+        working-directory: source
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y build-essential cmake clang llvm-dev
+          cmake -S . -B "$RUNNER_TEMP/llvm" -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON
+          cmake --build "$RUNNER_TEMP/llvm" --parallel 2 --target oreslang-llvmc
+      - name: Baseline library corpus and direct ownership native guests
+        working-directory: source
+        run: |
+          set -euo pipefail
+          python3 tests/atto_libraries_v1.py --compiler "$RUNNER_TEMP/llvm/oreslang-llvmc" --clang "$(command -v clang)"
+          python3 tests/native_owned_factory_take.py --compiler "$RUNNER_TEMP/llvm/oreslang-llvmc" --clang "$(command -v clang)"
+      - name: Original allocator guests and sanitizer linked execution
+        working-directory: source
+        run: |
+          set -euo pipefail
+          python3 tests/atto_alloc_guest.py --compiler "$RUNNER_TEMP/llvm/oreslang-llvmc" --clang "$(command -v clang)"
+      - name: Source remains unchanged
+        working-directory: source
+        run: git diff --exit-code HEAD
