@@ -1,0 +1,100 @@
+name: Atto native library scalar and exact embedded source regressions
+on:
+  push:
+    branches: ['ci/atto-library-parity-wave12-20261126']
+permissions: {}
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - repo: atto-source.rs
+            head: 0cc4d9570f79ecff92a5f2e5bbb5260dbfe750b6
+            tree: 1dd60a5c08787ae3850bc1a03223de300ed5f9a0
+            profile: rust
+          - repo: atto-source.js
+            head: 9716e4edca219852fe0c7b678aeffb4d86705aa0
+            tree: 5b7469c3006789906c1516535495c1e6acf72e74
+            profile: arena
+          - repo: atto-source.js
+            head: 25cbd592f714b49c8529d875c9a3e4d385d7e7d4
+            tree: 247a29c008a4f26f1eb8f48135d96f96b86df58e
+            profile: expect
+          - repo: atto-source.net
+            head: 1ebc970d2ae168a2944c4b43959be2361a15d0ef
+            tree: 1b93f7d1626beb871bd7461a54a66f29bd44251a
+            profile: net
+    steps:
+      - name: Bind public exact source and tree
+        env:
+          SOURCE_REPO: ${{ matrix.repo }}
+          SOURCE_HEAD: ${{ matrix.head }}
+          SOURCE_TREE: ${{ matrix.tree }}
+        run: |
+          set -euo pipefail
+          git init source
+          cd source
+          GIT_TERMINAL_PROMPT=0 git -c credential.helper= -c http.extraheader= fetch --no-tags --depth=1 "https://github.com/atto-lang/$SOURCE_REPO.git" "$SOURCE_HEAD"
+          git checkout --detach FETCH_HEAD
+          test "$(git rev-parse HEAD)" = "$SOURCE_HEAD"
+          test "$(git rev-parse HEAD^{tree})" = "$SOURCE_TREE"
+      - name: Rust typed proof and actual library Wasm execution
+        if: matrix.profile == 'rust'
+        working-directory: source
+        run: |
+          set -euo pipefail
+          cargo test --locked --test allocation_guarantees_v1
+          cargo build --locked --release --bin attoc
+          node tests/atto_libraries.mjs target/release/attoc
+          node --input-type=module <<'JS'
+          import assert from 'node:assert/strict';
+          import {writeFileSync,readFileSync,mkdtempSync,rmSync} from 'node:fs';
+          import {tmpdir} from 'node:os';
+          import {join,resolve} from 'node:path';
+          import {spawnSync} from 'node:child_process';
+          const compiler=resolve('target/release/attoc'), dir=mkdtempSync(join(tmpdir(),'atto-annotated-'));
+          const headers=['define fnc int • forward(int x)','define fnc int <- forward(int x)','define fnc forward(int x) -> int','define fnc forward(int x): int','define fnc forward(int x): int ->'];
+          const sources=headers.map(h=>'@noalloc\n@nocopy\n'+h+' { return x; }\npub fnc main(): int { return forward(42); }');
+          sources.push('@noalloc\n@nocopy\nfnc forward(x:int):int { return leaf(x); }\nfnc leaf(x:int):int { return x; }\npub fnc main():int { return forward(42); }');
+          try { for (const [i,source] of sources.entries()) {
+            const input=join(dir,i+'.atto'), output=join(dir,i+'.wasm');
+            writeFileSync(input,source);
+            const r=spawnSync(compiler,[input,'-o',output],{encoding:'utf8',timeout:120000});
+            assert.equal(r.status,0,r.stderr); assert.equal(r.signal,null);
+            const module=new WebAssembly.Module(readFileSync(output));
+            assert.deepEqual(WebAssembly.Module.imports(module),[]);
+            assert.equal(Number(new WebAssembly.Instance(module,{}).exports.main()),42);
+            console.log('ANNOTATED_GUEST_PASS',i);
+          }} finally {rmSync(dir,{recursive:true,force:true});}
+          JS
+      - name: JS actual Atto Arena boundary matrix
+        if: matrix.profile == 'arena'
+        working-directory: source
+        run: |
+          set -euo pipefail
+          node --test tests/alloc-arena-remaining-source.test.mjs
+          npm test
+      - name: JS terminal expect guest and full regressions
+        if: matrix.profile == 'expect'
+        working-directory: source
+        run: |
+          set -euo pipefail
+          node --test tests/terminal-expect-v6.test.mjs
+          npm test
+      - uses: actions/setup-dotnet@v4
+        if: matrix.profile == 'net'
+        with:
+          dotnet-version: '10.0.x'
+      - name: CLR actual source witnesses and library guests
+        if: matrix.profile == 'net'
+        working-directory: source
+        run: |
+          set -euo pipefail
+          dotnet run -c Release --project verification/Ores.Net.Tests | tee "$RUNNER_TEMP/net-test.log"
+          grep -F 'ATTO_LIBRARIES_V1 net guest_passed=3 executed=3 rejected=7 unsupported=7 failed=0' "$RUNNER_TEMP/net-test.log"
+      - name: Tracked source unchanged
+        working-directory: source
+        run: git diff --exit-code HEAD
