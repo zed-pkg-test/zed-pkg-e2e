@@ -1,0 +1,87 @@
+name: Atto exact-tree parity batch 2
+on:
+  push:
+    branches: [ci/atto-parity-ownership-20261126-batch2]
+permissions: {}
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - backend: js
+            head: '32d58c609af1935a448f7b729efdeddf6036b537'
+            tree: '741b6894acab9cc4f8326fdf0ff10e0b6e392815'
+          - backend: realtime
+            head: '65984b8fb1214e46c8dbac8023bc82301e9792c2'
+            tree: 'e78f0327cc6264a8e2fc1c291e1471f65c50f6e0'
+          - backend: hdl
+            head: 'c19fed113545782f85d8774add3cfdabe53ac632'
+            tree: 'be77838ddf0c204f0724e1247e7ddac9b2afcc3c'
+          - backend: forge
+            head: '1239afb1c4bf58fa0ef7691c151a826bce40f8a4'
+            tree: 'd3435cb1b53166ac3945dfd62bfab6342a9e1de7'
+          - backend: rs
+            head: '2d49a9ba4e2de12b34ca9461050925c57c594f1b'
+            tree: 'b6cd7aacb652d82268d8eb74b19dfb883dc8c62b'
+    env:
+      BACKEND: ${{ matrix.backend }}
+      SOURCE_HEAD: ${{ matrix.head }}
+      SOURCE_TREE: ${{ matrix.tree }}
+    steps:
+      - name: Fetch immutable public source without credentials
+        run: |
+          set -euo pipefail
+          git init "$RUNNER_TEMP/source"
+          cd "$RUNNER_TEMP/source"
+          git -c credential.helper= fetch --no-tags --depth=1 "https://github.com/atto-lang/atto-source.${BACKEND}.git" "$SOURCE_HEAD"
+          git checkout --detach FETCH_HEAD
+          test "$(git rev-parse HEAD)" = "$SOURCE_HEAD"
+          test "$(git rev-parse HEAD^{tree})" = "$SOURCE_TREE"
+          printf 'SOURCE_HEAD=%s SOURCE_TREE=%s\n' "$SOURCE_HEAD" "$SOURCE_TREE"
+      - name: Node 22
+        if: matrix.backend == 'js' || matrix.backend == 'realtime' || matrix.backend == 'hdl'
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: JS compiled guest regression and full suite
+        if: matrix.backend == 'js'
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP/source"
+          node --test tests/guard-condition-list-adversarial.test.mjs
+          npm test
+      - name: Counted-static alias equivalence and repository tests
+        if: matrix.backend == 'realtime' || matrix.backend == 'hdl'
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP/source"
+          node --test tests/suspension-alias-counted-profile.test.mjs
+          node --test tests/*.test.mjs
+      - name: Forge strict scalar regression
+        if: matrix.backend == 'forge'
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP/source"
+          for compiler in g++ clang++; do
+            "$compiler" -std=c++20 -Wall -Wextra -Werror -Iinclude -I. tests/scalar_parser.cpp -o "$RUNNER_TEMP/scalar-parser"
+            "$RUNNER_TEMP/scalar-parser"
+          done
+      - name: Rust move and take equivalence and full compiler regressions
+        if: matrix.backend == 'rs'
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP/source"
+          cargo test --locked --test move_take_equivalence
+          cargo test --locked --all-targets
+          rustup target add wasm32-unknown-unknown
+          cargo build --locked --release --target wasm32-unknown-unknown --lib
+      - name: Source identity unchanged
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP/source"
+          test "$(git rev-parse HEAD^{tree})" = "$SOURCE_TREE"
+          git diff --exit-code
+          git diff --cached --exit-code
