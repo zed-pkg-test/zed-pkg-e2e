@@ -1,89 +1,82 @@
-name: Exact native fixture argument order replay
+name: Exact integrated lifecycle and parser regression
 on:
   pull_request:
     branches: ['main']
-permissions:
-  contents: read
+    paths: ['.github/workflows/v3-native-order-and-cranelift.yml']
+permissions: {}
 jobs:
-  native-argument-order:
+  java-jvm:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    env:
+      GIT_TERMINAL_PROMPT: '0'
+      GIT_CONFIG_NOSYSTEM: '1'
+      GIT_CONFIG_GLOBAL: /dev/null
+    steps:
+      - name: Fetch and verify exact public source
+        shell: bash
+        run: |
+          set -euo pipefail
+          git init source
+          git -C source -c credential.helper= -c http.extraHeader= fetch --no-tags --depth=1 https://github.com/atto-lang/atto-source.java.git 456b05ad8a6a159e9a98123f04fffed556568962
+          git -C source -c core.hooksPath=/dev/null checkout --detach FETCH_HEAD
+          test "$(git -C source rev-parse HEAD)" = 456b05ad8a6a159e9a98123f04fffed556568962
+          test "$(git -C source rev-parse HEAD^{tree})" = 3c110925a471f2b44b385422a667a77f84600323
+          test "$(git -C source write-tree)" = 3c110925a471f2b44b385422a667a77f84600323
+          git -C source diff --quiet HEAD --
+          test -z "$(git -C source ls-files --others --exclude-standard)"
+          printf 'EXACT_PUBLIC_SOURCE|atto-lang/atto-source.java|456b05ad8a6a159e9a98123f04fffed556568962|3c110925a471f2b44b385422a667a77f84600323\n'
+      - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3
+        with:
+          distribution: graalvm
+          java-version: '25'
+      - name: Run scoped compiler verification
+        shell: bash
+        working-directory: source
+        run: |
+          set -euo pipefail
+          mvn -B -ntp -Dtest=TrapFailurePolicyTest,TrapResultSemanticsTest,CanonicalCallerTrapParityV1Test,AttoStrictTrapSourceAdmissionTest,GuestOrdinaryThrowTest,TypedValueMatchParameterTest,CheckedUnwrapPipelineExecutionTest -DfailIfNoTests=true -Dsurefire.failIfNoSpecifiedTests=true test
+      - name: Main Python harness regression
+        working-directory: source
+        run: python3 -m unittest discover -s tests -p test_atto_libraries_v1_harness.py
+  llvm-nio:
     runs-on: ubuntu-24.04
     timeout-minutes: 25
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - lane: forge
-            source: atto-source.forge
-            source_sha: 631b5adb3e6e6031f5b541e5e919cef847cce9b2
-            source_tree: 25e6b1ad466c8362185f2eab1d6674fa3f4ff2f8
-            fixture_sha: 521018d3c85b53fff690ea5c6835bbc3e22a1630
-            adapter_blob: ead0288973215aff6f3c29cc4d1dfd271681f655
-            test_blob: febbed8d2c24e5bef8e69028b392a4667d076603
-          - lane: llvm-native
-            source: atto-source.llvm
-            source_sha: 5797bd366f0958355ac8e1a2c433e12c689443b6
-            source_tree: 81518863e3b997512a11c0f15adeea95e4b49e45
-            fixture_sha: 668aecb9dabf39b1ecd3ac3473e03c0674d5beb1
-            adapter_blob: 7ea2f0b79a082d25424cce0f26e8b9773e4a8434
-            test_blob: 9b321346b0146053856f7b9a3610c8d0d5f51269
     env:
-      LANE: ${{ matrix.lane }}
-      SOURCE_REPO: ${{ matrix.source }}
-      SOURCE_SHA: ${{ matrix.source_sha }}
-      SOURCE_TREE: ${{ matrix.source_tree }}
-      FIXTURE_SHA: ${{ matrix.fixture_sha }}
-      ADAPTER_BLOB: ${{ matrix.adapter_blob }}
-      TEST_BLOB: ${{ matrix.test_blob }}
+      SOURCE_SHA: 212f24d0b2291dfd45bd6d6e378caa5c987bac77
+      SOURCE_TREE: 6a342f49dba8b98cf866d5f1ac44e99bf39c1abb
+      GIT_TERMINAL_PROMPT: '0'
+      GIT_CONFIG_NOSYSTEM: '1'
+      GIT_CONFIG_GLOBAL: /dev/null
     steps:
-      - name: Fetch exact public compiler and fixtures
+      - name: Exact public source
         run: |
           set -euo pipefail
-          export GIT_TERMINAL_PROMPT=0 GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null
-          fetch() {
-            git init "$1"
-            git -C "$1" -c credential.helper= -c http.extraHeader= fetch --no-tags --depth=1 "https://github.com/atto-lang/$2.git" "$3"
-            git -C "$1" -c core.hooksPath=/dev/null checkout --detach FETCH_HEAD
-            test "$(git -C "$1" rev-parse HEAD)" = "$3"
-            test "$(git -C "$1" write-tree)" = "$(git -C "$1" rev-parse HEAD^{tree})"
-            git -C "$1" diff --exit-code HEAD
-            git -C "$1" rev-parse HEAD^{tree}
-          }
-          fetch source "$SOURCE_REPO" "$SOURCE_SHA"
-          test "$(git -C source rev-parse HEAD^{tree})" = "$SOURCE_TREE"
-          fetch fixture atto-compilers-parity-testing "$FIXTURE_SHA"
-          base="fixtures/package-namespace-v3/adapters/$LANE"
-          test "$(git -C fixture hash-object "$base/native-session.mjs")" = "$ADAPTER_BLOB"
-          test "$(git -C fixture hash-object "$base/native-session.test.mjs")" = "$TEST_BLOB"
-          echo "EXACT_PUBLIC_SOURCE|$SOURCE_SHA|$FIXTURE_SHA|$ADAPTER_BLOB|$TEST_BLOB"
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
-        with:
-          node-version: '22'
-      - name: Compile real provider driver
-        run: |
-          set -euo pipefail
+          git init source
           cd source
-          if [ "$LANE" = forge ]; then
-            c++ -std=c++20 -O2 -I. compiler/frontend.cpp compiler/ir.cpp codegen/native.cpp ../fixture/fixtures/package-namespace-v3/adapters/forge/provider.cpp -o "$RUNNER_TEMP/forge-v3-driver"
-          else
-            cargo generate-lockfile
-            cargo build --locked --bin atto-llvm
-            cargo test --locked --bin atto-llvm namespace_provider::tests::exact_admission_and_native_ir -- --nocapture
-          fi
-      - name: Run real guest tests and argument ordering regression
+          git -c credential.helper= -c core.askPass= -c http.extraHeader= fetch --no-tags --depth=1 https://github.com/atto-lang/atto-source.llvm.git "$SOURCE_SHA"
+          git checkout --detach FETCH_HEAD
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+          test "$(git rev-parse HEAD^{tree})" = "$SOURCE_TREE"
+          git fsck --no-dangling
+          test -z "$(git status --porcelain --untracked-files=all)"
+          printf 'EXACT_SOURCE sha=%s tree=%s\n' "$SOURCE_SHA" "$SOURCE_TREE"
+      - name: Strict native build and focused self-owned teardown
+        working-directory: source
         run: |
           set -euo pipefail
-          export ATTO_FORGE_DRIVER="$RUNNER_TEMP/forge-v3-driver"
-          export ATTO_LLVM_DRIVER="$PWD/source/target/debug/atto-llvm"
-          export ATTO_V3_FIXTURE="$PWD/fixture/fixtures/package-namespace-v3"
-          node --test --test-reporter=tap "$ATTO_V3_FIXTURE/adapters/$LANE/native-session.test.mjs" | tee /tmp/native-order.tap
-          grep -E '^# tests 4$' /tmp/native-order.tap
-          grep -E '^# pass 4$' /tmp/native-order.tap
-          grep -E '^# fail 0$' /tmp/native-order.tap
-          grep -E '^# skipped 0$' /tmp/native-order.tap
-          grep -F 'guest=42/46/43' /tmp/native-order.tap
-          grep -F 'native host argument evaluation is explicitly sequenced' /tmp/native-order.tap
-          git -C fixture diff --exit-code HEAD
-
+          cmake -S . -B "$RUNNER_TEMP/build" -DBUILD_TESTING=ON -DCMAKE_BUILD_TYPE=Debug
+          cmake --build "$RUNNER_TEMP/build" --target oreslang-native-vm-nio-lifecycle-test -j2
+          ctest --test-dir "$RUNNER_TEMP/build" -R '^native_vm_nio_lifecycle_and_rt_prestart$' --repeat until-fail:20 --output-on-failure --no-tests=error -V
+      - name: Original full sanitizer gate
+        working-directory: source
+        env:
+          ORES_NIO_EXPECT_HEAD: ${{ env.SOURCE_SHA }}
+          ORES_NIO_EXPECT_TREE: ${{ env.SOURCE_TREE }}
+        run: |
+          set -euo pipefail
+          bash scripts/test-native-vm-nio-host-sanitizers.sh
+          echo SCOPE=NATIVE_HOST_SANITIZER_GATE
   cranelift-operator-regression:
     runs-on: ubuntu-24.04
     timeout-minutes: 25
@@ -99,10 +92,25 @@ jobs:
           test "$(git -C source rev-parse HEAD^{tree})" = 490b592b543aaccf3a320adbd3f51ad68dddd560
           test "$(git -C source write-tree)" = 490b592b543aaccf3a320adbd3f51ad68dddd560
           git -C source diff --exit-code HEAD
-      - name: Actual native regression and formatting
+      - name: Actual native regression
+        working-directory: source
+        run: cargo test --all-targets --locked
+      - name: Formatting and lint differential
+        if: always()
         working-directory: source
         run: |
           set -euo pipefail
-          cargo fmt --all -- --check
-          cargo test --all-targets --locked
+          git -c credential.helper= -c http.extraHeader= fetch --no-tags --depth=1 https://github.com/atto-lang/atto-source.cranelift.git 99fe0f708b3a1ee86f0a52215bd8ea857bc57c91
+          git worktree add --detach "$RUNNER_TEMP/base" 99fe0f708b3a1ee86f0a52215bd8ea857bc57c91
+          set +e
+          (cd "$RUNNER_TEMP/base" && cargo fmt --all -- --check) > "$RUNNER_TEMP/base-fmt.log" 2>&1
+          base_fmt=$?
+          cargo fmt --all -- --check > "$RUNNER_TEMP/head-fmt.log" 2>&1
+          head_fmt=$?
           cargo clippy --all-targets --locked -- -D warnings
+          lint=$?
+          set -e
+          printf 'FORMAT_BASE=%s FORMAT_HEAD=%s STRICT_LINT=%s\n' "$base_fmt" "$head_fmt" "$lint"
+          cat "$RUNNER_TEMP/head-fmt.log"
+          test "$head_fmt" = 0
+          test "$lint" = 0
