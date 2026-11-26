@@ -15,11 +15,12 @@ jobs:
         run: |
           set -euo pipefail
           git init source
-          GIT_TERMINAL_PROMPT=0 git -C source -c credential.helper= -c http.extraHeader= fetch --depth=1 https://github.com/atto-lang/atto-source.llvm.git f138594dc8779a6f5427b8387194e52dda318d8e
+          GIT_TERMINAL_PROMPT=0 git -C source -c credential.helper= -c http.extraHeader= fetch --depth=1 https://github.com/atto-lang/atto-source.llvm.git a0b513eb3e766623301930eb9bcf9582b45715d1
           git -C source checkout --detach FETCH_HEAD
-          test "$(git -C source rev-parse HEAD)" = f138594dc8779a6f5427b8387194e52dda318d8e
+          test "$(git -C source rev-parse HEAD)" = a0b513eb3e766623301930eb9bcf9582b45715d1
           git -C source log -1 --format='%H %T'
           test -z "$(git -C source status --porcelain)"
+          test "$(git -C source rev-parse 'HEAD^{tree}')" = 61a3e8656d2e23ab508151a18e0dbfe89ba86b64
           test "$(git -C source hash-object tests/formal/checked-shift/check_shift.py)" = a3dc5d425b6d4666c4d8eaed2242d0fe6bbb1fc8
           test "$(git -C source hash-object tests/formal/checked-shift/test_shift.py)" = 4513625af395245f0dad02a1204a06dd07bea412
       - name: Build production LLVM compiler and AOT auditor
@@ -74,73 +75,85 @@ jobs:
               done
             done
           done
-  frontend:
+
+  result-idempotence:
     if: github.head_ref == 'ci/atto-shift-proof-and-admission-20261126'
     runs-on: ubuntu-24.04
-    timeout-minutes: 25
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - repo: atto-format
-            sha: 555f5f223d5661e1b52deb3b5572606f2ac18ed3
-            gate: format-visibility
-          - repo: atto-format
-            sha: 37b425c2815c7c7e4f382fe3cf3f06b63de8189e
-            gate: format-suspension
-          - repo: atto-source.rs
-            sha: 530bd6c27b6dcd36362035e996ab021186d2aaf6
-            gate: rust-suspension
-          - repo: atto-source.realtime
-            sha: 65984b8fb1214e46c8dbac8023bc82301e9792c2
-            gate: counted-suspension
-          - repo: atto-source.hdl
-            sha: c19fed113545782f85d8774add3cfdabe53ac632
-            gate: counted-suspension
-          - repo: atto-source.forge
-            sha: 1239afb1c4bf58fa0ef7691c151a826bce40f8a4
-            gate: forge-suspension
+    timeout-minutes: 35
     steps:
-      - name: Verify exact public source
+      - name: Verify exact public Result forward-port
         shell: bash
-        env:
-          REPO: ${{ matrix.repo }}
-          SHA: ${{ matrix.sha }}
         run: |
           set -euo pipefail
           git init source
-          GIT_TERMINAL_PROMPT=0 git -C source -c credential.helper= -c http.extraHeader= fetch --depth=1 "https://github.com/atto-lang/$REPO.git" "$SHA"
+          GIT_TERMINAL_PROMPT=0 git -C source -c credential.helper= -c http.extraHeader= fetch --depth=1 https://github.com/atto-lang/atto-source.llvm.git 098e0d77ca89f4d8c7a0cfc85f680127e9ac17d7
           git -C source checkout --detach FETCH_HEAD
-          test "$(git -C source rev-parse HEAD)" = "$SHA"
+          test "$(git -C source rev-parse HEAD)" = 098e0d77ca89f4d8c7a0cfc85f680127e9ac17d7
           git -C source log -1 --format='%H %T'
           test -z "$(git -C source status --porcelain)"
-      - name: Execute source-owned targeted gates
+          test "$(git -C source hash-object src/main/cpp/oreslang/frontend/Parser.cpp)" = 8926c26aff03f5449c1b1005d425287137d9587f
+          test "$(git -C source hash-object src/main/cpp/oreslang/types/NativeSumTypes.hpp)" = a15c8503106d3513c1b762218a4a13094b81cc05
+      - name: Build production LLVM compiler and AOT auditor
         shell: bash
-        working-directory: source
-        env:
-          GATE: ${{ matrix.gate }}
         run: |
           set -euo pipefail
-          case "$GATE" in
-            format-visibility)
-              cargo test --locked --test export_visibility_provenance
-              ;;
-            format-suspension)
-              node --test tests/callable-headers.test.mjs
-              cargo test --locked --test formatter
-              ;;
-            rust-suspension)
-              cargo test --locked --lib
-              cargo test --locked --test actor_persistence_frontend
-              ;;
-            counted-suspension)
-              node --test tests/suspension-alias-counted-profile.test.mjs
-              ;;
-            forge-suspension)
-              cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug
-              cmake --build build --target scalar_parser_test scalar_lexer_test --parallel 2
-              ctest --test-dir build --output-on-failure -R '^scalar_(parser|lexer)_test$'
-              ;;
-            *) exit 1;;
-          esac
-          echo "EXACT_SOURCE_GATE_PASS $GATE"
+          sudo apt-get update
+          sudo apt-get install -y llvm-18-dev clang-18 cmake ninja-build
+          cmake -S source -B build -G Ninja -DBUILD_TESTING=OFF -DCMAKE_BUILD_TYPE=Release -DLLVM_DIR="$(llvm-config-18 --cmakedir)" -DCMAKE_C_COMPILER=clang-18 -DCMAKE_CXX_COMPILER=clang++-18
+          cmake --build build --target oreslang-llvmc --parallel 2
+          rustc --edition=2021 -D warnings source/scripts/audit_no_gc_ir.rs -o build/oreslang-no-gc-ir-audit
+      - name: Execute actual idempotent Result source fixtures
+        shell: bash
+        run: |
+          set -euo pipefail
+          for name in ok err nested; do
+            for level in 0 2; do
+              ORESLANG_LLVMC="$PWD/build/oreslang-llvmc" ORES_NO_GC_IR_AUDIT="$PWD/build/oreslang-no-gc-ir-audit" ORESLANG_LLVM_AOT_OPT_LEVEL="$level" CLANG=clang-18 bash source/scripts/compile-aot.sh "source/tests/fixtures/trap-result-idempotent-$name.atto" "$PWD/guest-$name-O$level"
+              status=0
+              "./guest-$name-O$level" || status=$?
+              test "$status" = 42
+              echo "REAL_RESULT_IDEMPOTENCE_PASS $name O$level"
+            done
+          done
+      - name: Require exact nominal type and scalar rejection diagnostics
+        shell: bash
+        run: |
+          set -euo pipefail
+          for name in option wrong-type scalar; do
+            status=0
+            build/oreslang-llvmc "source/tests/fixtures/trap-result-idempotent-$name-reject.atto" > reject.ll 2> reject.err || status=$?
+            test "$status" -ne 0
+            test "$status" -lt 128
+            test ! -s reject.ll
+            cat reject.err
+            case "$name" in
+              option) grep -F 'native trap Option payload requires checked nested ownership ABI' reject.err;;
+              wrong-type) grep -F 'native trap existing Result type does not match expected Result' reject.err;;
+              scalar) grep -F 'native trap operand unsupported: only pure integer literals and checked arithmetic are lowered, or existing Result values' reject.err;;
+            esac
+            echo "RESULT_IDEMPOTENCE_REJECT_PASS $name"
+          done
+      - name: Preserve ordinary trap and terminal checked overflow gates
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash source/scripts/test-trap-int-aot.sh "$PWD/build/oreslang-llvmc" clang-18 "$PWD/build/oreslang-no-gc-ir-audit" "$PWD/source/tests/fixtures/trap-int-native42.atto" "$PWD/source/tests/fixtures/trap-int-overflow-terminal.atto" "$PWD/source/scripts/compile-aot.sh"
+  formatter-visibility:
+    if: github.head_ref == 'ci/atto-shift-proof-and-admission-20261126'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Verify exact public current formatter and run focused regression
+        shell: bash
+        run: |
+          set -euo pipefail
+          git init source
+          GIT_TERMINAL_PROMPT=0 git -C source -c credential.helper= -c http.extraHeader= fetch --depth=1 https://github.com/atto-lang/atto-format.git 48c9e34f8e1e6a57bc411d3112a63b0cf6907ded
+          git -C source checkout --detach FETCH_HEAD
+          test "$(git -C source rev-parse HEAD)" = 48c9e34f8e1e6a57bc411d3112a63b0cf6907ded
+          git -C source log -1 --format='%H %T'
+          test -z "$(git -C source status --porcelain)"
+          test "$(git -C source hash-object tests/export_visibility_provenance.rs)" = b639df8a339b81e2920a200d609be22a902041b5
+          cd source
+          cargo test --locked --test export_visibility_provenance
+          cargo test --locked --test formatter
