@@ -1,17 +1,17 @@
-name: Atto current main rem mod proof forward-port
+name: Atto current main checked shift flow
 on:
   pull_request:
     branches: [main]
     types: [opened, synchronize, reopened]
 permissions: {}
 jobs:
-  rem-mod:
+  checked-shift:
     if: github.head_ref == 'ci/atto-js-ashr-and-intrinsic-proof-20261126'
     runs-on: ubuntu-24.04
     timeout-minutes: 35
     env:
       GIT_TERMINAL_PROMPT: '0'
-      SOURCE_SHA: 7e094c6fe2268b881247a09330bdbce22ea1046e
+      SOURCE_SHA: 3d917061120c4b1bf758d102e9194ba2f638dc73
     steps:
       - name: Verify exact public compiler and proof inputs
         shell: bash
@@ -23,11 +23,8 @@ jobs:
           test "$(git -C source rev-parse HEAD)" = "$SOURCE_SHA"
           git -C source log -1 --format='%H %T'
           test -z "$(git -C source status --porcelain)"
-          test "$(git -C source hash-object tests/formal/validate_scalar_remainder_ir.py)" = aff749ca6c99ddc623c9de6007e599671456032e
-          test "$(git -C source hash-object tests/formal/representative_rem_mod.ll)" = 1da16e7fde729f94584c82eea5315f249b0f1ca3
-          test "$(git -C source hash-object tests/formal/verify_remainder.py)" = 15b6114e3f1ef16c4d7648911eadd149f1d22b01
-          test "$(git -C source hash-object tests/fixtures/formal-dynamic-rem-mod.atto)" = 1bf1483cad2ce3c8614fc47902a6df194f4a64aa
-          test "$(git -C source hash-object tests/formal/test_remainder_native.py)" = c85e82c8262d19d966b81048d71ccc12eeb74ecf
+          test "$(git -C source hash-object tests/formal/checked-shift/check_shift.py)" = 7925dd15e81642d4462f47c034af59580bb82daa
+          test "$(git -C source hash-object tests/formal/checked-shift/test_shift.py)" = 312a384027abb91f9e3b53270398d6e1ddcf45b0
       - name: Build actual compiler and audited AOT driver dependency
         shell: bash
         run: |
@@ -38,31 +35,44 @@ jobs:
           cmake --build build --target oreslang-llvmc --parallel 2
           rustc --edition=2021 -D warnings source/scripts/audit_no_gc_ir.rs -o build/oreslang-no-gc-ir-audit
           sha256sum build/oreslang-llvmc
-      - name: Replay representative native differential
-        shell: bash
-        run: |
-          set -euo pipefail
-          python3 source/tests/formal/test_remainder_native.py
-      - name: Execute representative and actual compiler-derived proofs
+      - name: Validate actual emitted shift guard and dataflow
         shell: bash
         run: |
           set -euo pipefail
           python3 -m venv proof-env
-          proof-env/bin/pip install --only-binary=:all: llvmlite==0.47.0 z3-solver==4.13.3.0
-          proof-env/bin/python source/tests/formal/verify_remainder.py --solver "$PWD/proof-env/bin/z3"
-          build/oreslang-llvmc source/tests/fixtures/formal-dynamic-rem-mod.atto > actual.ll
+          proof-env/bin/pip install --only-binary=:all: llvmlite==0.47.0
+          proof-env/bin/python source/tests/formal/checked-shift/test_shift.py
+          cat > shifts.atto <<'ATTO'
+          pub fnc shift_left(int a, int n): int { return a <<< n; }
+          pub fnc shift_logical(int a, int n): int { return a >>> n; }
+          pub fnc shift_arithmetic(int a, int n): int { return a ashr n; }
+          pub fnc main(): int { return shift_left(1, 3) + shift_logical(-1, 63) + shift_arithmetic(-9, 1) + 38; }
+          ATTO
+          build/oreslang-llvmc shifts.atto > actual.ll
           cat actual.ll
-          proof-env/bin/python source/tests/formal/verify_remainder.py --solver "$PWD/proof-env/bin/z3" --compiler "$PWD/build/oreslang-llvmc"
-      - name: Execute actual audited native guest at O0 and O2
-        if: ${{ !cancelled() }}
+          sha256sum actual.ll shifts.atto
+          for item in 'shift_left left' 'shift_logical logical-right' 'shift_arithmetic arithmetic-right'; do
+            read -r symbol op <<< "$item"
+            proof-env/bin/python source/tests/formal/checked-shift/check_shift.py actual.ll "$symbol" "$op"
+          done
+      - name: Execute real positive and invalid-count native guests at O0 and O2
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p guest
+          ulimit -c 0
           for level in 0 2; do
-            ORESLANG_LLVMC="$PWD/build/oreslang-llvmc" ORES_NO_GC_IR_AUDIT="$PWD/build/oreslang-no-gc-ir-audit" ORESLANG_LLVM_AOT_OPT_LEVEL="$level" CLANG=clang-18 bash source/scripts/compile-aot.sh source/tests/fixtures/formal-dynamic-rem-mod.atto "$PWD/guest/rem-mod-O$level"
+            export ORESLANG_LLVMC="$PWD/build/oreslang-llvmc" ORES_NO_GC_IR_AUDIT="$PWD/build/oreslang-no-gc-ir-audit" ORESLANG_LLVM_AOT_OPT_LEVEL="$level" CLANG=clang-18
+            bash source/scripts/compile-aot.sh shifts.atto "$PWD/shift-ok-O$level"
             status=0
-            "guest/rem-mod-O$level" || status=$?
-            test "$status" = 42
-            echo "REAL_ATTO_REM_MOD_GUEST_PASS O$level exit=$status"
+            "./shift-ok-O$level" || status=$?
+            test "$status" -eq 42
+            echo "REAL_SHIFT_GUEST_PASS O$level exit=$status"
+            for op in '<<<' '>>>' 'ashr'; do
+              for n in 64 -1; do
+                printf 'pub fnc shift_bad(int a, int n): int { return a %s n; }\npub fnc main(): int { return shift_bad(-9, %s); }\n' "$op" "$n" > shift-invalid.atto
+                bash source/scripts/compile-aot.sh shift-invalid.atto "$PWD/shift-invalid-O$level"
+                python3 -c 'import subprocess,signal,sys; r=subprocess.run([sys.argv[1]],timeout=5); assert r.returncode == -signal.SIGILL, r.returncode' "$PWD/shift-invalid-O$level"
+                echo "REAL_SHIFT_COUNT_DENIED O$level $op $n"
+              done
+            done
           done
