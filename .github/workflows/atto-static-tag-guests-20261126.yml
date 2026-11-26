@@ -1,0 +1,250 @@
+name: Atto static brand public-source exact-head guest proof
+on:
+  pull_request:
+    branches: [main]
+    paths: ['.github/workflows/atto-static-tag-guests-20261126.yml']
+permissions: {}
+jobs:
+  source-free-capacity:
+    if: github.event.pull_request.head.repo.full_name == github.repository && github.head_ref == 'ci/atto-static-tag-guests-20261126'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    steps:
+      - name: Execute source-free Rust and Node canary
+        run: |
+          set -euo pipefail
+          rustup toolchain install 1.85.1 --profile minimal
+          rustc +1.85.1 --version
+          node --version
+          printf 'fn main() { assert_eq!(6 * 7, 42); }\n' > "$RUNNER_TEMP/probe.rs"
+          rustc +1.85.1 "$RUNNER_TEMP/probe.rs" -o "$RUNNER_TEMP/probe"
+          "$RUNNER_TEMP/probe"
+          node -e 'require("node:assert/strict").equal(6*7,42)'
+  public-source:
+    needs: source-free-capacity
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - lane: witness
+            sha: 4234d4c57dc6a71390b0bcc5f1129666ceb33329
+          - lane: scalar-guest
+            sha: e305c3b5d60f744d834921178da79b2cc8e96798
+    steps:
+      - name: Fetch only immutable public source; verify every tracked blob and mode
+        env:
+          EXPECTED_SHA: ${{ matrix.sha }}
+          GIT_TERMINAL_PROMPT: '0'
+          GIT_CONFIG_GLOBAL: /dev/null
+          GIT_CONFIG_SYSTEM: /dev/null
+        run: |
+          set -euo pipefail
+          mkdir "$RUNNER_TEMP/atto-public"
+          cd "$RUNNER_TEMP/atto-public"
+          git init -q
+          git -c credential.helper= -c core.hooksPath=/dev/null fetch --no-tags --depth=1 https://github.com/atto-lang/atto-source.rs.git "$EXPECTED_SHA"
+          test "$(git rev-parse FETCH_HEAD)" = "$EXPECTED_SHA"
+          git -c core.hooksPath=/dev/null checkout --detach FETCH_HEAD
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+          echo "source commit $(git rev-parse HEAD)"
+          echo "source root tree $(git rev-parse HEAD^{tree})"
+          git ls-tree -rz --full-tree HEAD > "$RUNNER_TEMP/atto-tree"
+          count=0
+          while IFS= read -r -d '' entry; do
+            meta="${entry%%"
+            path="${entry#*"
+            read -r mode type oid <<< "$meta"
+            test "$type" = blob
+            test -f "$path"
+            test ! -L "$path"
+            case "$mode" in
+              100644) test ! -x "$path" ;;
+              100755) test -x "$path" ;;
+              *) exit 1 ;;
+            esac
+            test "$(git hash-object --no-filters -- "$path")" = "$oid"
+            count=$((count+1))
+          done < "$RUNNER_TEMP/atto-tree"
+          test "$count" -gt 0
+          echo "verified tracked blobs: $count"
+          test -z "$(git status --porcelain --untracked-files=no)"
+      - name: Execute shared tag registry and full library regression
+        working-directory: ${{ runner.temp }}/atto-public
+        run: |
+          set -euo pipefail
+          rustup toolchain install 1.85.1 --profile minimal
+          rustc +1.85.1 --version
+          cargo +1.85.1 test --locked --offline --lib structural_tags::tests -- --nocapture
+          cargo +1.85.1 test --locked --offline --lib
+      - name: Existing member and shape witnesses
+        if: matrix.lane == 'witness'
+        working-directory: ${{ runner.temp }}/atto-public
+        run: |
+          set -euo pipefail
+          cargo +1.85.1 test --locked --offline --test shape_witness_contract
+          cargo +1.85.1 test --locked --offline --test structural_member_witness_contract
+      - name: Compile and execute actual branded guests plus no-artifact negatives
+        if: matrix.lane == 'scalar-guest'
+        working-directory: ${{ runner.temp }}/atto-public
+        run: |
+          set -euo pipefail
+          cargo +1.85.1 test --locked --offline --test structural_scalar_call
+          cargo +1.85.1 test --locked --offline --test structural_tag_guest
+          cargo +1.85.1 build --locked --offline --release --bin attoc
+          sha256sum target/release/attoc
+          ATTOC=target/release/attoc node tests/structural_tag_guest_execution.mjs
+      - name: Confirm source commit unchanged
+        working-directory: ${{ runner.temp }}/atto-public
+        env:
+          EXPECTED_SHA: ${{ matrix.sha }}
+        run: |
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+          test -z "$(git status --porcelain --untracked-files=no)"
+\t'*}"
+            path="__PATH__"
+            read -r mode type oid <<< "$meta"
+            test "$type" = blob
+            test -f "$path"
+            test ! -L "$path"
+            case "$mode" in
+              100644) test ! -x "$path" ;;
+              100755) test -x "$path" ;;
+              *) exit 1 ;;
+            esac
+            test "$(git hash-object --no-filters -- "$path")" = "$oid"
+            count=$((count+1))
+          done < "$RUNNER_TEMP/atto-tree"
+          test "$count" -gt 0
+          echo "verified tracked blobs: $count"
+          test -z "$(git status --porcelain --untracked-files=no)"
+      - name: Execute shared tag registry and full library regression
+        working-directory: ${{ runner.temp }}/atto-public
+        run: |
+          set -euo pipefail
+          rustup toolchain install 1.85.1 --profile minimal
+          rustc +1.85.1 --version
+          cargo +1.85.1 test --locked --offline --lib structural_tags::tests -- --nocapture
+          cargo +1.85.1 test --locked --offline --lib
+      - name: Existing member and shape witnesses
+        if: matrix.lane == 'witness'
+        working-directory: ${{ runner.temp }}/atto-public
+        run: |
+          set -euo pipefail
+          cargo +1.85.1 test --locked --offline --test shape_witness_contract
+          cargo +1.85.1 test --locked --offline --test structural_member_witness_contract
+      - name: Compile and execute actual branded guests plus no-artifact negatives
+        if: matrix.lane == 'scalar-guest'
+        working-directory: ${{ runner.temp }}/atto-public
+        run: |
+          set -euo pipefail
+          cargo +1.85.1 test --locked --offline --test structural_scalar_call
+          cargo +1.85.1 test --locked --offline --test structural_tag_guest
+          cargo +1.85.1 build --locked --offline --release --bin attoc
+          sha256sum target/release/attoc
+          ATTOC=target/release/attoc node tests/structural_tag_guest_execution.mjs
+      - name: Confirm source commit unchanged
+        working-directory: ${{ runner.temp }}/atto-public
+        env:
+          EXPECTED_SHA: ${{ matrix.sha }}
+        run: |
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+          test -z "$(git status --porcelain --untracked-files=no)"
+\t'}"
+            read -r mode type oid <<< "$meta"
+            test "$type" = blob
+            test -f "$path"
+            test ! -L "$path"
+            case "$mode" in
+              100644) test ! -x "$path" ;;
+              100755) test -x "$path" ;;
+              *) exit 1 ;;
+            esac
+            test "$(git hash-object --no-filters -- "$path")" = "$oid"
+            count=$((count+1))
+          done < "$RUNNER_TEMP/atto-tree"
+          test "$count" -gt 0
+          echo "verified tracked blobs: $count"
+          test -z "$(git status --porcelain --untracked-files=no)"
+      - name: Execute shared tag registry and full library regression
+        working-directory: ${{ runner.temp }}/atto-public
+        run: |
+          set -euo pipefail
+          rustup toolchain install 1.85.1 --profile minimal
+          rustc +1.85.1 --version
+          cargo +1.85.1 test --locked --offline --lib structural_tags::tests -- --nocapture
+          cargo +1.85.1 test --locked --offline --lib
+      - name: Existing member and shape witnesses
+        if: matrix.lane == 'witness'
+        working-directory: ${{ runner.temp }}/atto-public
+        run: |
+          set -euo pipefail
+          cargo +1.85.1 test --locked --offline --test shape_witness_contract
+          cargo +1.85.1 test --locked --offline --test structural_member_witness_contract
+      - name: Compile and execute actual branded guests plus no-artifact negatives
+        if: matrix.lane == 'scalar-guest'
+        working-directory: ${{ runner.temp }}/atto-public
+        run: |
+          set -euo pipefail
+          cargo +1.85.1 test --locked --offline --test structural_scalar_call
+          cargo +1.85.1 test --locked --offline --test structural_tag_guest
+          cargo +1.85.1 build --locked --offline --release --bin attoc
+          sha256sum target/release/attoc
+          ATTOC=target/release/attoc node tests/structural_tag_guest_execution.mjs
+      - name: Confirm source commit unchanged
+        working-directory: ${{ runner.temp }}/atto-public
+        env:
+          EXPECTED_SHA: ${{ matrix.sha }}
+        run: |
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+          test -z "$(git status --porcelain --untracked-files=no)"
+\t'*}"
+            path="__PATH__"
+            read -r mode type oid <<< "$meta"
+            test "$type" = blob
+            test -f "$path"
+            test ! -L "$path"
+            case "$mode" in
+              100644) test ! -x "$path" ;;
+              100755) test -x "$path" ;;
+              *) exit 1 ;;
+            esac
+            test "$(git hash-object --no-filters -- "$path")" = "$oid"
+            count=$((count+1))
+          done < "$RUNNER_TEMP/atto-tree"
+          test "$count" -gt 0
+          echo "verified tracked blobs: $count"
+          test -z "$(git status --porcelain --untracked-files=no)"
+      - name: Execute shared tag registry and full library regression
+        working-directory: ${{ runner.temp }}/atto-public
+        run: |
+          set -euo pipefail
+          rustup toolchain install 1.85.1 --profile minimal
+          rustc +1.85.1 --version
+          cargo +1.85.1 test --locked --offline --lib structural_tags::tests -- --nocapture
+          cargo +1.85.1 test --locked --offline --lib
+      - name: Existing member and shape witnesses
+        if: matrix.lane == 'witness'
+        working-directory: ${{ runner.temp }}/atto-public
+        run: |
+          set -euo pipefail
+          cargo +1.85.1 test --locked --offline --test shape_witness_contract
+          cargo +1.85.1 test --locked --offline --test structural_member_witness_contract
+      - name: Compile and execute actual branded guests plus no-artifact negatives
+        if: matrix.lane == 'scalar-guest'
+        working-directory: ${{ runner.temp }}/atto-public
+        run: |
+          set -euo pipefail
+          cargo +1.85.1 test --locked --offline --test structural_scalar_call
+          cargo +1.85.1 test --locked --offline --test structural_tag_guest
+          cargo +1.85.1 build --locked --offline --release --bin attoc
+          sha256sum target/release/attoc
+          ATTOC=target/release/attoc node tests/structural_tag_guest_execution.mjs
+      - name: Confirm source commit unchanged
+        working-directory: ${{ runner.temp }}/atto-public
+        env:
+          EXPECTED_SHA: ${{ matrix.sha }}
+        run: |
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+          test -z "$(git status --porcelain --untracked-files=no)"
