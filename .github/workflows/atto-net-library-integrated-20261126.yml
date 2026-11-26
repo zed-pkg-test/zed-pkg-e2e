@@ -1,0 +1,29 @@
+name: Atto CLR integrated library corpus evidence regression
+on:
+  push:
+    branches: ['ci/atto-net-library-integrated-20261126']
+permissions: {}
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Bind exact public commit and tree
+        run: |
+          set -euo pipefail
+          git init source
+          cd source
+          GIT_TERMINAL_PROMPT=0 git -c credential.helper= -c http.extraheader= fetch --no-tags --depth=1 https://github.com/atto-lang/atto-source.net.git ae4cd4185ac02c47656cd90fa9f4f96f56f73756
+          git checkout --detach FETCH_HEAD
+          test "$(git rev-parse HEAD)" = ae4cd4185ac02c47656cd90fa9f4f96f56f73756
+          test "$(git rev-parse HEAD^{tree})" = 84f055ebef52e1478525e7da9520bca1c3a311b7
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - name: Full CLR compiler and real library CIL execution
+        working-directory: source
+        run: |
+          set -euo pipefail
+          dotnet run -c Release --project verification/Ores.Net.Tests | tee "$RUNNER_TEMP/net-test.log"
+          grep -E 'ATTO_LIBRARIES_V1 net passed=[0-9]+ executed=[3-9][0-9]* rejected=[7-9][0-9]* unsupported=[0-9]+ failed=0' "$RUNNER_TEMP/net-test.log"
+          git diff --exit-code HEAD
