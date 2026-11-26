@@ -13,10 +13,10 @@ jobs:
           set -euo pipefail
           git init source
           cd source
-          GIT_TERMINAL_PROMPT=0 git -c credential.helper= -c http.extraheader= fetch --no-tags --depth=1 https://github.com/atto-lang/atto-format.git 48c9e34f8e1e6a57bc411d3112a63b0cf6907ded
+          GIT_TERMINAL_PROMPT=0 git -c credential.helper= -c http.extraheader= fetch --no-tags --depth=1 https://github.com/atto-lang/atto-format.git 35b2f3a8aae90a3a6e87beb3672b45fdad95ff8a
           git checkout --detach FETCH_HEAD
-          test "$(git rev-parse HEAD)" = 48c9e34f8e1e6a57bc411d3112a63b0cf6907ded
-          test "$(git rev-parse HEAD^{tree})" = b57e81b85fe27a3513b4e7d76b77342d70a8ee7c
+          test "$(git rev-parse HEAD)" = 35b2f3a8aae90a3a6e87beb3672b45fdad95ff8a
+          test "$(git rev-parse HEAD^{tree})" = aa91e0385d56893e11e2c2af1515ddfe220374c2
       - name: Rust formatter and visibility regression
         working-directory: source
         run: |
