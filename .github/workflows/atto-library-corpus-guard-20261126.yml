@@ -1,0 +1,75 @@
+name: Atto complete library corpus and rejection guard parity
+on:
+  push:
+    branches: ['ci/atto-library-corpus-guard-20261126']
+permissions: {}
+jobs:
+  guard:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - repo: atto-source.rs
+            head: 71153d5a52e4f4e39b47c7e823ebfed48200af75
+            tree: c015bf3be4cf63f5cafe1c32f96f8ada8886146c
+            profile: rust
+          - repo: atto-source.llvm
+            head: 7b8fd6b931a23d37c71665ec49dc17582e4c5f96
+            tree: 7b3490700753c7cb64f711d7864facb70af4561a
+            profile: llvm
+          - repo: atto-source.java
+            head: ec842c9223628f409779e4b5d5bbd652107c481a
+            tree: f406eb4a8d77ee531f22b6e287693189e287d107
+            profile: java
+          - repo: atto-platform-conformance
+            head: d425bc0b95484dfb1aff9d56b8407f86cbf1e877
+            tree: 29585b32cff7798f928343bba2d9d6f2af66d08f
+            profile: conformance
+    steps:
+      - name: Bind public exact head and tree
+        env:
+          SOURCE_REPO: ${{ matrix.repo }}
+          SOURCE_HEAD: ${{ matrix.head }}
+          SOURCE_TREE: ${{ matrix.tree }}
+          GIT_TERMINAL_PROMPT: '0'
+        run: |
+          set -euo pipefail
+          git init source
+          cd source
+          git -c credential.helper= -c http.extraheader= fetch --no-tags --depth=1 "https://github.com/atto-lang/$SOURCE_REPO.git" "$SOURCE_HEAD"
+          git checkout --detach FETCH_HEAD
+          test "$(git rev-parse HEAD)" = "$SOURCE_HEAD"
+          test "$(git rev-parse HEAD^{tree})" = "$SOURCE_TREE"
+          git log -1 --format='%H %T'
+      - name: Rust host guards and real Wasm library corpus
+        if: matrix.profile == 'rust'
+        working-directory: source
+        run: |
+          set -euo pipefail
+          node --test tests/atto_libraries_harness.test.mjs
+          cargo build --locked --release --bin attoc
+          node tests/atto_libraries.mjs target/release/attoc
+      - name: LLVM host guards and real native library corpus
+        if: matrix.profile == 'llvm'
+        working-directory: source
+        run: |
+          set -euo pipefail
+          python3 tests/test_atto_library_case_guard.py
+          sudo apt-get update
+          sudo apt-get install -y build-essential cmake clang llvm-dev
+          cmake -S . -B "$RUNNER_TEMP/llvm" -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON
+          cmake --build "$RUNNER_TEMP/llvm" --parallel 2 --target oreslang-llvmc
+          python3 tests/atto_libraries_v1.py --compiler "$RUNNER_TEMP/llvm/oreslang-llvmc" --clang "$(command -v clang)"
+      - name: Java host harness regression tests (not guest proof)
+        if: matrix.profile == 'java'
+        working-directory: source
+        run: python3 tests/test_atto_libraries_v1_harness.py
+      - name: Shared launcher harness regression tests (not guest proof)
+        if: matrix.profile == 'conformance'
+        working-directory: source
+        run: python3 libraries/v1/test_run_cli_backend.py
+      - name: Tracked source unchanged
+        working-directory: source
+        run: git diff --exit-code HEAD
