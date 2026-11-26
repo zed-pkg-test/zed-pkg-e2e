@@ -1,0 +1,99 @@
+name: Atto public core alloc and std library parity
+on:
+  push:
+    branches: ['ci/atto-public-library-parity-20261126']
+permissions: {}
+jobs:
+  library:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - repo: atto-common-source
+            head: 66c4f08d964fc2ab7c8b2a2b8542e7d9550dee48
+            tree: 41bf01740f4463023ac6f8e0e6003b82da220339
+            profile: common
+          - repo: atto-source.js
+            head: a1ed2c0f00948ac24aa869a8c8184c57b53c3a1b
+            tree: 878f44c45b0c1b8a567ba14dc659751d9b86d6ec
+            profile: js
+          - repo: atto-source.llvm
+            head: 6889d34bf5bbc8fde0d36b6d1ffabfc4ac8ebb96
+            tree: 7363c72ffad1c28c2f74e7fbe8f1c36d7acf4542
+            profile: llvm
+          - repo: atto-source.net
+            head: cf3a55c5e3536ebc17d7ff726eb67320b5e88ecd
+            tree: 5e7d806fe4485a8f666744d486797a1e2818d12a
+            profile: adapter
+          - repo: atto-source.rs
+            head: 87da77bbb43c1b02a7e8c2e39bc2a65a0fcaeca2
+            tree: 9c957c6641d599392eeefe0ffd4221c30c7963cd
+            profile: adapter
+          - repo: atto-source.forge
+            head: b80b6d82fc2f3027b014699f9919ba9a36a2b8a7
+            tree: 1df1c90fe6bba70830d92cc7af94ff3604e16e99
+            profile: adapter
+          - repo: atto-source.cranelift
+            head: 728ed4e184308dbe65d1d8d237092e7b20ed56a4
+            tree: b9f5d92e6f2d3e2a174074f6e6980bd1265e826b
+            profile: adapter
+    steps:
+      - name: Anonymous public source checkout and tree binding
+        env:
+          SOURCE_REPO: ${{ matrix.repo }}
+          SOURCE_HEAD: ${{ matrix.head }}
+          SOURCE_TREE: ${{ matrix.tree }}
+          GIT_TERMINAL_PROMPT: '0'
+        run: |
+          set -euo pipefail
+          git init source
+          cd source
+          git -c credential.helper= -c http.extraheader= fetch --no-tags --depth=1 "https://github.com/atto-lang/$SOURCE_REPO.git" "$SOURCE_HEAD"
+          git checkout --detach FETCH_HEAD
+          test "$(git rev-parse HEAD)" = "$SOURCE_HEAD"
+          test "$(git rev-parse HEAD^{tree})" = "$SOURCE_TREE"
+          git diff --exit-code HEAD
+          git log -1 --format='%H %T'
+      - name: Common source structural and native host contracts
+        if: matrix.profile == 'common'
+        working-directory: source
+        run: |
+          set -euo pipefail
+          node --test tests/library-layers.test.mjs tests/canonical-stdlib-bytes.test.mjs tests/byte_buffer_source_contract.test.mjs tests/alloc_core_std_source.test.mjs
+          node src/library-layers.mjs .
+          rustc --edition=2021 --test -D warnings tests/byte_buffer_reference.rs -o "$RUNNER_TEMP/byte-buffer-reference"
+          "$RUNNER_TEMP/byte-buffer-reference"
+          cmake -S native -B "$RUNNER_TEMP/common-native" -DATTO_COMMON_SANITIZERS=ON -DCMAKE_BUILD_TYPE=RelWithDebInfo
+          cmake --build "$RUNNER_TEMP/common-native" --parallel 2
+          ctest --test-dir "$RUNNER_TEMP/common-native" --output-on-failure --no-tests=error
+      - name: JS compiler and core library tests
+        if: matrix.profile == 'js'
+        working-directory: source
+        run: |
+          set -euo pipefail
+          npm run check
+          npm test
+          npm run test:core-browser
+      - name: Native LLVM alloc and library guest corpus
+        if: matrix.profile == 'llvm'
+        working-directory: source
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y build-essential cmake clang llvm-dev python3
+          cmake -S . -B "$RUNNER_TEMP/llvm" -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON
+          cmake --build "$RUNNER_TEMP/llvm" --parallel 2 --target oreslang-llvmc
+          python3 -I tests/atto_libraries_v1.py --compiler "$RUNNER_TEMP/llvm/oreslang-llvmc" --clang "$(command -v clang)"
+          python3 -I tests/atto_alloc_guest.py --compiler "$RUNNER_TEMP/llvm/oreslang-llvmc" --clang "$(command -v clang)"
+      - name: Stdlib synthetic receipt tests only
+        if: matrix.profile == 'adapter' || matrix.profile == 'js'
+        working-directory: source
+        run: |
+          set -euo pipefail
+          node --test tests/std-metrics-json-zorde-guest-admission.test.mjs
+          echo 'Adapter tests only; NOT native guest evidence'
+      - name: Verify tracked source unchanged
+        working-directory: source
+        run: git diff --exit-code HEAD
