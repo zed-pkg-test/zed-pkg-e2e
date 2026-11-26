@@ -1,0 +1,92 @@
+name: Atto actual generic collection and library rejection controls
+on:
+  push:
+    branches: ['ci/atto-library-parity-wave14-20261126']
+permissions: {}
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - repo: atto-platform-conformance
+            head: 4cf5080adb9d3a97a847c89701a2e37d5c8c1154
+            tree: edcc6930064827a0541bdff33d1736ef7bd4a1fe
+            profile: contract
+          - repo: atto-source.java
+            head: 3992cde9c0874ef40da2c0e9fd3c2755e380895d
+            tree: d5c2639175943253489991fecd4d9a1b6514de04
+            profile: java
+          - repo: atto-source.rs
+            head: 2cdcc62539a3b963f407b79501d66d97ac3d6f75
+            tree: 17a0072ba0ca56c27cb3ff93779a6053dae633d4
+            profile: rust
+          - repo: atto-source.java
+            head: 60430b68e5ef0b4b831c70ec0819e4e7e24140cc
+            tree: 714855cfd65d910e754205edcf65a7001d49473a
+            profile: generic
+          - repo: atto-source.llvm
+            head: b5ae7afb68d47ac638f0e70b14d8b850f1e0d947
+            tree: 36d153c573ce797928f0acf2b656269f4afe85eb
+            profile: llvm
+    steps:
+      - name: Bind exact public commit and tree
+        env:
+          SOURCE_REPO: ${{ matrix.repo }}
+          SOURCE_HEAD: ${{ matrix.head }}
+          SOURCE_TREE: ${{ matrix.tree }}
+        run: |
+          set -euo pipefail
+          git init source
+          cd source
+          GIT_TERMINAL_PROMPT=0 git -c credential.helper= -c http.extraheader= fetch --no-tags --depth=1 "https://github.com/atto-lang/$SOURCE_REPO.git" "$SOURCE_HEAD"
+          git checkout --detach FETCH_HEAD
+          test "$(git rev-parse HEAD)" = "$SOURCE_HEAD"
+          test "$(git rev-parse HEAD^{tree})" = "$SOURCE_TREE"
+      - name: Shared host-only rejection controls
+        if: matrix.profile == 'contract'
+        working-directory: source
+        run: python3 libraries/v1/test_run_cli_backend.py
+      - name: Java host-only launcher rejection controls
+        if: matrix.profile == 'java'
+        working-directory: source
+        run: python3 tests/test_atto_libraries_v1_harness.py
+      - name: Rust host controls and actual library corpus
+        if: matrix.profile == 'rust'
+        working-directory: source
+        run: |
+          set -euo pipefail
+          node --test tests/atto_libraries_harness.test.mjs
+          cargo build --locked --release --bin attoc
+          node tests/atto_libraries.mjs target/release/attoc
+      - uses: actions/setup-java@dded0888837ed1f317902acf8a20df0ad188d165
+        if: matrix.profile == 'generic'
+        with:
+          distribution: graalvm
+          java-version: '25'
+      - name: Java canonical generic collection source and actual linked guests
+        if: matrix.profile == 'generic'
+        working-directory: source
+        run: |
+          set -euo pipefail
+          node --test tests/alloc-collections-source-contract.test.mjs
+          mvn -B -ntp -Dtest=AttoAllocGenericSourceGuestTest,AttoAllocCollectionsGuestTest -DfailIfNoTests=true test
+      - name: LLVM actual native compiler and baseline corpus
+        if: matrix.profile == 'llvm'
+        working-directory: source
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y build-essential cmake clang llvm-dev
+          cmake -S . -B "$RUNNER_TEMP/llvm" -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON
+          cmake --build "$RUNNER_TEMP/llvm" --parallel 2 --target oreslang-llvmc
+          python3 tests/atto_libraries_v1.py --compiler "$RUNNER_TEMP/llvm/oreslang-llvmc" --clang "$(command -v clang)"
+      - name: LLVM native allocation and sanitizer linked cases
+        if: matrix.profile == 'llvm'
+        working-directory: source
+        run: python3 tests/atto_alloc_guest.py --compiler "$RUNNER_TEMP/llvm/oreslang-llvmc" --clang "$(command -v clang)"
+      - name: Tracked source unchanged
+        working-directory: source
+        run: git diff --exit-code HEAD
