@@ -1,0 +1,92 @@
+name: Atto exact integrated parity batch 4
+on:
+  push:
+    branches: [ci/atto-parity-20261126-batch4]
+permissions: {}
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - backend: js
+            pr: '226'
+            head: '807f37ec6269631db6759f8a8bfd35a72856d332'
+            tree: '2a5f412d2bc82f714f92da9c8c8598c28f1674fb'
+          - backend: js
+            pr: '236'
+            head: '115062e94b7310ce4fdbbc9f9eba5194f9440b71'
+            tree: '6cce3705f3a6f42ee10d7b39dd539300144d9245'
+          - backend: hdl
+            pr: '105'
+            head: '1503681edad6f91d28ce3031eb47cea888c81844'
+            tree: '53c8ea207a974d500132aa771e907510e8e39651'
+          - backend: java
+            pr: '1984'
+            head: '70ef727e711444ba31c95154d0133241f98ce775'
+            tree: 'de3b0869e737d004acfe7aabb5b144dae8d97c92'
+          - backend: llvm
+            pr: '1008'
+            head: 'c51a52c494b10ffcf2718e853a1c167423add6a0'
+            tree: '81552bac5309a3f1a8b2b64d7ea9bec4375b86dd'
+    env:
+      BACKEND: ${{ matrix.backend }}
+      SOURCE_HEAD: ${{ matrix.head }}
+      SOURCE_TREE: ${{ matrix.tree }}
+      PR: ${{ matrix.pr }}
+    steps:
+      - name: Bind public immutable source
+        run: |
+          set -euo pipefail
+          git init "$RUNNER_TEMP/source"
+          cd "$RUNNER_TEMP/source"
+          git -c credential.helper= fetch --no-tags --depth=1 "https://github.com/atto-lang/atto-source.${BACKEND}.git" "$SOURCE_HEAD"
+          git checkout --detach FETCH_HEAD
+          test "$(git rev-parse HEAD)" = "$SOURCE_HEAD"
+          test "$(git rev-parse HEAD^{tree})" = "$SOURCE_TREE"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: JS compiled guest and full suite
+        if: matrix.backend == 'js'
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP/source"
+          if [ "$PR" = 226 ]; then node --test tests/checked-ashr-dynamic-differential.test.mjs; else node --test tests/guard-condition-list-adversarial.test.mjs; fi
+          npm test
+      - name: HDL source contract and full RTL suite
+        if: matrix.backend == 'hdl'
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y iverilog
+          cd "$RUNNER_TEMP/source"
+          node --test tests/alloc-collections-source-contract.test.mjs
+          npm test
+      - name: JVM checked u64 actual guests
+        if: matrix.backend == 'java'
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP/source"
+          java -version
+          javac -version
+          node --test tests/checked-u64-java.test.mjs
+      - name: LLVM checked u64 native and wasm32 actual guests
+        if: matrix.backend == 'llvm'
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP/source"
+          clang --version
+          clang++ --version
+          wasm-ld --version
+          ulimit -c 0
+          node --test tests/checked_u64_native_wasm.test.mjs
+      - name: Verify tracked source unchanged
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP/source"
+          test "$(git rev-parse HEAD^{tree})" = "$SOURCE_TREE"
+          git diff --exit-code
+          git diff --cached --exit-code
