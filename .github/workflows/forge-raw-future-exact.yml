@@ -10,11 +10,11 @@ jobs:
         run: |
           set -euo pipefail
           git init source
-          GIT_TERMINAL_PROMPT=0 git -C source -c credential.helper= -c http.extraHeader= fetch --no-tags --depth=1 https://github.com/atto-lang/atto-source.forge.git 716f0953e96157b39fd9e5a3a36269da8ff33621
+          GIT_TERMINAL_PROMPT=0 git -C source -c credential.helper= -c http.extraHeader= fetch --no-tags --depth=1 https://github.com/atto-lang/atto-source.forge.git 62c70f19853c4854e05d684049e91f5ba9579a08
           git -C source checkout --detach FETCH_HEAD
-          test "$(git -C source rev-parse HEAD)" = 716f0953e96157b39fd9e5a3a36269da8ff33621
-          test "$(git -C source rev-parse HEAD^{tree})" = bf9b39e712f78da59a4ac9d1e050c30c601b21e4
-          test "$(git -C source write-tree)" = bf9b39e712f78da59a4ac9d1e050c30c601b21e4
+          test "$(git -C source rev-parse HEAD)" = 62c70f19853c4854e05d684049e91f5ba9579a08
+          test "$(git -C source rev-parse HEAD^{tree})" = 889024d576dbc9fc10a4c5cf6f8a0ef41721b64a
+          test "$(git -C source write-tree)" = 889024d576dbc9fc10a4c5cf6f8a0ef41721b64a
       - name: Build Forge and execute actual native guests
         working-directory: source
         run: |

@@ -1,0 +1,91 @@
+name: Public four-backend select regression
+on: [push]
+permissions: {}
+jobs:
+  public-source-guest:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - backend: llvm
+            sha: 1b76092fac837e8c5695aa7e443df4b159eb7295
+            tree: 62e7a9996ba33a7d991aa79d5473153923156091
+            repo: atto-lang/atto-source.llvm
+            id: '1448700962'
+    env:
+      SOURCE_SHA: ${{ matrix.sha }}
+      SOURCE_REPO: ${{ matrix.repo }}
+      SOURCE_ID: ${{ matrix.id }}
+      SOURCE_TREE: ${{ matrix.tree }}
+      GIT_TERMINAL_PROMPT: '0'
+    steps:
+      - name: Verify public repository and immutable source tree without credentials
+        shell: bash
+        run: |
+          set -euo pipefail
+          repo_json=$(curl --fail --silent --show-error "https://api.github.com/repos/$SOURCE_REPO")
+          jq -e --arg id "$SOURCE_ID" '(.id|tostring)==$id and .private==false and .visibility=="public"' <<< "$repo_json" >/dev/null
+          commit_json=$(curl --fail --silent --show-error "https://api.github.com/repos/$SOURCE_REPO/git/commits/$SOURCE_SHA")
+          expected_tree=$(jq -er --arg sha "$SOURCE_SHA" 'select(.sha==$sha) | .tree.sha' <<< "$commit_json")
+          test "$expected_tree" = "$SOURCE_TREE"
+          printf '%s\n' "$expected_tree" | grep -Eq '^[0-9a-f]{40}$'
+          git init source
+          git -C source -c credential.helper= -c http.extraHeader= fetch --no-tags --depth=1 "https://github.com/$SOURCE_REPO.git" "$SOURCE_SHA"
+          git -C source checkout --detach FETCH_HEAD
+          test "$(git -C source rev-parse HEAD)" = "$SOURCE_SHA"
+          test "$(git -C source rev-parse HEAD^{tree})" = "$expected_tree"
+          printf 'SOURCE_HEAD=%s\nSOURCE_ROOT_TREE=%s\n' "$SOURCE_SHA" "$expected_tree"
+      - name: Verify exact public conformance corpus
+        if: matrix.backend == 'llvm' || matrix.backend == 'rust'
+        shell: bash
+        run: |
+          set -euo pipefail
+          repo=atto-lang/atto-platform-conformance
+          sha=b5ffba074829d5e8c95d9817a8a8db7af1c4ff98
+          curl --fail --silent --show-error "https://api.github.com/repos/$repo" | jq -e '.id==1448719136 and .private==false and .visibility=="public"' >/dev/null
+          tree=$(curl --fail --silent --show-error "https://api.github.com/repos/$repo/git/commits/$sha" | jq -er --arg sha "$sha" 'select(.sha==$sha)|.tree.sha')
+          git init corpus
+          git -C corpus -c credential.helper= -c http.extraHeader= fetch --no-tags --depth=1 "https://github.com/$repo.git" "$sha"
+          git -C corpus checkout --detach FETCH_HEAD
+          test "$(git -C corpus rev-parse HEAD)" = "$sha"
+          test "$(git -C corpus rev-parse HEAD^{tree})" = "$tree"
+      - name: Install native toolchain
+        if: matrix.backend == 'llvm'
+        run: sudo apt-get update && sudo apt-get install -y build-essential cmake clang llvm-dev python3
+      - name: Build compiler and execute native LLVM guests
+        if: matrix.backend == 'llvm'
+        working-directory: source
+        run: |
+          set -euo pipefail
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF
+          cmake --build build --target oreslang-llvmc --parallel 2
+          bash scripts/test-counted-ready-native-guest.sh build/oreslang-llvmc ../corpus/fixtures/select-source-v2
+      - name: Build Forge CLI and execute shared native guests
+        if: matrix.backend == 'forge'
+        working-directory: source
+        run: |
+          set -euo pipefail
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+          cmake --build build --target oresforge --parallel 2
+          bash verification/test-counted-ready-shared-native.sh build/oresforge contracts/counted-ready-v1
+      - uses: graalvm/setup-graalvm@27b360dbb857524eaf0b4c4cef364d38e5b4f173
+        if: matrix.backend == 'java'
+        with:
+          java-version: '25'
+          distribution: 'graalvm'
+      - name: Java parser and select guests
+        if: matrix.backend == 'java'
+        working-directory: source
+        run: mvn -B -ntp -Dtest=TypedDefaultSelectGuestTest,SelectFormParserGuardTest -Dsurefire.failIfNoSpecifiedTests=true test
+      - name: Build Rust native CLI and wasm32 compiler and run actual guests
+        if: matrix.backend == 'rust'
+        working-directory: source
+        run: |
+          set -euo pipefail
+          cargo build --locked --release --bin attoc
+          toolchain=$(rustup show active-toolchain | cut -d ' ' -f1)
+          rustup target add --toolchain "$toolchain" wasm32-unknown-unknown
+          cargo +"$toolchain" build --locked --release --lib --target wasm32-unknown-unknown
+          node tests/counted-ready-wasm-parity.mjs target/release/attoc target/wasm32-unknown-unknown/release/atto_compiler.wasm ../corpus/fixtures/select-source-v2
