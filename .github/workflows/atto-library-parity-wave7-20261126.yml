@@ -1,0 +1,71 @@
+name: Atto library source false-positive controls and integrated Java guard
+on:
+  push:
+    branches: ['ci/atto-library-parity-wave7-20261126']
+permissions: {}
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - repo: atto-source.net
+            head: 757618c0aed116e335801ca6aaef43160c60d690
+            tree: 07c505fd42cd72875ea71ba46a4be978573adf88
+            profile: source
+          - repo: atto-source.rs
+            head: 074f2d838759d4939a670270f2d5bf88e5cd511a
+            tree: c4336ee3ff819b2165b96c81bb66002505f8cba6
+            profile: source
+          - repo: atto-source.java
+            head: 6db5536a7504df4931cfc5a9bd988e2c5ae637fe
+            tree: 8a911d2a68533b48bb715a258a50f145ccabffcd
+            profile: java
+    steps:
+      - name: Bind exact public commit and tree
+        env:
+          SOURCE_REPO: ${{ matrix.repo }}
+          SOURCE_HEAD: ${{ matrix.head }}
+          SOURCE_TREE: ${{ matrix.tree }}
+          GIT_TERMINAL_PROMPT: '0'
+        run: |
+          set -euo pipefail
+          git init source
+          cd source
+          git -c credential.helper= -c http.extraheader= fetch --no-tags --depth=1 "https://github.com/atto-lang/$SOURCE_REPO.git" "$SOURCE_HEAD"
+          git checkout --detach FETCH_HEAD
+          test "$(git rev-parse HEAD)" = "$SOURCE_HEAD"
+          test "$(git rev-parse HEAD^{tree})" = "$SOURCE_TREE"
+          git log -1 --format='%H %T'
+      - name: Source-only core and alloc tests and new negative controls
+        if: matrix.profile == 'source'
+        working-directory: source
+        run: |
+          set -euo pipefail
+          node --test tests/alloc-collections-source-contract.test.mjs tests/core-memory-policy-source.test.mjs tests/core-types-matrix-source.test.mjs tests/core-types-source.test.mjs
+      - uses: actions/setup-java@dded0888837ed1f317902acf8a20df0ad188d165
+        if: matrix.profile == 'java'
+        with:
+          distribution: graalvm
+          java-version: '25'
+      - name: Java real linked library corpus and guard controls
+        if: matrix.profile == 'java'
+        working-directory: source
+        run: |
+          set -euo pipefail
+          mvn -B -ntp -Dtest=AttoLibrariesV1Test,AttoAllocCollectionsGuestTest -DfailIfNoTests=true test
+          python3 - <<'PY'
+          import xml.etree.ElementTree as E
+          for cls,minimum in [('AttoLibrariesV1Test',18),('AttoAllocCollectionsGuestTest',8)]:
+              root=E.parse('target/surefire-reports/TEST-dev.oreslang.'+cls+'.xml').getroot()
+              assert int(root.attrib['tests']) >= minimum
+              assert all(int(root.attrib.get(k,'0')) == 0 for k in ('failures','errors','skipped'))
+              if cls=='AttoLibrariesV1Test':
+                  assert any('corpusGuardRejectsEveryMissingCaseAndInvalidOutcome' == c.attrib.get('name') for c in root.findall('testcase'))
+              print(root.attrib)
+          PY
+      - name: Tracked source unchanged
+        working-directory: source
+        run: git diff --exit-code HEAD
