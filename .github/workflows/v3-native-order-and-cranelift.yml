@@ -1,0 +1,60 @@
+name: Exact NativeAOT counted guest and Cranelift parser replay
+on:
+  pull_request:
+    branches: ['main']
+    paths: ['.github/workflows/v3-native-order-and-cranelift.yml']
+permissions: {}
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - repo: atto-source.net
+            sha: dc9a7a816518be21d7f1db0ead943251176e44fc
+            tree: 60123e2bc97282ebdb9f0b2137735b5438440f66
+          - repo: atto-source.cranelift
+            sha: 051897d80e1b3f767201ac4d226424c1278e19fb
+            tree: 1aac75d50cb2c9bf9f1b8b41684399a886d15a99
+    env:
+      SOURCE_REPO: ${{ matrix.repo }}
+      SOURCE_SHA: ${{ matrix.sha }}
+      SOURCE_TREE: ${{ matrix.tree }}
+      GIT_TERMINAL_PROMPT: '0'
+      GIT_CONFIG_NOSYSTEM: '1'
+      GIT_CONFIG_GLOBAL: /dev/null
+    steps:
+      - name: Verify exact public source tree
+        run: |
+          set -euo pipefail
+          git init source
+          git -C source -c credential.helper= -c http.extraHeader= fetch --no-tags --depth=1 "https://github.com/atto-lang/$SOURCE_REPO.git" "$SOURCE_SHA"
+          git -C source -c core.hooksPath=/dev/null checkout --detach FETCH_HEAD
+          test "$(git -C source rev-parse HEAD)" = "$SOURCE_SHA"
+          test "$(git -C source rev-parse HEAD^{tree})" = "$SOURCE_TREE"
+          test "$(git -C source write-tree)" = "$SOURCE_TREE"
+          git -C source diff --exit-code HEAD
+          printf 'EXACT_PUBLIC_SOURCE|%s|%s|%s\n' "$SOURCE_REPO" "$SOURCE_SHA" "$SOURCE_TREE"
+      - uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9
+        if: matrix.repo == 'atto-source.net'
+        with:
+          dotnet-version: '10.0.x'
+      - name: NativeAOT actual guest and host lease probe
+        if: matrix.repo == 'atto-source.net'
+        working-directory: source
+        run: |
+          set -euo pipefail
+          bash scripts/test-counted-ready-nativeaot-guest.sh
+          dotnet publish verification/Ores.Net.SelectProbe/Ores.Net.SelectProbe.csproj -c Release -r linux-x64 -o "$RUNNER_TEMP/probe" -warnaserror
+          "$RUNNER_TEMP/probe/Ores.Net.SelectProbe" | tee "$RUNNER_TEMP/probe.log"
+          grep -F DOTNET_SELECT_NATIVE_PASS "$RUNNER_TEMP/probe.log"
+      - name: Actual native parser and linked guest regression
+        if: matrix.repo == 'atto-source.cranelift'
+        working-directory: source
+        run: |
+          set -euo pipefail
+          cargo test --locked --all-targets
+          cargo fmt --all -- --check
+          cargo clippy --all-targets --locked -- -D warnings
