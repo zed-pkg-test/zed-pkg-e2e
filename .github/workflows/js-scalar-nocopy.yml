@@ -1,0 +1,28 @@
+name: JS exact canonical annotation compiler and guest regression
+on:
+  push:
+    branches: ['ci/js-scalar-nocopy-b8c44d1-20261126']
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Verify exact public source head and tree
+        run: |
+          set -euo pipefail
+          git init source
+          git -C source -c credential.helper= fetch --depth=1 https://github.com/atto-lang/atto-source.js.git b8c44d14a8353a627b5723f4dcdf1965b967356e9
+          git -C source checkout --detach FETCH_HEAD
+          test "$(git -C source rev-parse HEAD)" = b8c44d14a8353a627b5723f4dcdf1965b967356e9
+          test "$(git -C source rev-parse 'HEAD^{tree}')" = 185fffdd9f8fd15a1cba000eeaadc6e961a07b4d
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: 22
+      - name: Execute focused compiler and actual guest tests
+        working-directory: source
+        run: node --test tests/scalar-allocation-guarantees-v1.test.mjs tests/ownership-bang-admission.test.mjs
+      - name: Execute full Node regression
+        working-directory: source
+        run: npm test
