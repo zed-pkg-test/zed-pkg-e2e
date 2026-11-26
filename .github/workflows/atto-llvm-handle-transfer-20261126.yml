@@ -13,10 +13,10 @@ jobs:
           set -euo pipefail
           git init source
           cd source
-          GIT_TERMINAL_PROMPT=0 git -c credential.helper= -c http.extraheader= fetch --no-tags --depth=1 https://github.com/atto-lang/atto-source.llvm.git 15db7ae74d525659413302e4646f5c7224a41601
+          GIT_TERMINAL_PROMPT=0 git -c credential.helper= -c http.extraheader= fetch --no-tags --depth=1 https://github.com/atto-lang/atto-source.llvm.git 5df3b576b6fbf1fdef5e8db61ca5ce077df6aade
           git checkout --detach FETCH_HEAD
-          test "$(git rev-parse HEAD)" = 15db7ae74d525659413302e4646f5c7224a41601
-          test "$(git rev-parse HEAD^{tree})" = 5fbf7eb04d2215fd800f967dd71f0f8666357582
+          test "$(git rev-parse HEAD)" = 5df3b576b6fbf1fdef5e8db61ca5ce077df6aade
+          test "$(git rev-parse HEAD^{tree})" = db088de6861e3c7d79b49b99fd236f1f990cafd9
       - name: Build actual compiler
         working-directory: source
         run: |
@@ -35,7 +35,16 @@ jobs:
         working-directory: source
         run: |
           set -euo pipefail
-          python3 tests/atto_alloc_guest.py --compiler "$RUNNER_TEMP/llvm/oreslang-llvmc" --clang "$(command -v clang)"
+          failed=0
+          for module in slab deque actor_heap; do
+            if python3 tests/atto_alloc_guest.py --compiler "$RUNNER_TEMP/llvm/oreslang-llvmc" --clang "$(command -v clang)" --module "$module"; then
+              echo "ALLOC_MODULE_PASS $module"
+            else
+              echo "ALLOC_MODULE_FAIL $module"
+              failed=1
+            fi
+          done
+          exit "$failed"
       - name: Source remains unchanged
         working-directory: source
         run: git diff --exit-code HEAD
