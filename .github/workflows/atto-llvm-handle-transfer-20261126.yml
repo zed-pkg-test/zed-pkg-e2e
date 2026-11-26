@@ -13,10 +13,10 @@ jobs:
           set -euo pipefail
           git init source
           cd source
-          GIT_TERMINAL_PROMPT=0 git -c credential.helper= -c http.extraheader= fetch --no-tags --depth=1 https://github.com/atto-lang/atto-source.llvm.git 5df3b576b6fbf1fdef5e8db61ca5ce077df6aade
+          GIT_TERMINAL_PROMPT=0 git -c credential.helper= -c http.extraheader= fetch --no-tags --depth=1 https://github.com/atto-lang/atto-source.llvm.git 59b78a55c4c0064775e0f4620a5c53b9c80f66e8
           git checkout --detach FETCH_HEAD
-          test "$(git rev-parse HEAD)" = 5df3b576b6fbf1fdef5e8db61ca5ce077df6aade
-          test "$(git rev-parse HEAD^{tree})" = db088de6861e3c7d79b49b99fd236f1f990cafd9
+          test "$(git rev-parse HEAD)" = 59b78a55c4c0064775e0f4620a5c53b9c80f66e8
+          test "$(git rev-parse HEAD^{tree})" = d9d54e9449a83401e076389d97af16c3b2a38503
       - name: Build actual compiler
         working-directory: source
         run: |
