@@ -1,0 +1,105 @@
+name: Atto library and checked unwrap parity wave 5
+on:
+  push:
+    branches: ['ci/atto-library-parity-wave5-20261126']
+permissions: {}
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - repo: atto-source.java
+            head: d646df15d1f43d065434c143814d19d93bc81c49
+            tree: 8839458abe7772f8aa107f03856334b427ba40c7
+            profile: java-library
+          - repo: atto-source.java
+            head: c3e6c10992dfbf94d207633ceb80bfd700f03c24
+            tree: 09ba1c744c2f4540ee11185163f4ae5eb0481b44
+            profile: java-alloc
+          - repo: atto-source.js
+            head: cc50e18f8acfa4eff77924d8cd369aa09e69f949
+            tree: 3f3760cd875898dfc77023f92dd94e8dad93ab20
+            profile: js
+          - repo: atto-source.cranelift
+            head: 3130578567361902c0be41266012f7ab0939827a
+            tree: 8b2dbae2bc875f0b78914c9b1760ee05fbff3b03
+            profile: cranelift
+          - repo: atto-source.realtime
+            head: 780e813265da1b027f40adeb8114c15985a9ed46
+            tree: 3590639c6f92fb3b73826cdb70d324a94d6270ac
+            profile: realtime
+    steps:
+      - name: Bind exact public head and tree
+        env:
+          SOURCE_REPO: ${{ matrix.repo }}
+          SOURCE_HEAD: ${{ matrix.head }}
+          SOURCE_TREE: ${{ matrix.tree }}
+          GIT_TERMINAL_PROMPT: '0'
+        run: |
+          set -euo pipefail
+          git init source
+          cd source
+          git -c credential.helper= -c http.extraheader= fetch --no-tags --depth=1 "https://github.com/atto-lang/$SOURCE_REPO.git" "$SOURCE_HEAD"
+          git checkout --detach FETCH_HEAD
+          test "$(git rev-parse HEAD)" = "$SOURCE_HEAD"
+          test "$(git rev-parse HEAD^{tree})" = "$SOURCE_TREE"
+          git log -1 --format='%H %T'
+      - uses: actions/setup-java@dded0888837ed1f317902acf8a20df0ad188d165
+        if: startsWith(matrix.profile, 'java-')
+        with:
+          distribution: graalvm
+          java-version: '25'
+      - name: Java linked core alloc and std guest corpus
+        if: matrix.profile == 'java-library'
+        working-directory: source
+        run: |
+          set -euo pipefail
+          mvn -B -ntp -Dtest=AttoLibrariesV1Test -DfailIfNoTests=true test
+          python3 - <<'PY'
+          import xml.etree.ElementTree as E
+          root=E.parse('target/surefire-reports/TEST-dev.oreslang.AttoLibrariesV1Test.xml').getroot()
+          assert int(root.attrib['tests']) >= 17
+          assert all(int(root.attrib.get(k,'0')) == 0 for k in ('failures','errors','skipped'))
+          print(root.attrib)
+          PY
+      - name: Java actual Atto allocation guest tests
+        if: matrix.profile == 'java-alloc'
+        working-directory: source
+        run: |
+          set -euo pipefail
+          mvn -B -ntp -Dtest=AttoAllocCollectionsGuestTest -DfailIfNoTests=true test
+          python3 - <<'PY'
+          import xml.etree.ElementTree as E
+          root=E.parse('target/surefire-reports/TEST-dev.oreslang.AttoAllocCollectionsGuestTest.xml').getroot()
+          assert int(root.attrib['tests']) >= 8
+          assert all(int(root.attrib.get(k,'0')) == 0 for k in ('failures','errors','skipped'))
+          PY
+      - name: JS exact shared guests and full regressions
+        if: matrix.profile == 'js'
+        working-directory: source
+        run: |
+          set -euo pipefail
+          node --test tests/shared-checked-unwrap-v6-guests.test.mjs
+          npm test
+      - name: Cranelift locked native JIT and object tests
+        if: matrix.profile == 'cranelift'
+        working-directory: source
+        run: |
+          set -euo pipefail
+          rustup toolchain install 1.99.1 --profile minimal --component rustfmt --component clippy
+          cargo +1.99.1 fmt --all -- --check
+          cargo +1.99.1 test --locked --all-targets
+          cargo +1.99.1 clippy --locked --all-targets -- -D warnings
+      - name: Realtime generated native C and rejection tests
+        if: matrix.profile == 'realtime'
+        working-directory: source
+        run: |
+          set -euo pipefail
+          cc --version
+          node --test tests/strict_closed_scalar.test.mjs tests/checked_unwrap_native.test.mjs
+      - name: Tracked source unchanged
+        working-directory: source
+        run: git diff --exit-code HEAD
