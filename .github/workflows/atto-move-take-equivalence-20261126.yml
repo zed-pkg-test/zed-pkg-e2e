@@ -1,0 +1,36 @@
+name: Atto Rust move and take equivalence
+on:
+  push:
+    branches: ['ci/atto-move-take-equivalence-20261126']
+permissions: {}
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - name: Verify exact public source commit and tree
+        run: |
+          set -euo pipefail
+          git init source
+          cd source
+          GIT_TERMINAL_PROMPT=0 git -c credential.helper= -c http.extraheader= fetch --no-tags --depth=1 https://github.com/atto-lang/atto-source.rs.git 2d49a9ba4e2de12b34ca9461050925c57c594f1b
+          git checkout --detach FETCH_HEAD
+          test "$(git rev-parse HEAD)" = 2d49a9ba4e2de12b34ca9461050925c57c594f1b
+          test "$(git rev-parse HEAD^{tree})" = b6cd7aacb652d82268d8eb74b19dfb883dc8c62b
+      - name: Native compiler and exact ownership equivalence
+        working-directory: source
+        run: |
+          set -euo pipefail
+          rustup toolchain install stable --profile minimal --target wasm32-unknown-unknown
+          cargo +stable test --locked --test move_take_equivalence
+          cargo +stable test --locked --all-targets
+          cargo +stable build --locked --bin attoc
+      - name: Browser compiler and real Wasm guest differential
+        working-directory: source
+        run: |
+          set -euo pipefail
+          cargo +stable build --locked --lib --target wasm32-unknown-unknown --release
+          ATTOC="$PWD/target/debug/attoc" node tests/conformance.mjs target/wasm32-unknown-unknown/release/atto_compiler.wasm
+      - name: Source remains unchanged
+        working-directory: source
+        run: git diff --exit-code HEAD
